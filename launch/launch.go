@@ -151,71 +151,66 @@ func main() {
 	// transfer data between socket and component stdin/out
 	// NOTE: io.Copy copies from right argument to left
 	go func() {
-		//for err := (error)(nil); err == nil; _, err = io.Copy(cin, conn) {
-		//	fmt.Println("copied something connection -> component stdin")
-		//}
-		buf := make([]byte, 1024)
-		for {
-			n, addr, err := conn.ReadFromUDP(buf)
-			//fmt.Println("NET-IN received", n, "bytes from ", addr) //" with contents:", string(buf[0:n]))
-			if err != nil {
-				//fmt.Println(reflect.TypeOf(err))
-				if err == io.EOF {
-					fmt.Println("EOF from network input. Closing.")
-					return
-				}
-				fmt.Println("ERROR: receiving from network input:", err, "Closing.")
-				conn.Close()
-				return
-			}
-			cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
-			//fmt.Println("STDIN wrote", n, "bytes to component stdin")
-			fmt.Println("in xfer", n, "bytes from", addr)
+		if n, err := io.Copy(cin, conn); err != nil {
+			fmt.Println("ERROR: receiving from network input:", err, "Closing.")
+			conn.Close()
+			return
+		} else {
+			fmt.Println("net input reached EOF. transferred", n, "bytes from net to component stdin.")
 		}
-
 		/*
-			for {
-				if bytes, err := io.Copy(cin, iconnFile); err != nil {
-					fmt.Println("error copy conn -> cin!")
-					return
-				} else {
-					fmt.Println("copied", bytes, "bytes from component stdout -> connection")
+			NOTE: this using manual buffering, though more debug output
+				buf := make([]byte, 1024)
+				for {
+					n, addr, err := conn.ReadFromUDP(buf)
+					//fmt.Println("NET-IN received", n, "bytes from ", addr) //" with contents:", string(buf[0:n]))
+					if err != nil {
+						//fmt.Println(reflect.TypeOf(err))
+						if err == io.EOF {
+							fmt.Println("EOF from network input. Closing.")
+							return
+						}
+						fmt.Println("ERROR: receiving from network input:", err, "Closing.")
+						conn.Close()
+						return
+					}
+					cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
+					//fmt.Println("STDIN wrote", n, "bytes to component stdin")
+					fmt.Println("in xfer", n, "bytes from", addr)
 				}
-			}
 		*/
 	}()
 	go func() {
-		//for err := (error)(nil); err == nil; _, err = io.Copy(conn, cout) {
+		if bytes, err := io.Copy(oconn, cout); err != nil {
+			fmt.Println("ERROR: writing to network output:", err, "Closing.")
+			conn.Close()
+			return
+		} else {
+			fmt.Println("net output reached EOF. copied", bytes, "bytes from component stdout -> connection")
+		}
 		/*
+			NOTE this using manual buffering
+			buf := make([]byte, 1024)
 			for {
-				if bytes, err := io.Copy(oconn, cout); err != nil {
-					fmt.Println("error copy cout -> conn!")
+				n, err := cout.Read(buf)
+				if err != nil {
+					if err == io.EOF {
+						fmt.Println("EOF from component stdout. Closing.")
+					} else {
+						fmt.Println("ERROR reading from component stdout:", err, "- closing.")
+					}
 					return
 				} else {
-					fmt.Println("copied", bytes, "bytes from component stdout -> connection")
+					//fmt.Println("STDOUT received", n, "bytes from component stdout") //string(buf[0:n])
 				}
+				oconn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
+				//fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
+				fmt.Println("out xfer", n, "bytes")
 			}
 		*/
-		buf := make([]byte, 1024)
-		for {
-			n, err := cout.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					fmt.Println("EOF from component stdout. Closing.")
-				} else {
-					fmt.Println("ERROR reading from component stdout:", err, "- closing.")
-				}
-				return
-			} else {
-				//fmt.Println("STDOUT received", n, "bytes from component stdout") //string(buf[0:n])
-			}
-			oconn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
-			//fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
-			fmt.Println("out xfer", n, "bytes")
-		}
 	}()
 
-	// trigger on signal
+	// trigger on signal (SIGHUP, SIGUSR1, SIGUSR2, etc.) to reconnect, reconfigure etc.
 	//TODO
 
 	// declare ports
@@ -234,6 +229,7 @@ func main() {
 
 	// post success
 	//TODO subprocess logger
+	//TODO logger -t flowd -p daemon.info/error/crit/emerg "Starting up"
 
 	cmd.Wait()
 	// send out any remaining output from component stdout
