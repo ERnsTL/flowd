@@ -151,12 +151,11 @@ func main() {
 	// transfer data between socket and component stdin/out
 	// NOTE: io.Copy copies from right argument to left
 	go func() {
-		if n, err := io.Copy(cin, conn); err != nil {
+		// input network endpoint -> component stdin
+		if _, err := io.Copy(cin, conn); err != nil {
 			fmt.Println("ERROR: receiving from network input:", err, "Closing.")
 			conn.Close()
 			return
-		} else {
-			fmt.Println("net input reached EOF. transferred", n, "bytes from net to component stdin.")
 		}
 		/*
 			NOTE: this using manual buffering, though more debug output
@@ -181,6 +180,7 @@ func main() {
 		*/
 	}()
 	go func() {
+		// component stdout -> output network endpoint
 		if bytes, err := io.Copy(oconn, cout); err != nil {
 			fmt.Println("ERROR: writing to network output:", err, "Closing.")
 			conn.Close()
@@ -217,7 +217,7 @@ func main() {
 	//TODO
 
 	// make discoverable
-	pub := exec.Command("avahi-publish-service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", actualPort, "igloo=true")
+	pub := exec.Command("avahi-publish-service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", actualPort, "sometag=true")
 	if err := pub.Start(); err != nil {
 		fmt.Println("ERROR:", err)
 		os.Exit(4)
