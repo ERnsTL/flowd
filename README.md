@@ -1,8 +1,16 @@
 # flowd
 
-TODO add more info
+> This is pre-alpha software. Far from all features currently present.
 
-This is pre-alpha software. More features to come.
+Wire up components (programs) written in different programming languages, using the best features and libraries of each.
+
+Make them communicate in a network of components.
+
+Build a *data factory* in which components transform the passed data frames around to produce a uselful output.
+
+Components naturally make use of all available processor cores.
+
+A component network can span multiple machines, lending itself for use in distributed systems. Load balancing and routing are planned as well.
 
 ## Examples
 
@@ -36,7 +44,9 @@ The data flow for this example as follows:
 
 Running tests:
 
-  ```GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...```
+  ```
+  GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
+  ```
 
 ## License
 
