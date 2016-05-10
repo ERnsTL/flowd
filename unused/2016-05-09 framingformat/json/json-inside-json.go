@@ -1,4 +1,4 @@
-package main
+package json_exp
 
 import (
 	"encoding/json"
