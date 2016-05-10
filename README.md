@@ -26,11 +26,15 @@ The data flow for this example as follows:
   bin/udp2stdout localhost:4000
   ```
 
+  This should listen for the results.
+
 1. Run a processing component:
 
   ```
   bin/launch -in udp4://:0 -out udp4://localhost:4000 bin/filter-records
   ```
+
+  This should run a simple filtering component, publish it on the network using mDNS and output the UDP port it listens on.
 
 1. Run a simple data source:
 
@@ -39,6 +43,10 @@ The data flow for this example as follows:
   echo "found on port $port"
   cat src/github.com/ERnsTL/flowd/examples/example.json | bin/stdin2udp localhost:$port
   ```
+
+  This looks up the component using mDNS, connects to it and sends it some JSON test data to filter.
+
+  Switching back to the data sink, you should now see the input data filtered of some attributes.
 
 ## Development
 
