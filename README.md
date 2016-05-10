@@ -14,23 +14,29 @@ The data flow for this example as follows:
 
 1. Run a sink:
 
-  > bin/udp2stdout localhost:4000
+  ```
+  bin/udp2stdout localhost:4000
+  ```
 
 1. Run a processing component:
 
-  > bin/launch -in udp4://:0 -out udp4://localhost:4000 bin/filter-records
+  ```
+  bin/launch -in udp4://:0 -out udp4://localhost:4000 bin/filter-records
+  ```
 
 1. Run a simple data source:
 
-  > port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
-  > echo "found on port $port"
-  > cat src/github.com/ERnsTL/flowd/examples/example.json | bin/stdin2udp localhost:$port
+  ```
+  port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
+  echo "found on port $port"
+  cat src/github.com/ERnsTL/flowd/examples/example.json | bin/stdin2udp localhost:$port
+  ```
 
 ## Development
 
 Running tests:
 
-> GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
+  ```GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...```
 
 ## License
 
