@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"time"
 )
 
@@ -59,8 +60,29 @@ func (e *endpoint) Set(value string) error {
 	if e.Scheme == "" {
 		return errors.New("unallowed URL form: scheme missing")
 	}
+	if e.Scheme != "udp" && e.Scheme != "udp4" && e.Scheme != "udp6" {
+		return errors.New("unallowed URL form: unimplemented scheme: only {udp,udp4,udp6} allowed")
+	}
 	if e.Host == "" {
 		return errors.New("unallowed URL form: missing host:port or //")
+	} else {
+		_, portStr, err := net.SplitHostPort(e.Host)
+		if err != nil {
+			return errors.New("unallowed URL form: host and/or port unvalid: " + err.Error())
+		}
+		var port int
+		if portStr == "" {
+			port = 0
+		} else {
+			port, err = strconv.Atoi(portStr)
+			if err != nil {
+				return errors.New("unallowed URL form: port malformed, only numbers allowed: " + err.Error())
+			}
+			if port < 0 || port > 65535 {
+				return errors.New("unallowed URL form: port out of range: allowed range is [0;65535]")
+			}
+		}
+		// TODO save the int port and addr somewhere inside ourselves to avoid duplicate work
 	}
 	return nil
 }
