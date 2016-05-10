@@ -62,8 +62,8 @@ GNU LGPLv3+
 
 ## Contributing
 
-1. open an issue
-2. discuss the idea
+1. open an issue or pick an existing one
+2. discuss your idea
 3. send pull request
 4. quality check
 5. merged!
