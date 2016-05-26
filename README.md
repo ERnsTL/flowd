@@ -2,7 +2,7 @@
 
 > This is pre-alpha software. Far from all features currently present.
 
-Wire up components (programs) written in different programming languages, using the best features and libraries of each.
+Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
 Make them communicate in a network of components.
 
@@ -10,7 +10,17 @@ Build a *data factory* in which components transform the passed data frames arou
 
 Components naturally make use of all available processor cores.
 
-A component network can span multiple machines, lending itself for use in distributed systems. Load balancing and routing are planned as well.
+A component network can span multiple machines, lending itself for use in distributed systems. Load balancing and routing are planned features.
+
+Use available off-the-shelf components where you can. Grow a collection of specialized components and *reuse* them for the next and next project of yours.
+
+Rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
+
+## Installation
+
+```
+GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
+```
 
 ## Examples
 
@@ -18,7 +28,9 @@ Components are currently run in reverse order (sink to source).
 
 The data flow for this example as follows:
 
-```data file -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display```
+```
+data file -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
+```
 
 1. Run a sink:
 
