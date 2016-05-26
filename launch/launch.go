@@ -14,12 +14,17 @@ import (
 )
 
 // type for component connection endpoint definition
-type endpoint url.URL
+type endpoint struct {
+	Url        *url.URL
+	Addr       net.UDPAddr
+	Conn       *net.UDPConn
+	listenPort string
+}
 
 // implement flag.Value interface
 func (e *endpoint) String() string {
 	//return fmt.Sprint(*e)
-	return fmt.Sprintf("%s://%s", e.Scheme, e.Host)
+	return fmt.Sprintf("%s://%s", e.Url.Scheme, e.Url.Host)
 }
 
 func (e *endpoint) Set(value string) error {
@@ -33,40 +38,40 @@ func (e *endpoint) Set(value string) error {
 			return errors.New("interval flag already set")
 		}
 	*/
-	e2, err := url.Parse(value)
+	url, err := url.Parse(value)
 	if err != nil {
 		return errors.New("could not parse flag value: " + err.Error())
 	}
 	// convert just-parsed URL to endpoint and replace *this* endpoint
-	*e = *(*endpoint)(e2)
+	//*e = *(*endpoint)(e2)
 	// filter unallowed URL parts; only scheme://host:port is allowed
 	// NOTE: url.Opaque is eg. localhost:0 -> always present
-	if e.User != nil {
+	if url.User != nil {
 		return errors.New("unallowed URL form: user part not nil")
 	}
-	if e.Path != "" {
+	if url.Path != "" {
 		return errors.New("unallowed URL form: path part not nil")
 	}
-	if e.RawPath != "" {
+	if url.RawPath != "" {
 		return errors.New("unallowed URL form: raw path part not nil")
 	}
-	if e.RawQuery != "" {
+	if url.RawQuery != "" {
 		return errors.New("unallowed URL form: raw query part not nil")
 	}
-	if e.Fragment != "" {
+	if url.Fragment != "" {
 		return errors.New("unallowed URL form: fragment part not nil")
 	}
 	// check for required URL parts
-	if e.Scheme == "" {
+	if url.Scheme == "" {
 		return errors.New("unallowed URL form: scheme missing")
 	}
-	if e.Scheme != "udp" && e.Scheme != "udp4" && e.Scheme != "udp6" {
+	if url.Scheme != "udp" && url.Scheme != "udp4" && url.Scheme != "udp6" {
 		return errors.New("unallowed URL form: unimplemented scheme: only {udp,udp4,udp6} allowed")
 	}
-	if e.Host == "" {
+	if url.Host == "" {
 		return errors.New("unallowed URL form: missing host:port or //")
 	} else {
-		_, portStr, err := net.SplitHostPort(e.Host)
+		_, portStr, err := net.SplitHostPort(url.Host)
 		if err != nil {
 			return errors.New("unallowed URL form: host and/or port unvalid: " + err.Error())
 		}
@@ -84,7 +89,44 @@ func (e *endpoint) Set(value string) error {
 		}
 		// TODO save the int port and addr somewhere inside ourselves to avoid duplicate work
 	}
+	// looks ok, save it
+	e.Url = url
 	return nil
+}
+
+func (e *endpoint) Dial() {
+	//&net.UDPAddr{IP: net.ParseIP(ohost), Port: oport}
+	oaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
+	if err != nil {
+		fmt.Println("ERROR: resolving output endpoint address for initial connection:", err)
+	}
+	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}, oaddr)
+	if err != nil {
+		fmt.Println("ERROR: could not dial UDP output connection:", err)
+		os.Exit(3)
+	}
+	e.Conn = oconn
+	//defer oconn.Close()
+}
+
+func (e *endpoint) Listen() {
+	// &net.UDPAddr{IP: net.ParseIP(host), Port: port}
+	// NOTE: above may return nil if textual address given
+	iaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
+	if err != nil {
+		fmt.Println("ERROR could not resolve in endpoint address:", err)
+		os.Exit(2)
+	}
+	conn, err := net.ListenUDP("udp4", iaddr)
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(4)
+	}
+	_, actualPort, _ := net.SplitHostPort(conn.LocalAddr().String())
+	//actualPort := strconv.Itoa(port)
+	e.listenPort = actualPort
+	e.Conn = conn
+	//defer e.Conn.Close()
 }
 
 /*
@@ -104,8 +146,8 @@ func (e *endpoint) HostAndPort() (host string, port int, err error) {
 
 func main() {
 	// read program arguments
-	inEndpoint := endpoint{Scheme: "udp", Host: "localhost:0"}
-	outEndpoint := endpoint{Scheme: "udp", Host: "localhost:0"}
+	inEndpoint := endpoint{Url: &url.URL{Scheme: "udp", Host: "localhost:0"}}
+	outEndpoint := endpoint{Url: &url.URL{Scheme: "udp", Host: "localhost:0"}}
 	var help bool
 	flag.Var(&inEndpoint, "in", "input endpoint in URL format, ie. udp://localhost:0")
 	flag.Var(&outEndpoint, "out", "input endpoint in URL format, ie. udp://localhost:0")
@@ -120,35 +162,13 @@ func main() {
 	}
 
 	// connect to next component in pipeline
-	//&net.UDPAddr{IP: net.ParseIP(ohost), Port: oport}
-	oaddr, err := net.ResolveUDPAddr("udp4", outEndpoint.Host)
-	if err != nil {
-		fmt.Println("ERROR: resolving output endpoint addr for initial connection:", err)
-	}
-	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}, oaddr)
-	if err != nil {
-		fmt.Println("ERROR: could not dial UDP output connection:", err)
-		os.Exit(3)
-	}
-	defer oconn.Close()
+	outEndpoint.Dial()
 
 	// listen for input from other components
-	// &net.UDPAddr{IP: net.ParseIP(host), Port: port}
-	// NOTE: above may return nil if textual address given
-	iaddr, err := net.ResolveUDPAddr("udp4", inEndpoint.Host)
-	if err != nil {
-		fmt.Println("ERROR could not resolve in endpoint address:", err)
-		os.Exit(2)
-	}
-	conn, err := net.ListenUDP("udp4", iaddr)
-	if err != nil {
-		fmt.Println("ERROR:", err)
-		os.Exit(4)
-	}
-	_, actualPort, _ := net.SplitHostPort(conn.LocalAddr().String())
-	//actualPort := strconv.Itoa(port)
-	defer conn.Close()
-	defer oconn.Close()
+	inEndpoint.Listen()
+
+	defer inEndpoint.Conn.Close()
+	defer outEndpoint.Conn.Close()
 
 	// start subprocess with arguments
 	cmd := exec.Command(flag.Arg(0), flag.Args()[1:]...)
@@ -174,9 +194,9 @@ func main() {
 	// NOTE: io.Copy copies from right argument to left
 	go func() {
 		// input network endpoint -> component stdin
-		if _, err := io.Copy(cin, conn); err != nil {
+		if _, err := io.Copy(cin, inEndpoint.Conn); err != nil {
 			fmt.Println("ERROR: receiving from network input:", err, "Closing.")
-			conn.Close()
+			inEndpoint.Conn.Close()
 			return
 		}
 		/*
@@ -203,9 +223,9 @@ func main() {
 	}()
 	go func() {
 		// component stdout -> output network endpoint
-		if bytes, err := io.Copy(oconn, cout); err != nil {
+		if bytes, err := io.Copy(outEndpoint.Conn, cout); err != nil {
 			fmt.Println("ERROR: writing to network output:", err, "Closing.")
-			conn.Close()
+			outEndpoint.Conn.Close()
 			return
 		} else {
 			fmt.Println("net output reached EOF. copied", bytes, "bytes from component stdout -> connection")
@@ -235,11 +255,11 @@ func main() {
 	// trigger on signal (SIGHUP, SIGUSR1, SIGUSR2, etc.) to reconnect, reconfigure etc.
 	//TODO
 
-	// declare ports
+	// declare network ports
 	//TODO
 
 	// make discoverable
-	pub := exec.Command("avahi-publish-service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", actualPort, "sometag=true")
+	pub := exec.Command("avahi-publish-service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", inEndpoint.listenPort, "sometag=true")
 	if err := pub.Start(); err != nil {
 		fmt.Println("ERROR:", err)
 		os.Exit(4)
@@ -247,7 +267,7 @@ func main() {
 	defer pub.Process.Kill()
 
 	// return port number
-	fmt.Println(actualPort)
+	fmt.Println(inEndpoint.listenPort)
 
 	// post success
 	//TODO subprocess logger

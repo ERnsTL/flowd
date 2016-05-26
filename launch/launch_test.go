@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,7 +12,7 @@ func TestHasStructFrame(t *testing.T) {
 }
 
 func TestEndpointHasRequiredFields(t *testing.T) {
-	_ = endpoint{Scheme: "udp", Host: "localhost:0"}
+	_ = endpoint{Url: &url.URL{Scheme: "udp", Host: "localhost:0"}}
 }
 
 var nokendpoints = []string{
