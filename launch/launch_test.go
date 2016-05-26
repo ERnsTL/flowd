@@ -91,7 +91,7 @@ var okendpoints = []string{
 }
 
 func TestEndpointRejectsUncorrectEndpoints(t *testing.T) {
-	var e endpoint
+	var e inputEndpoints
 	var err error
 	for _, estr := range nokendpoints {
 		err = e.Set(estr)
@@ -100,7 +100,7 @@ func TestEndpointRejectsUncorrectEndpoints(t *testing.T) {
 }
 
 func TestEndpointAcceptsCorrectEndpoints(t *testing.T) {
-	var e endpoint
+	var e inputEndpoints
 	var err error
 	for _, estr := range okendpoints {
 		err = e.Set(estr)
