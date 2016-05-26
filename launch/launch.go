@@ -95,7 +95,7 @@ func (e *endpoint) Set(value string) error {
 }
 
 func (e *endpoint) Dial() {
-	//&net.UDPAddr{IP: net.ParseIP(ohost), Port: oport}
+	// NOTE: net.ParseIP is not enough, returns nil for textual address -> resolve
 	oaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
 	if err != nil {
 		fmt.Println("ERROR: resolving output endpoint address for initial connection:", err)
@@ -106,12 +106,10 @@ func (e *endpoint) Dial() {
 		os.Exit(3)
 	}
 	e.Conn = oconn
-	//defer oconn.Close()
 }
 
 func (e *endpoint) Listen() {
-	// &net.UDPAddr{IP: net.ParseIP(host), Port: port}
-	// NOTE: above may return nil if textual address given
+	// NOTE: net.ParseIP is not enough, returns nil for textual address -> resolve
 	iaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
 	if err != nil {
 		fmt.Println("ERROR could not resolve in endpoint address:", err)
@@ -126,23 +124,7 @@ func (e *endpoint) Listen() {
 	//actualPort := strconv.Itoa(port)
 	e.listenPort = actualPort
 	e.Conn = conn
-	//defer e.Conn.Close()
 }
-
-/*
-NOTE unused
-func (e *endpoint) HostAndPort() (host string, port int, err error) {
-	host, portStr, err := net.SplitHostPort(e.Host)
-	if err != nil {
-		return "", 0, errors.New("splitting host and port: " + err.Error())
-	}
-	port, err = strconv.Atoi(portStr)
-	if err != nil {
-		return "", 0, errors.New("converting port from string to int: " + err.Error())
-	}
-	return
-}
-*/
 
 func main() {
 	// read program arguments
@@ -151,7 +133,7 @@ func main() {
 	var help bool
 	flag.Var(&inEndpoint, "in", "input endpoint in URL format, ie. udp://localhost:0")
 	flag.Var(&outEndpoint, "out", "input endpoint in URL format, ie. udp://localhost:0")
-	//flag.Bool(&help, "h", false, "print usage")
+	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Println("ERROR: missing command to run")
@@ -163,17 +145,14 @@ func main() {
 
 	// connect to next component in pipeline
 	outEndpoint.Dial()
-
 	// listen for input from other components
 	inEndpoint.Listen()
-
+	// close connections later
 	defer inEndpoint.Conn.Close()
 	defer outEndpoint.Conn.Close()
 
 	// start subprocess with arguments
 	cmd := exec.Command(flag.Arg(0), flag.Args()[1:]...)
-	//cmd.Stdin = os.Stdin
-	//cmd.Stdout = os.Stdout
 	cout, err := cmd.StdoutPipe()
 	if err != nil {
 		fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
