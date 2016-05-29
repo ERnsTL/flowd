@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"time"
 )
+
+const bufSize = 65535
 
 // type for component connection endpoint definition
 type endpoint struct {
@@ -55,6 +58,7 @@ func (e *inputEndpoint) Listen() {
 	e.Conn = conn
 }
 
+//TODO seems useless, because Conn.Close can be called directly
 func (e *inputEndpoint) Close() {
 	e.Conn.Close()
 }
@@ -63,6 +67,7 @@ func (e *outputEndpoint) Close() {
 }
 
 // types to hold information on a collection of endpoints, ie. all input endpoints
+// NOTE: using map of pointers, because map elements are not addressable
 type inputEndpoints map[string]*inputEndpoint
 type outputEndpoints map[string]*outputEndpoint
 
@@ -80,17 +85,9 @@ func (e *outputEndpoints) String() string {
 	return ""
 }
 
+// NOTE: can be called multiple times if there are multiple occurrences of the -in resp. -out flags
+// NOTE: if only one occurrence shall be allowed, check if a required property is already set
 func (e *inputEndpoints) Set(value string) error {
-	// If we wanted to allow the flag to be set multiple times,
-	// accumulating values, we would delete this if statement.
-	// That would permit usages such as
-	//	-deltaT 10s -deltaT 15s
-	// and other combinations.
-	/*
-		if e.Scheme != "" {
-			return errors.New("interval flag already set")
-		}
-	*/
 	if parsedUrl, err := parseEndpointURL(value); err != nil {
 		return err
 	} else {
@@ -115,7 +112,12 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	// convert just-parsed URL to endpoint and replace *this* endpoint
 	//*e = *(*endpoint)(e2)
 	// filter unallowed URL parts; only scheme://host:port is allowed
-	// NOTE: url.Opaque is eg. localhost:0 -> always present
+	// NOTE: url.Opaque is eg. localhost:0 -> usually present, but can be left out to mean 0.0.0.0
+	/*
+		if url.Opaque == "" {
+			return nil, errors.New("unallowed URL form: opaque part = host+port nil")
+		}
+	*/
 	if url.User != nil {
 		return nil, errors.New("unallowed URL form: user part not nil")
 	}
@@ -190,8 +192,11 @@ func main() {
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
 	var help bool
+	var inFraming, outFraming bool
 	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. udp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. udp://localhost:0#portname")
+	flag.BoolVar(&inFraming, "inframing", true, "perform frame decoding and routing on input endpoints")
+	flag.BoolVar(&outFraming, "outframing", true, "perform frame decoding and routing on output endpoints")
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.Parse()
 	if flag.NArg() == 0 {
@@ -208,7 +213,7 @@ func main() {
 	defer inEndpoints.Close()
 	defer outEndpoints.Close()
 
-	// start subprocess with arguments
+	// start component as subprocess, with arguments
 	cmd := exec.Command(flag.Arg(0), flag.Args()[1:]...)
 	cout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -226,71 +231,87 @@ func main() {
 	defer cout.Close()
 	defer cin.Close()
 
-	// transfer data between socket and component stdin/out
-	// NOTE: io.Copy copies from right argument to left
-	go func() {
-		// input network endpoint -> component stdin
-		/*
-			if _, err := io.Copy(cin, inEndpoint.Conn); err != nil {
-				fmt.Println("ERROR: receiving from network input:", err, "Closing.")
-				inEndpoint.Conn.Close()
-				return
-			}
-		*/
-		/*
-			NOTE: this using manual buffering, though more debug output
-				buf := make([]byte, 1024)
+	// input = transfer input network endpoint to component stdin
+	//fmt.Println("input framing set to", inFraming)
+	if !inFraming {
+		// NOTE: using Go stdlib without any processing
+		// NOTE: io.Copy copies from right argument to left
+		for inEndpoint := range inEndpoints {
+			go func(ep *inputEndpoint) {
+				if _, err := io.Copy(cin, ep.Conn); err != nil {
+					fmt.Println("ERROR: receiving from network input:", err, "Closing.")
+					ep.Conn.Close()
+					return
+				}
+			}(inEndpoints[inEndpoint])
+		}
+	} else {
+		// NOTE: using manual buffering, though more debug output and we can do framing
+		for inEndpoint := range inEndpoints {
+			go func(ep *inputEndpoint) {
+				buf := make([]byte, bufSize)
 				for {
-					n, addr, err := conn.ReadFromUDP(buf)
-					//fmt.Println("NET-IN received", n, "bytes from ", addr) //" with contents:", string(buf[0:n]))
+					//FIXME refactor including framing
+					n, addr, err := ep.Conn.ReadFromUDP(buf)
+					fmt.Println("NET-IN received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
 					if err != nil {
-						//fmt.Println(reflect.TypeOf(err))
 						if err == io.EOF {
 							fmt.Println("EOF from network input. Closing.")
-							return
+						} else {
+							fmt.Println("ERROR: receiving from network input:", err, "Closing.")
 						}
-						fmt.Println("ERROR: receiving from network input:", err, "Closing.")
-						conn.Close()
+						ep.Conn.Close()
 						return
 					}
 					cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
-					//fmt.Println("STDIN wrote", n, "bytes to component stdin")
+					fmt.Println("STDIN wrote", n, "bytes to component stdin")
 					fmt.Println("in xfer", n, "bytes from", addr)
 				}
-		*/
-	}()
-	go func() {
-		// component stdout -> output network endpoint
-		/*
-			if bytes, err := io.Copy(outEndpoint.Conn, cout); err != nil {
-				fmt.Println("ERROR: writing to network output:", err, "Closing.")
-				outEndpoint.Conn.Close()
-				return
-			} else {
-				fmt.Println("net output reached EOF. copied", bytes, "bytes from component stdout -> connection")
-			}
-		*/
-		/*
-			NOTE this using manual buffering
-			buf := make([]byte, 1024)
-			for {
-				n, err := cout.Read(buf)
-				if err != nil {
-					if err == io.EOF {
-						fmt.Println("EOF from component stdout. Closing.")
-					} else {
-						fmt.Println("ERROR reading from component stdout:", err, "- closing.")
-					}
+			}(inEndpoints[inEndpoint])
+		}
+	}
+
+	// output = transfer component stdout to output network endpoint
+	//fmt.Println("output framing set to", outFraming)
+	if !outFraming {
+		// NOTE: using Go stdlib, without processing
+		for outEndpoint := range outEndpoints {
+			go func(ep *outputEndpoint) {
+				if bytes, err := io.Copy(ep.Conn, cout); err != nil {
+					fmt.Println("ERROR: writing to network output:", err, "Closing.")
+					ep.Conn.Close()
 					return
 				} else {
-					//fmt.Println("STDOUT received", n, "bytes from component stdout") //string(buf[0:n])
+					fmt.Println("net output reached EOF. copied", bytes, "bytes from component stdout -> connection")
 				}
-				oconn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
-				//fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
-				fmt.Println("out xfer", n, "bytes")
-			}
-		*/
-	}()
+			}(outEndpoints[outEndpoint])
+		}
+	} else {
+		// NOTE: this using manual buffering
+		for outEndpoint := range outEndpoints {
+			go func(ep *outputEndpoint) {
+				//TODO refactor using framing
+				buf := make([]byte, bufSize)
+				for {
+					n, err := cout.Read(buf)
+					if err != nil {
+						if err == io.EOF {
+							fmt.Println("EOF from component stdout. Closing.")
+						} else {
+							fmt.Println("ERROR reading from component stdout:", err, "- closing.")
+						}
+						ep.Conn.Close()
+						return
+					} else {
+						fmt.Println("STDOUT received", n, "bytes from component stdout")
+					}
+					ep.Conn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
+					fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
+					fmt.Println("out xfer", n, "bytes")
+				}
+			}(outEndpoints[outEndpoint])
+		}
+	}
 
 	// trigger on signal (SIGHUP, SIGUSR1, SIGUSR2, etc.) to reconnect, reconfigure etc.
 	//TODO
