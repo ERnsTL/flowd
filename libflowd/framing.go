@@ -85,7 +85,6 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := bufw.Flush(); err != nil {
 		return errors.New("marshal: flushing writer: " + err.Error())
 	}
-	fmt.Println("marshal: no error, returning nil")
 	return nil
 }
 
