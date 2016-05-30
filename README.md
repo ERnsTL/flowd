@@ -105,6 +105,8 @@ data file -> stdin -> frame -> stdout/in -> UDP -> stdin -> component -> stdout 
 
 ## Architecture
 
+> This describes the current pre-alpha state. Far from all of the target architecture is currently present.
+
 At this stage, all components are basically normal programs or scripts, which do not have to be specially modified or little modified to be used in a flowd network.
 
 All components are each started by an instance of the ```launch``` program. It manages the message framing, if requested, message routing and handles all the network connections with other components.
@@ -113,7 +115,7 @@ A component can have multiple input and output ports. If message framing is used
 
 A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by its ```launch``` parent process.
 
-The framing format is a simple text-based format very similar to an HTTP header, can easily be implemented in any programming language and is easy to extend without being bound to any currently-trendy format. It contains basic information on:
+The framing format is a simple text-based format very similar to an HTTP header. It can can easily be implemented in any programming language and is easy to extend without being bound to any currently-trendy data format. It contains basic information on:
 
 * Over which port did this frame come in? Over which port shall this be sent out to another component?
 * Is this a control frame or a data frame?
