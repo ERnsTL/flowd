@@ -70,7 +70,7 @@ This example is the same as example 1, but uses message framing. This allows the
 The data flow for this example as follows:
 
 ```
-data file -> stdin -> frame -> stdout -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
+data file -> stdin -> frame -> stdout/in -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
 ```
 
 1. Run a sink:
