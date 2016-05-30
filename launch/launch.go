@@ -57,6 +57,7 @@ func (e *inputEndpoint) Listen() {
 	}
 	_, actualPort, _ := net.SplitHostPort(conn.LocalAddr().String())
 	//actualPort := strconv.Itoa(port)
+	//TODO decide whether to keep string or int representation
 	e.listenPort = actualPort
 	e.Conn = conn
 }
