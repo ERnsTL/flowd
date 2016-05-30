@@ -338,54 +338,62 @@ func main() {
 		}
 	} else {
 		// NOTE: this using manual buffering
-		for outEndpoint := range outEndpoints {
-			go func(ep *outputEndpoint) {
-				buf := make([]byte, bufSize)
-				var nPrev int
-				for {
-					n, err := cout.Read(buf[nPrev:])
-					if err != nil {
-						if err == io.EOF {
-							fmt.Println("EOF from component stdout. Closing.")
-						} else {
-							fmt.Println("ERROR reading from component stdout:", err, "- closing.")
-						}
-						ep.Conn.Close()
-						return
+		go func() {
+			buf := make([]byte, bufSize)
+			var nPrev int
+			for {
+				n, err := cout.Read(buf[nPrev:])
+				if err != nil {
+					if err == io.EOF {
+						fmt.Println("EOF from component stdout. Closing.")
 					} else {
-						if debug {
-							fmt.Println("STDOUT received", n, "bytes from component stdout")
-						}
+						fmt.Println("ERROR reading from component stdout:", err, "- closing.")
 					}
-					if _, err := flowd.ParseFrame(bytes.NewReader(buf[0 : nPrev+n])); err != nil { //TODO optimize, NewReader should not be neccessary
-						// frame uncomplete, but not malformed -> wait for remaining fragments
-						if debug {
-							fmt.Println("WARNING: uncomplete frame from component stdout, re-assembling:", err.Error())
-						}
-						nPrev = nPrev + n
-					} else { // frame complete now
-						if debug {
-							fmt.Println("OK parsing frame from component stdout")
-						}
-
-						// write out to network
-						//TODO implement routing to correct network connection
-						//TODO error feedback for unknown output ports
-						ep.Conn.Write(buf[0 : nPrev+n]) // NOTE: only write slice of buffer containing actual data
-						//TODO having two outputs say the same seems useless
-						if debug {
-							fmt.Println("NET-OUT wrote", nPrev+n, "bytes to next component over network")
-						}
-						if !quiet {
-							fmt.Println("out xfer", nPrev+n, "bytes")
-						}
-
-						// reset size of any previous fragment(s)
-						nPrev = 0
+					outEndpoints.Close()
+					return
+				} else {
+					if debug {
+						fmt.Println("STDOUT received", n, "bytes from component stdout")
 					}
 				}
-			}(outEndpoints[outEndpoint])
-		}
+				if frame, err := flowd.ParseFrame(bytes.NewReader(buf[0 : nPrev+n])); err != nil { //TODO optimize, NewReader should not be neccessary
+					// frame uncomplete, but not malformed -> wait for remaining fragments
+					if debug {
+						fmt.Println("WARNING: uncomplete frame from component stdout, re-assembling:", err.Error())
+					}
+					nPrev = nPrev + n
+				} else { // frame complete now
+					if debug {
+						fmt.Println("OK parsing frame from component stdout")
+					}
+
+					// write out to network
+					//TODO error feedback for unknown output ports
+					if e, exists := outEndpoints[frame.Port]; exists {
+						// NOTE: only write slice of buffer containing actual data
+						if _, err := e.Conn.Write(buf[0 : nPrev+n]); err != nil {
+							fmt.Println("NET-OUT ERROR sending to output endpoint:", err.Error(), "- closing.")
+							outEndpoints[frame.Port].Close()
+							//TODO return as well = close down all output operations or allow one output to fail?
+						} else {
+							//TODO having two outputs say the same seems useless
+							if debug {
+								fmt.Println("NET-OUT wrote", nPrev+n, "bytes to port", frame.Port, "over network")
+							}
+							if !quiet {
+								fmt.Println("out xfer", nPrev+n, "bytes to", frame.Port)
+							}
+						}
+					} else {
+						fmt.Println("NET-OUT ERROR: component tried sending to undeclared port. Exiting.")
+						outEndpoints.Close()
+						return
+					}
+					// reset size of any previous fragment(s)
+					nPrev = 0
+				}
+			}
+		}()
 	}
 
 	// trigger on signal (SIGHUP, SIGUSR1, SIGUSR2, etc.) to reconnect, reconfigure etc.
