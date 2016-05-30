@@ -18,10 +18,10 @@ func main() {
 	flag.StringVar(&port, "port", "in", "port name for which this frame is destined")
 	flag.StringVar(&contentType, "content-type", "text/plain", "MIME content type of the frame body")
 	flag.BoolVar(&help, "h", false, "print usage information")
-	flag.BoolVar(&debug, "debug", false, "print debug messages to stdout")
+	flag.BoolVar(&debug, "debug", false, "print debug messages to stderr")
 	flag.Parse()
 	if flag.NArg() != 0 {
-		fmt.Println("ERROR: unexpected free arguments")
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments")
 		printUsage()
 	}
 	if help {
@@ -30,31 +30,31 @@ func main() {
 
 	// check arguments
 	if bodyType == "" {
-		fmt.Println("ERROR: missing body type")
+		fmt.Fprintln(os.Stderr, "ERROR: missing body type")
 		printUsage()
 	}
 
 	// check for stdin type
 	if termutil.Isatty(os.Stdin.Fd()) {
-		fmt.Println("ERROR: nothing piped on STDIN")
+		fmt.Fprintln(os.Stderr, "ERROR: nothing piped on STDIN")
 	} else {
 		if debug {
-			fmt.Println("ok, found something piped on STDIN")
+			fmt.Fprintln(os.Stderr, "ok, found something piped on STDIN")
 		}
 
 		// read body
 		if debug {
-			fmt.Println("reading body until EOF...")
+			fmt.Fprintln(os.Stderr, "reading body until EOF...")
 		}
 		var body bytes.Buffer
 		io.Copy(&body, os.Stdin) // NOTE: copies from stdin to body buffer
 		if debug {
-			fmt.Println("total size:", body.Len())
+			fmt.Fprintln(os.Stderr, "total size:", body.Len())
 		}
 
 		// frame body
 		if debug {
-			fmt.Println("framing")
+			fmt.Fprintln(os.Stderr, "framing")
 		}
 		bodyBytes := body.Bytes() //TODO optimize
 		frame := &flowd.Frame{
@@ -65,21 +65,28 @@ func main() {
 			Body:        &bodyBytes,
 			Extensions:  map[string]string{},
 		}
+		if debug {
+			frame.Marshal(os.Stderr)
+			fmt.Fprintln(os.Stderr) // NOTE: just for nicer output
+		}
 
 		// output
 		frame.Marshal(os.Stdout)
+		if debug {
+			fmt.Fprintln(os.Stderr, "done")
+		}
 	}
 }
 
 func CheckError(err error) {
 	if err != nil {
-		fmt.Println("ERROR:", err)
+		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
 	}
 }
 
 func printUsage() {
-	fmt.Println("Usage:", os.Args[0], "-bodytype [data-type]", "-content-type [mime-type]", "-port [name]")
+	fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "-bodytype [data-type]", "-content-type [mime-type]", "-port [name]")
 	flag.PrintDefaults()
 	os.Exit(1)
 }
