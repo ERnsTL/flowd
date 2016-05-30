@@ -26,6 +26,8 @@ GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
 
 Components are currently run in reverse order (sink to source).
 
+### Example 1
+
 The data flow for this example as follows:
 
 ```
@@ -43,7 +45,7 @@ data file -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> di
 1. Run a processing component:
 
   ```
-  bin/launch -in udp4://:0 -out udp4://localhost:4000 bin/filter-records
+  bin/launch -inframing=false -outframing=false -in udp4://:0#in -out udp4://localhost:4000#out bin/filter-records
   ```
 
   This should run a simple filtering component, publish it on the network using mDNS and output the UDP port it listens on.
@@ -53,12 +55,53 @@ data file -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> di
   ```
   port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
   echo "found on port $port"
-  cat src/github.com/ERnsTL/flowd/examples/example.json | bin/stdin2udp localhost:$port
+  cat src/github.com/ERnsTL/flowd/examples/example-stream.json | \
+  bin/stdin2udp localhost:$port
   ```
 
   This looks up the component using mDNS, connects to it and sends it some JSON test data to filter.
 
-  Switching back to the data sink, you should now see the input data filtered of some attributes.
+  Switching back to the data sink, you should now see the input data filtered on the Name attribute.
+
+### Example 2
+
+This example is the same as example 1, but uses message framing. This allows the use of multiple and named ports on the input and output side and the creation of complex, non-linear processing networks.
+
+The data flow for this example as follows:
+
+```
+data file -> stdin -> frame -> stdout -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
+```
+
+1. Run a sink:
+
+  ```
+  bin/udp2stdout localhost:4000
+  ```
+
+  This should listen for the results.
+
+1. Run a processing component:
+
+  ```
+  bin/launch -in udp4://:0#in -out udp4://localhost:4000#out bin/filter-records-framed
+  ```
+
+  This should run the same filtering component as in example 1, but a version which uses message framing. Again, the component's ```in``` port is published on the network using mDNS and outputs the UDP port it listens on.
+
+1. Run a simple data source:
+
+  ```
+  port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
+  echo "found on port $port"
+  cat src/github.com/ERnsTL/flowd/examples/example-list.json | \
+  bin/stdin2frame -debug -bodytype FilterMessage -content-type "application/json" | \
+  bin/stdin2udp localhost:$port
+  ```
+
+  This looks up the component using mDNS, connects to it and sends it some framed JSON test data to filter.
+
+  Switching back to the data sink, you should now see the input data filtered on the Name attribute.
 
 ## Development
 
