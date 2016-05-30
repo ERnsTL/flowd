@@ -35,6 +35,7 @@ func (e *outputEndpoint) Dial() {
 	if err != nil {
 		fmt.Println("ERROR: resolving output endpoint address for initial connection:", err)
 	}
+	//TODO make protocol-agnostic using net.DialAddr()
 	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}, oaddr)
 	if err != nil {
 		fmt.Println("ERROR: could not dial UDP output connection:", err)
@@ -195,14 +196,14 @@ func main() {
 	// read program arguments
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
-	var help, verbose, quiet bool
+	var help, debug, quiet bool
 	var inFraming, outFraming bool
 	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. udp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. udp://localhost:0#portname")
 	flag.BoolVar(&inFraming, "inframing", true, "perform frame decoding and routing on input endpoints")
 	flag.BoolVar(&outFraming, "outframing", true, "perform frame decoding and routing on output endpoints")
 	flag.BoolVar(&help, "h", false, "print usage information")
-	flag.BoolVar(&verbose, "verbose", false, "be verbose in event display")
+	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 	flag.Parse()
 	if flag.NArg() == 0 {
@@ -256,12 +257,11 @@ func main() {
 		for inEndpoint := range inEndpoints {
 			go func(ep *inputEndpoint) {
 				buf := make([]byte, bufSize)
+				var nPrev int
 				for {
 					// read from connection
-					n, addr, err := ep.Conn.ReadFromUDP(buf)
-					if verbose {
-						fmt.Println("net in received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
-					}
+					n, addr, err := ep.Conn.ReadFromUDP(buf[nPrev:])
+					// NOTE: above can lead to reading only parts of an UDP packet even if buffer is large enough
 					if err != nil {
 						if err == io.EOF {
 							fmt.Println("EOF from network input. Closing.")
@@ -271,26 +271,42 @@ func main() {
 						ep.Conn.Close()
 						return
 					}
-
+					if debug {
+						fmt.Println("net in received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
+					}
 					// decode frame
-					bufReader := bytes.NewReader(buf[0:n])
+					bufReader := bytes.NewReader(buf[0 : n+nPrev])
 					//flowd.ParseFrame(ep.Conn)
 					if fr, err := flowd.ParseFrame(bufReader); err != nil {
-						fmt.Println("net in: ERROR parsing frame:", err.Error())
-						//discard frame
+						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev] and buf[nPrev:n]
+						if nPrev > 0 {
+							// already tried once, discard previous fragment
+							fmt.Println("net in: ERROR parsing frame, discarding previous fragment:", err.Error())
+							copy(buf[nPrev:n], buf)
+							nPrev = n
+						} else {
+							// try again later using more arrived frames
+							fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
+							nPrev = n
+						}
 					} else { // parsed fine
-						if verbose {
+						if debug {
 							fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
 						}
 
+						//TODO check frame's Port header if an input port of that name exists in inEndpoints
+
 						// forward frame to component
-						cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
-						if verbose {
-							fmt.Println("STDIN wrote", n, "bytes to component stdin")
+						cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
+						if debug {
+							fmt.Println("STDIN wrote", n+nPrev, "bytes to component stdin")
 						}
 						if !quiet {
-							fmt.Println("in xfer", n, "bytes from", addr)
+							fmt.Println("in xfer", (n + nPrev), "bytes from", addr)
 						}
+
+						// reset previous packet size
+						nPrev = 0
 					}
 				}
 			}(inEndpoints[inEndpoint])
@@ -329,12 +345,12 @@ func main() {
 						ep.Conn.Close()
 						return
 					} else {
-						if verbose {
+						if debug {
 							fmt.Println("STDOUT received", n, "bytes from component stdout")
 						}
 					}
 					ep.Conn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
-					if verbose {
+					if debug {
 						fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
 					}
 					if !quiet {
