@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+
+	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65535
@@ -191,13 +194,15 @@ func main() {
 	// read program arguments
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
-	var help bool
+	var help, verbose, quiet bool
 	var inFraming, outFraming bool
 	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. udp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. udp://localhost:0#portname")
 	flag.BoolVar(&inFraming, "inframing", true, "perform frame decoding and routing on input endpoints")
 	flag.BoolVar(&outFraming, "outframing", true, "perform frame decoding and routing on output endpoints")
 	flag.BoolVar(&help, "h", false, "print usage information")
+	flag.BoolVar(&verbose, "verbose", false, "be verbose in event display")
+	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Println("ERROR: missing command to run")
@@ -251,9 +256,11 @@ func main() {
 			go func(ep *inputEndpoint) {
 				buf := make([]byte, bufSize)
 				for {
-					//FIXME refactor including framing
+					// read from connection
 					n, addr, err := ep.Conn.ReadFromUDP(buf)
-					fmt.Println("NET-IN received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
+					if verbose {
+						fmt.Println("net in received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
+					}
 					if err != nil {
 						if err == io.EOF {
 							fmt.Println("EOF from network input. Closing.")
@@ -263,9 +270,27 @@ func main() {
 						ep.Conn.Close()
 						return
 					}
-					cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
-					fmt.Println("STDIN wrote", n, "bytes to component stdin")
-					fmt.Println("in xfer", n, "bytes from", addr)
+
+					// decode frame
+					bufReader := bytes.NewReader(buf[0:n])
+					//flowd.ParseFrame(ep.Conn)
+					if fr, err := flowd.ParseFrame(bufReader); err != nil {
+						fmt.Println("net in: ERROR parsing frame:", err.Error())
+						//discard frame
+					} else { // parsed fine
+						if verbose {
+							fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
+						}
+
+						// forward frame to component
+						cin.Write(buf[0:n]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
+						if verbose {
+							fmt.Println("STDIN wrote", n, "bytes to component stdin")
+						}
+						if !quiet {
+							fmt.Println("in xfer", n, "bytes from", addr)
+						}
+					}
 				}
 			}(inEndpoints[inEndpoint])
 		}
@@ -303,11 +328,17 @@ func main() {
 						ep.Conn.Close()
 						return
 					} else {
-						fmt.Println("STDOUT received", n, "bytes from component stdout")
+						if verbose {
+							fmt.Println("STDOUT received", n, "bytes from component stdout")
+						}
 					}
 					ep.Conn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
-					fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
-					fmt.Println("out xfer", n, "bytes")
+					if verbose {
+						fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
+					}
+					if !quiet {
+						fmt.Println("out xfer", n, "bytes")
+					}
 				}
 			}(outEndpoints[outEndpoint])
 		}
