@@ -123,7 +123,7 @@ The framing format is a simple text-based format very similar to an HTTP header,
 * The frame body is a free-form byte array, so you can put in whatever you want.
 * Header fields are extensible to convey application-specific meta data.
 
-Using several components, a network can be built. It is like a graph of components or workers in a data factory doing one step in the processing. It is a bit like enhanced UNIX pipes. The application developer connects the output ports to other components' input ports and parameterizes the components. In this fashion, the application is built. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project.
+Using several components, a network can be built. It is like a graph of components or workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
 
 ## Development
 
