@@ -300,10 +300,15 @@ func main() {
 							fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
 						}
 
-						//TODO check frame's Port header if an input port of that name exists in inEndpoints
-
+						// check frame Port header field if it matches the name of this input endpoint
+						//FIXME which side does the header field rewriting? - better the sending side.
+						if ep.Url.Fragment != fr.Port {
+							fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment, " - discarding.")
+							// discard frame
+						} // else {	//TODO actually enforce this and make error in msg above
 						// forward frame to component
 						cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
+						//TODO two outputs saying just about the same seems useless
 						if debug {
 							fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
 						}
@@ -368,27 +373,29 @@ func main() {
 					}
 
 					// write out to network
-					//TODO error feedback for unknown output ports
+					//TODO error feedback for unknown/unconnected output ports
 					if e, exists := outEndpoints[frame.Port]; exists {
 						// NOTE: only write slice of buffer containing actual data
+						//TODO rewrite frame.Port to match the other side's input port name - and write the marshaled frame, not the buf
 						if _, err := e.Conn.Write(buf[0 : nPrev+n]); err != nil {
-							fmt.Println("NET-OUT ERROR sending to output endpoint:", err.Error(), "- closing.")
+							fmt.Println("net out: ERROR: sending to output endpoint", frame.Port, ":", err.Error(), "- closing.")
 							outEndpoints[frame.Port].Close()
 							//TODO return as well = close down all output operations or allow one output to fail?
 						} else {
 							//TODO having two outputs say the same seems useless
 							if debug {
-								fmt.Println("NET-OUT wrote", nPrev+n, "bytes to port", frame.Port, "over network")
+								fmt.Println("net out wrote", nPrev+n, "bytes to port", frame.Port, "over network")
 							}
 							if !quiet {
-								fmt.Println("out xfer", nPrev+n, "bytes to", frame.Port)
+								fmt.Println("out xfer", nPrev+n, "bytes to", frame.Port, "=", outEndpoints[frame.Port].Conn.RemoteAddr())
 							}
 						}
 					} else {
-						fmt.Println("NET-OUT ERROR: component tried sending to undeclared port. Exiting.")
+						fmt.Println("net out: ERROR: component tried sending to undeclared port. Exiting.")
 						outEndpoints.Close()
 						return
 					}
+
 					// reset size of any previous fragment(s)
 					nPrev = 0
 				}
