@@ -13,8 +13,11 @@ type Message struct {
 }
 
 func main() {
+	// set up JSON decoder and encoder
 	dec := json.NewDecoder(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
+
+	// parse as much JSON as available, process, encode
 	for {
 		var v map[string]interface{}
 		if err := dec.Decode(&v); err != nil {
