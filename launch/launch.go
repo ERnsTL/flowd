@@ -239,7 +239,9 @@ func main() {
 	defer cin.Close()
 
 	// input = transfer input network endpoint to component stdin
-	//fmt.Println("input framing set to", inFraming)
+	if debug {
+		fmt.Println("input framing set to", inFraming)
+	}
 	if !inFraming {
 		// NOTE: using Go stdlib without any processing
 		// NOTE: io.Copy copies from right argument to left
@@ -278,15 +280,19 @@ func main() {
 					bufReader := bytes.NewReader(buf[0 : n+nPrev])
 					//flowd.ParseFrame(ep.Conn)
 					if fr, err := flowd.ParseFrame(bufReader); err != nil {
-						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev] and buf[nPrev:n]
+						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
+						// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
 						if nPrev > 0 {
 							// already tried once, discard previous fragment
-							fmt.Println("net in: ERROR parsing frame, discarding previous fragment:", err.Error())
-							copy(buf[nPrev:n], buf)
-							nPrev = n
+							fmt.Println("net in: ERROR parsing frame, discarding buffer:", err.Error())
+							nPrev = 0
 						} else {
 							// try again later using more arrived frames
-							fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
+							if debug {
+								fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly:", err.Error())
+							} else if !quiet {
+								fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
+							}
 							nPrev = n
 						}
 					} else { // parsed fine
@@ -297,12 +303,12 @@ func main() {
 						//TODO check frame's Port header if an input port of that name exists in inEndpoints
 
 						// forward frame to component
-						cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make JSON decoder error because of \x00 bytes beyond payload
+						cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
 						if debug {
-							fmt.Println("STDIN wrote", n+nPrev, "bytes to component stdin")
+							fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
 						}
 						if !quiet {
-							fmt.Println("in xfer", (n + nPrev), "bytes from", addr)
+							fmt.Println("in xfer", nPrev+n, "bytes from", addr)
 						}
 
 						// reset previous packet size
@@ -314,7 +320,9 @@ func main() {
 	}
 
 	// output = transfer component stdout to output network endpoint
-	//fmt.Println("output framing set to", outFraming)
+	if debug {
+		fmt.Println("output framing set to", outFraming)
+	}
 	if !outFraming {
 		// NOTE: using Go stdlib, without processing
 		for outEndpoint := range outEndpoints {
@@ -332,10 +340,10 @@ func main() {
 		// NOTE: this using manual buffering
 		for outEndpoint := range outEndpoints {
 			go func(ep *outputEndpoint) {
-				//TODO refactor using framing
 				buf := make([]byte, bufSize)
+				var nPrev int
 				for {
-					n, err := cout.Read(buf)
+					n, err := cout.Read(buf[nPrev:])
 					if err != nil {
 						if err == io.EOF {
 							fmt.Println("EOF from component stdout. Closing.")
@@ -349,12 +357,31 @@ func main() {
 							fmt.Println("STDOUT received", n, "bytes from component stdout")
 						}
 					}
-					ep.Conn.Write(buf[0:n]) // NOTE: only write slice of buffer containing actual data
-					if debug {
-						fmt.Println("NET-OUT wrote", n, "bytes to next component over network")
-					}
-					if !quiet {
-						fmt.Println("out xfer", n, "bytes")
+					if _, err := flowd.ParseFrame(bytes.NewReader(buf[0 : nPrev+n])); err != nil { //TODO optimize, NewReader should not be neccessary
+						// frame uncomplete, but not malformed -> wait for remaining fragments
+						if debug {
+							fmt.Println("WARNING: uncomplete frame from component stdout, re-assembling:", err.Error())
+						}
+						nPrev = nPrev + n
+					} else { // frame complete now
+						if debug {
+							fmt.Println("OK parsing frame from component stdout")
+						}
+
+						// write out to network
+						//TODO implement routing to correct network connection
+						//TODO error feedback for unknown output ports
+						ep.Conn.Write(buf[0 : nPrev+n]) // NOTE: only write slice of buffer containing actual data
+						//TODO having two outputs say the same seems useless
+						if debug {
+							fmt.Println("NET-OUT wrote", nPrev+n, "bytes to next component over network")
+						}
+						if !quiet {
+							fmt.Println("out xfer", nPrev+n, "bytes")
+						}
+
+						// reset size of any previous fragment(s)
+						nPrev = 0
 					}
 				}
 			}(outEndpoints[outEndpoint])
@@ -368,7 +395,8 @@ func main() {
 	//TODO
 
 	// make discoverable
-	pub := exec.Command("avahi-publish-service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", inEndpoints["in"].listenPort, "sometag=true")
+	//TODO publish all input ports
+	pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", inEndpoints["in"].listenPort, "sometag=true")
 	if err := pub.Start(); err != nil {
 		fmt.Println("ERROR:", err)
 		os.Exit(4)
