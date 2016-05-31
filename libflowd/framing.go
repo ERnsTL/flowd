@@ -34,6 +34,7 @@ func ParseFrame(stream io.Reader) (f *Frame, err error) {
 	if len(types) != 2 {
 		return nil, errors.New("missing separator in Type header field")
 	}
+	//TODO read any remaining header fields into frame.Extensions
 	// NOTE: Port and Content-Type can be missing at the moment
 	f = &Frame{Type: types[0], BodyType: types[1], Port: header.Get("Port"), ContentType: header.Get("Content-Type"), Body: nil}
 
@@ -76,6 +77,7 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := printHeaderLine(tpw, "content-length", strconv.Itoa(len(*f.Body))); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
+	//TODO also marshal frame.Extensions header fields
 	if err := finalizeHeader(tpw); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
