@@ -36,7 +36,7 @@ func (e *outputEndpoint) Dial() {
 		fmt.Println("ERROR: resolving output endpoint address for initial connection:", err)
 	}
 	//TODO make protocol-agnostic using net.DialAddr()
-	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0}, oaddr)
+	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0}, oaddr)
 	if err != nil {
 		fmt.Println("ERROR: could not dial UDP output connection:", err)
 		os.Exit(3)
