@@ -23,7 +23,7 @@ func main() {
 		serverAddr, err := net.ResolveUDPAddr("udp", os.Args[1])
 		CheckError(err)
 
-		localAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+		localAddr, err := net.ResolveUDPAddr("udp", "0.0.0.0:0")
 		CheckError(err)
 
 		fmt.Println("connecting")
