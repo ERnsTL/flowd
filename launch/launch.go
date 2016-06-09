@@ -392,10 +392,13 @@ func main() {
 					if e, exists := outEndpoints[frame.Port]; exists {
 						// NOTE: only write slice of buffer containing actual data
 						//TODO rewrite frame.Port to match the other side's input port name - and write the marshaled frame, not the buf
-						if _, err := e.Conn.Write(buf[0 : nPrev+n]); err != nil {
+						if nout, err := e.Conn.Write(buf[0 : nPrev+n]); err != nil {
 							fmt.Println("net out: ERROR: sending to output endpoint", frame.Port, ":", err.Error(), "- closing.")
 							outEndpoints[frame.Port].Close()
 							//TODO return as well = close down all output operations or allow one output to fail?
+						} else if nout < nPrev+n {
+							fmt.Println("net out: ERROR: short send to output endpoint", frame.Port, ": only", nout, "of", nPrev+n, "bytes written - closing.")
+							outEndpoints[frame.Port].Close()
 						} else {
 							//TODO having two outputs say the same seems useless
 							if debug {
