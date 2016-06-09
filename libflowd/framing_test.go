@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -43,10 +42,12 @@ func TestFrameHasRequiredMethods(t *testing.T) {
 func TestFrameParsesAndMarshals(t *testing.T) {
 	// parse
 	frameStr := fmt.Sprintf("%s\r\n%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TextMessage", "Port: options", "Content-Type: text/plain", "Content-Length: 4", "TEST")
-	r := strings.NewReader(frameStr)
+	//r := strings.NewReader(frameStr)
 	var frame *flowd.Frame
 	var err error
-	frame, err = flowd.ParseFrame(r)
+	r := bytes.NewBufferString(frameStr)
+	bufr := bufio.NewReader(r)
+	frame, err = flowd.ParseFrame(bufr)
 	assert.NoError(t, err, "framing package cannot parse string into frame")
 	assert.Equal(t, "data", frame.Type, "parsed wrong data type")
 	assert.Equal(t, "TextMessage", frame.BodyType, "parsed wrong body type")

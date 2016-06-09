@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"flag"
@@ -292,7 +293,8 @@ func main() {
 						fmt.Println("net in received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
 					}
 					// decode frame
-					bufReader := bytes.NewReader(buf[0 : n+nPrev])
+					//bufReader := bytes.NewReader(buf[0 : n+nPrev])
+					bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn if it was TCP
 					//flowd.ParseFrame(ep.Conn)
 					if fr, err := flowd.ParseFrame(bufReader); err != nil {
 						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
@@ -359,53 +361,49 @@ func main() {
 	} else {
 		// NOTE: this using manual buffering
 		go func() {
-			buf := make([]byte, bufSize)
-			var nPrev int
+			bufr := bufio.NewReader(cout)
 			for {
-				n, err := cout.Read(buf[nPrev:])
-				if err != nil {
+				if frame, err := flowd.ParseFrame(bufr); err != nil {
 					if err == io.EOF {
 						fmt.Println("EOF from component stdout. Closing.")
 					} else {
-						fmt.Println("ERROR reading from component stdout:", err, "- closing.")
+						fmt.Println("ERROR parsing frame from component stdout:", err, "- closing.")
 					}
-					outEndpoints.Close()
-					return
-				} else {
-					if debug {
-						fmt.Println("STDOUT received", n, "bytes from component stdout")
-					}
-				}
-				if frame, err := flowd.ParseFrame(bytes.NewReader(buf[0 : nPrev+n])); err != nil { //TODO optimize, NewReader should not be neccessary
-					// frame uncomplete, but not malformed -> wait for remaining fragments
-					if debug {
-						fmt.Println("WARNING: uncomplete frame from component stdout, re-assembling:", err.Error())
-					}
-					nPrev = nPrev + n
 				} else { // frame complete now
 					if debug {
-						fmt.Println("OK parsing frame from component stdout")
+						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
 					}
 
 					// write out to network
 					//TODO error feedback for unknown/unconnected output ports
 					if e, exists := outEndpoints[frame.Port]; exists {
-						// NOTE: only write slice of buffer containing actual data
 						//TODO rewrite frame.Port to match the other side's input port name - and write the marshaled frame, not the buf
-						if nout, err := e.Conn.Write(buf[0 : nPrev+n]); err != nil {
+
+						// marshal
+						//TODO optimize; could directly marshal to e.Conn, but would lose info how many bytes were written
+						var outbuf bytes.Buffer
+						outw := bufio.NewWriter(&outbuf)
+						if err := frame.Marshal(outw); err != nil {
+							fmt.Println("net out: ERROR: marshalling frame:", err.Error(), "- closing.")
+							outEndpoints[frame.Port].Close()
+							//TODO return as well = close down all output operations or allow one output to fail?
+						}
+
+						// write
+						if nout, err := e.Conn.Write(outbuf.Bytes()); err != nil {
 							fmt.Println("net out: ERROR: sending to output endpoint", frame.Port, ":", err.Error(), "- closing.")
 							outEndpoints[frame.Port].Close()
 							//TODO return as well = close down all output operations or allow one output to fail?
-						} else if nout < nPrev+n {
-							fmt.Println("net out: ERROR: short send to output endpoint", frame.Port, ": only", nout, "of", nPrev+n, "bytes written - closing.")
+						} else if nout < outbuf.Len() {
+							fmt.Println("net out: ERROR: short send to output endpoint", frame.Port, ": only", nout, "of", outbuf.Len(), "bytes written - closing.")
 							outEndpoints[frame.Port].Close()
 						} else {
 							//TODO having two outputs say the same seems useless
 							if debug {
-								fmt.Println("net out wrote", nPrev+n, "bytes to port", frame.Port, "over network")
+								fmt.Println("net out wrote", outbuf.Len(), "bytes to port", frame.Port, "over network")
 							}
 							if !quiet {
-								fmt.Println("out xfer", nPrev+n, "bytes to", frame.Port, "=", outEndpoints[frame.Port].Conn.RemoteAddr())
+								fmt.Println("out xfer", outbuf.Len(), "bytes to", frame.Port, "=", outEndpoints[frame.Port].Conn.RemoteAddr())
 							}
 						}
 					} else {
@@ -413,9 +411,6 @@ func main() {
 						outEndpoints.Close()
 						return
 					}
-
-					// reset size of any previous fragment(s)
-					nPrev = 0
 				}
 			}
 		}()

@@ -19,10 +19,10 @@ type Frame struct {
 	Body        *[]byte
 }
 
-func ParseFrame(stream io.Reader) (f *Frame, err error) {
+// NOTE: require bufio.Reader not io.Reader, because textproto.Reader requires one. Making a local one would swallow any following frames into it.
+func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	// read headers
-	bufr := bufio.NewReader(stream)
-	textReader := textproto.NewReader(bufr)
+	textReader := textproto.NewReader(stream) //TODO To avoid denial of service attacks, the provided bufio.Reader should be reading from an io.LimitReader or similar Reader to bound the size of responses.
 	header, err := textReader.ReadMIMEHeader()
 	if err != nil {
 		return nil, errors.New("cannot parse into frame header: " + err.Error())
@@ -48,7 +48,7 @@ func ParseFrame(stream io.Reader) (f *Frame, err error) {
 		return nil, errors.New("converting content length to integer: " + err.Error())
 	}
 	buf := make([]byte, lenInt)
-	if n, err := io.ReadFull(bufr, buf); err != nil {
+	if n, err := io.ReadFull(stream, buf); err != nil {
 		if err == io.EOF {
 			return nil, errors.New("reading full frame body encountered EOF: " + err.Error())
 		} else {

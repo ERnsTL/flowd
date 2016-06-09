@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 
@@ -17,10 +18,11 @@ func main() {
 
 	var frame *flowd.Frame
 	var err error
+	bufr := bufio.NewReader(os.Stdin)
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(os.Stdin)
+		frame, err = flowd.ParseFrame(bufr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
