@@ -140,13 +140,8 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 		return nil, errors.New("fragment nil, must be name of port")
 	} else {
 		// check for well-formed port name
-		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?`) // -> [0] is match of entire exp, [1] is port name, [2] is
+		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?`) // -> [0] is match of entire exp, [1] is port name, [2] is array port index
 		matches := re.FindStringSubmatch(url.Fragment)
-		/*
-			for k, v := range matches {
-				fmt.Println("substring match:", k, v)
-			}
-		*/
 		if matches[0] != url.Fragment {
 			return nil, errors.New("port name malformed, must be \\w+ or \\w+[index]")
 		} else if len(matches[1]) > 1000 {
