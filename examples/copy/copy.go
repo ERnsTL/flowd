@@ -27,10 +27,11 @@ func main() {
 
 		// send it to given output ports
 		for _, outPort := range outPorts {
-			//fmt.Fprint(os.Stderr, "copying to port", outPort)
 			frame.Port = outPort
-			frame.Marshal(os.Stdout) //TODO optimize, marshal only once
-			//fmt.Fprintln(os.Stderr, "copied to port", outPort)
+			//TODO optimize, marshal frame only once
+			if err := frame.Marshal(os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+			}
 		}
 	}
 }
