@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -112,7 +113,7 @@ func (e *outputEndpoints) Set(value string) error {
 func parseEndpointURL(value string) (url *url.URL, err error) {
 	url, err = url.Parse(value)
 	if err != nil {
-		return nil, errors.New("could not parse flag value: " + err.Error())
+		return nil, errors.New("could not parse flag value as URL: " + err.Error())
 	}
 	// convert just-parsed URL to endpoint and replace *this* endpoint
 	//*e = *(*endpoint)(e2)
@@ -137,6 +138,23 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	}
 	if url.Fragment == "" {
 		return nil, errors.New("unallowed URL form: fragment nil, must be name of port")
+	} else {
+		// check for well-formed port name
+		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?`) // -> [0] is match of entire exp, [1] is port name, [2] is
+		matches := re.FindStringSubmatch(url.Fragment)
+		/*
+			for k, v := range matches {
+				fmt.Println("substring match:", k, v)
+			}
+		*/
+		if matches[0] != url.Fragment {
+			return nil, errors.New("unallowed URL form: port name malformed, must be \\w+ or \\w+[index]")
+		} else if len(matches[1]) > 1000 {
+			return nil, errors.New("unallowed URL form: port name too long, maximum allowable is 1000 UTF-8 runes")
+		} else if len(matches[2]) > 4 {
+			return nil, errors.New("unallowed URL form: port name array index too long, maximum allowable is 4 digits")
+		}
+		// TODO save the port name and index somewhere inside of ourselves to avoid duplicate work
 	}
 	// check for required URL parts
 	if url.Scheme == "" {
