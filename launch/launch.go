@@ -121,23 +121,23 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	// NOTE: url.Opaque is eg. localhost:0 -> usually present, but can be left out to mean 0.0.0.0
 	/*
 		if url.Opaque == "" {
-			return nil, errors.New("unallowed URL form: opaque part = host+port nil")
+			return nil, errors.New("opaque part = host+port nil")
 		}
 	*/
 	if url.User != nil {
-		return nil, errors.New("unallowed URL form: user part not nil")
+		return nil, errors.New("user part not nil")
 	}
 	if url.Path != "" {
-		return nil, errors.New("unallowed URL form: path part not nil")
+		return nil, errors.New("path part not nil")
 	}
 	if url.RawPath != "" {
-		return nil, errors.New("unallowed URL form: raw path part not nil")
+		return nil, errors.New("raw path part not nil")
 	}
 	if url.RawQuery != "" {
-		return nil, errors.New("unallowed URL form: raw query part not nil")
+		return nil, errors.New("raw query part not nil")
 	}
 	if url.Fragment == "" {
-		return nil, errors.New("unallowed URL form: fragment nil, must be name of port")
+		return nil, errors.New("fragment nil, must be name of port")
 	} else {
 		// check for well-formed port name
 		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?`) // -> [0] is match of entire exp, [1] is port name, [2] is
@@ -148,27 +148,27 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 			}
 		*/
 		if matches[0] != url.Fragment {
-			return nil, errors.New("unallowed URL form: port name malformed, must be \\w+ or \\w+[index]")
+			return nil, errors.New("port name malformed, must be \\w+ or \\w+[index]")
 		} else if len(matches[1]) > 1000 {
-			return nil, errors.New("unallowed URL form: port name too long, maximum allowable is 1000 UTF-8 runes")
+			return nil, errors.New("port name too long, maximum allowable is 1000 UTF-8 runes")
 		} else if len(matches[2]) > 4 {
-			return nil, errors.New("unallowed URL form: port name array index too long, maximum allowable is 4 digits")
+			return nil, errors.New("port name array index too long, maximum allowable is 4 digits")
 		}
 		// TODO save the port name and index somewhere inside of ourselves to avoid duplicate work
 	}
 	// check for required URL parts
 	if url.Scheme == "" {
-		return nil, errors.New("unallowed URL form: scheme missing")
+		return nil, errors.New("scheme missing")
 	}
 	if url.Scheme != "udp" && url.Scheme != "udp4" && url.Scheme != "udp6" {
-		return nil, errors.New("unallowed URL form: unimplemented scheme: only {udp,udp4,udp6} allowed")
+		return nil, errors.New("unimplemented scheme: only {udp,udp4,udp6} allowed")
 	}
 	if url.Host == "" {
-		return nil, errors.New("unallowed URL form: missing host:port or //")
+		return nil, errors.New("missing host:port or //")
 	} else {
 		_, portStr, err := net.SplitHostPort(url.Host)
 		if err != nil {
-			return nil, errors.New("unallowed URL form: host and/or port unvalid: " + err.Error())
+			return nil, errors.New("host and/or port unvalid: " + err.Error())
 		}
 		var port int
 		if portStr == "" {
@@ -176,10 +176,10 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 		} else {
 			port, err = strconv.Atoi(portStr)
 			if err != nil {
-				return nil, errors.New("unallowed URL form: port malformed, only numbers allowed: " + err.Error())
+				return nil, errors.New("port malformed, only numbers allowed: " + err.Error())
 			}
 			if port < 0 || port > 65535 {
-				return nil, errors.New("unallowed URL form: port out of range: allowed range is [0;65535]")
+				return nil, errors.New("port out of range: allowed range is [0;65535]")
 			}
 		}
 		// TODO save the int port and addr somewhere inside ourselves to avoid duplicate work
