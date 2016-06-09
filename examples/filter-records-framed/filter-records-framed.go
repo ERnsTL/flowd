@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,7 +29,8 @@ func main() {
 
 	for {
 		// read frame
-		inframe, err = flowd.ParseFrame(os.Stdin)
+		bufr := bufio.NewReader(os.Stdin)
+		inframe, err = flowd.ParseFrame(bufr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
