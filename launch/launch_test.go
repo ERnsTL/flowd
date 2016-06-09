@@ -109,6 +109,7 @@ func TestEndpointAcceptsCorrectEndpoints(t *testing.T) {
 }
 
 //TODO test cmdline flag parsing
+//TODO test port name parsing including array ports
 //TODO test missing component name
 //TODO test for unexistent component file name
 
