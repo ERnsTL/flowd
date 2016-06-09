@@ -10,11 +10,11 @@ import (
 func main() {
 	// read list of output ports
 	outPorts := os.Args[1:]
-	for _, outPort := range outPorts {
-		fmt.Println("got output port:", outPort)
+	if len(outPorts) == 0 {
+		fmt.Println("ERROR: no output port names given")
+		os.Exit(1)
 	}
 
-	// pre-declare to reduce GC allocations
 	var frame *flowd.Frame
 	var err error
 
@@ -25,10 +25,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
-		// send it
+		// send it to given output ports
 		for _, outPort := range outPorts {
+			//fmt.Fprint(os.Stderr, "copying to port", outPort)
 			frame.Port = outPort
 			frame.Marshal(os.Stdout) //TODO optimize, marshal only once
+			//fmt.Fprintln(os.Stderr, "copied to port", outPort)
 		}
 	}
 }
