@@ -127,7 +127,7 @@ The framing format is a simple text-based format very similar to an HTTP header.
 
 Using several components, a network can be built. It is like a graph of components or workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
 
-## features
+## Features
 
 * TCP output endpoints try again to dial connection, later turn into warnings, later into an error. This makes it possible to start components resp. their ```launch``` instances in any order.
 * TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit data or, if connection is lost, it can be resumed.
