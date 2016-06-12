@@ -39,14 +39,15 @@ func (e *outputEndpoint) Dial() {
 	go func() {
 		try := 1
 	tryagain: //TODO could go into infinite loop. later the orchestrator has to be able to detect these kinds of errors
-		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host, 30*time.Second)
+		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host, 10*time.Second)
 		if err != nil {
 			nerr, ok := err.(net.Error)
-			if ok && try < 20 {
-				if try > 10 {
+			if ok && try <= 10 {
+				if try > 5 {
 					fmt.Fprintln(os.Stderr, "WARNING: could not dial connection and/or resolve address:", err, "error is permanent?", nerr.Temporary())
 				}
 				time.Sleep(1 * time.Second)
+				try++
 				goto tryagain
 			} else {
 				fmt.Fprintln(os.Stderr, "ERROR: could not dial connection and/or resolve address:", err)
