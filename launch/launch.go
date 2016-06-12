@@ -43,8 +43,10 @@ func (e *outputEndpoint) Dial() {
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if ok && try < 10 {
-				fmt.Fprintln(os.Stderr, "WARNING: could not dial connection and/or resolve address:", err, "error is permanent?", nerr.Temporary())
-				time.Sleep(1 * time.Second)
+				if try > 5 {
+					fmt.Fprintln(os.Stderr, "WARNING: could not dial connection and/or resolve address:", err, "error is permanent?", nerr.Temporary())
+				}
+				time.Sleep(2 * time.Second)
 				goto tryagain
 			} else {
 				fmt.Fprintln(os.Stderr, "ERROR: could not dial connection and/or resolve address:", err)
@@ -146,7 +148,12 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 		}
 	*/
 	if url.User != nil {
-		return nil, errors.New("user part not nil")
+		if url.User.String() == "" && (url.Scheme == "unix" || url.Scheme == "unixpacket") {
+			// OK, this allows for transferring the "@" via the URL for Linux's abstract Unix domain sockets
+			url.Host = "@" + url.Host
+		} else {
+			return nil, errors.New("user part not nil: " + url.User.String())
+		}
 	}
 	if url.Path != "" {
 		return nil, errors.New("path part not nil")
@@ -186,23 +193,31 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	if url.Host == "" {
 		return nil, errors.New("missing host:port or //")
 	} else {
-		_, portStr, err := net.SplitHostPort(url.Host)
-		if err != nil {
-			return nil, errors.New("host and/or port unvalid: " + err.Error())
-		}
-		var port int
-		if portStr == "" {
-			port = 0
+		if url.Scheme == "unix" || url.Scheme == "unixpacket" {
+			if url.User != nil {
+				// OK, this allows for transferring the "@" via the URL for Linux's abstract Unix domain sockets
+				url.Host = "@" + url.Host
+			}
 		} else {
-			port, err = strconv.Atoi(portStr)
+			// TCP, UDP have [host]:[port] format
+			_, portStr, err := net.SplitHostPort(url.Host)
 			if err != nil {
-				return nil, errors.New("port malformed, only numbers allowed: " + err.Error())
+				return nil, errors.New("host and/or port unvalid: " + err.Error())
 			}
-			if port < 0 || port > 65535 {
-				return nil, errors.New("port out of range: allowed range is [0;65535]")
+			var port int
+			if portStr == "" {
+				port = 0
+			} else {
+				port, err = strconv.Atoi(portStr)
+				if err != nil {
+					return nil, errors.New("port malformed, only numbers allowed: " + err.Error())
+				}
+				if port < 0 || port > 65535 {
+					return nil, errors.New("port out of range: allowed range is [0;65535]")
+				}
 			}
+			// TODO save the int port and addr somewhere inside ourselves to avoid duplicate work
 		}
-		// TODO save the int port and addr somewhere inside ourselves to avoid duplicate work
 	}
 	return url, nil
 }
@@ -357,6 +372,7 @@ func main() {
 					bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn if it was TCP
 					//flowd.ParseFrame(ep.Conn)
 					// ### remove re-assembly, just join it to buffer (TODO an information packet can be really large -> something streaming)
+					// TODO could do packet re-assembly only if connection is UDPConn or UnixDatagramConn using type switch i := conn.(type) {}
 					if fr, err := flowd.ParseFrame(bufReader); err != nil {
 						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
 						// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
