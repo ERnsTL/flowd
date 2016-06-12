@@ -130,7 +130,7 @@ Using several components, a network can be built. It is like a graph of componen
 ## Features
 
 * TCP output endpoints try again to dial connection, later turn into warnings, later into an error. This makes it possible to start components resp. their ```launch``` instances in any order.
-* TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit data or, if connection is lost, it can be resumed.
+* TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit input data or, if connection is lost, it can be resumed or that the source component can be re-launched.
 
 ## Development
 
