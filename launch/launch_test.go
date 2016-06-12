@@ -108,6 +108,7 @@ func TestEndpointAcceptsCorrectEndpoints(t *testing.T) {
 	}
 }
 
+//TODO update for no UDP, +unix and +unixpacket
 //TODO test cmdline flag parsing
 //TODO test port name parsing including array ports
 //TODO test missing component name
