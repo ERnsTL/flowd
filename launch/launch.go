@@ -42,11 +42,11 @@ func (e *outputEndpoint) Dial() {
 		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host, 30*time.Second)
 		if err != nil {
 			nerr, ok := err.(net.Error)
-			if ok && try < 10 {
-				if try > 5 {
+			if ok && try < 20 {
+				if try > 10 {
 					fmt.Fprintln(os.Stderr, "WARNING: could not dial connection and/or resolve address:", err, "error is permanent?", nerr.Temporary())
 				}
-				time.Sleep(2 * time.Second)
+				time.Sleep(1 * time.Second)
 				goto tryagain
 			} else {
 				fmt.Fprintln(os.Stderr, "ERROR: could not dial connection and/or resolve address:", err)
@@ -83,6 +83,14 @@ func (e *inputEndpoint) Listen() {
 			ep.Ready <- true
 		}
 	}(e)
+}
+
+type NoArgsNoRetFunc func()
+
+func (e *inputEndpoint) ListenAgain(callback NoArgsNoRetFunc) {
+	e.Listen()
+	<-e.Ready
+	callback()
 }
 
 //TODO seems useless, because Conn.Close can be called directly
@@ -287,6 +295,19 @@ func main() {
 
 	// wait for connections to become ready, otherwise we start the component without all connections set up and it might panic
 	//TODO make it possible to see realtime updates when one is connected (1st one may block displaying "Ready" for the others)
+	/*
+		Select on multiple channels. Make Dial() methods submit to central ready channel (1 for inputs, 1 for outputs) and expect len(inEndpoints+outEndpoints) of ready notifications
+		for i := 1; i <= 9; i++ {
+		     select {
+		     case msg := <-c1:
+		          println(msg)
+			 case msg := <-c2:
+		          println(msg)
+		     case msg := <-c3:
+		          println(msg)
+		     }
+		}
+	*/
 	for name, _ := range inEndpoints {
 		ep := inEndpoints[name] //TODO not sure if this is necessary
 		if debug {
@@ -346,75 +367,7 @@ func main() {
 	} else {
 		// NOTE: using manual buffering, though more debug output and we can do framing
 		for inEndpoint := range inEndpoints {
-			go func(ep *inputEndpoint) {
-				buf := make([]byte, bufSize)
-				var nPrev int
-				for {
-					// read from connection
-					n, err := ep.Conn.Read(buf[nPrev:])
-					// NOTE: above can lead to reading only parts of an UDP packet even if buffer is large enough
-					// ###
-					if err != nil {
-						if err == io.EOF {
-							fmt.Println("EOF from network input", ep.Url.Fragment, "- closing.")
-							//TODO start listening again to allow re-connection
-						} else {
-							fmt.Println("ERROR: receiving from network input:", err, "Closing.")
-						}
-						ep.Conn.Close()
-						return
-					}
-					if debug {
-						fmt.Println("net in received", n, "bytes from", ep.Conn.RemoteAddr()) //" with contents:", string(buf[0:n]))
-					}
-					// decode frame
-					//bufReader := bytes.NewReader(buf[0 : n+nPrev])
-					bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn if it was TCP
-					//flowd.ParseFrame(ep.Conn)
-					// ### remove re-assembly, just join it to buffer (TODO an information packet can be really large -> something streaming)
-					// TODO could do packet re-assembly only if connection is UDPConn or UnixDatagramConn using type switch i := conn.(type) {}
-					if fr, err := flowd.ParseFrame(bufReader); err != nil {
-						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
-						// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
-						if nPrev > 0 {
-							// already tried once, discard previous fragment
-							fmt.Println("net in: ERROR parsing frame, discarding buffer:", err.Error())
-							nPrev = 0
-						} else {
-							// try again later using more arrived frames
-							if debug {
-								fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly:", err.Error())
-							} else if !quiet {
-								fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
-							}
-							nPrev = n
-						}
-					} else { // parsed fine
-						if debug {
-							fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
-						}
-
-						// check frame Port header field if it matches the name of this input endpoint
-						//FIXME which side does the header field rewriting? - better the sending side.
-						if ep.Url.Fragment != fr.Port {
-							fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment, " - discarding.")
-							// discard frame
-						} // else {	//TODO actually enforce this and make error in msg above
-						// forward frame to component
-						cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
-						//TODO two outputs saying just about the same seems useless
-						if debug {
-							fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
-						}
-						if !quiet {
-							fmt.Println("in xfer", nPrev+n, "bytes from", ep.Conn.RemoteAddr())
-						}
-
-						// reset previous packet size
-						nPrev = 0
-					}
-				}
-			}(inEndpoints[inEndpoint])
+			go handleInputEndpoint(inEndpoints[inEndpoint], debug, quiet, cin)
 		}
 	}
 
@@ -512,4 +465,84 @@ func printUsage() {
 	fmt.Println("Usage:", os.Args[0], "-in [input-endpoint(s)]", "-out [output-endpoint(s)]", "[component-cmd]", "[component-args...]")
 	flag.PrintDefaults()
 	os.Exit(1)
+}
+
+func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.WriteCloser) {
+	buf := make([]byte, bufSize)
+	var nPrev int
+	for {
+		// read from connection
+		n, err := ep.Conn.Read(buf[nPrev:])
+		// NOTE: above can lead to reading only parts of an UDP packet even if buffer is large enough
+		// ###
+		if err != nil {
+			if err == io.EOF {
+				_, portStr, _ := net.SplitHostPort(ep.Url.Host)
+				if portStr != "0" {
+					// can listen again since port is same (would have to change zeroconf announce)
+					fmt.Println("EOF from network input", ep.Url.Fragment, "- listening again.")
+
+					//start listening again to allow re-connection
+					ep.ListenAgain(func() {
+						handleInputEndpoint(ep, debug, quiet, cin)
+					})
+				} else {
+					fmt.Println("EOF from network input", ep.Url.Fragment, "- closing.")
+				}
+			} else {
+				fmt.Println("ERROR: receiving from network input:", err, "Closing.")
+			}
+			ep.Conn.Close()
+			return
+		}
+		if debug {
+			fmt.Println("net in received", n, "bytes from", ep.Conn.RemoteAddr()) //" with contents:", string(buf[0:n]))
+		}
+		// decode frame
+		//bufReader := bytes.NewReader(buf[0 : n+nPrev])
+		bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn if it was TCP
+		//flowd.ParseFrame(ep.Conn)
+		// ### remove re-assembly, just join it to buffer (TODO an information packet can be really large -> something streaming)
+		// TODO could do packet re-assembly only if connection is UDPConn or UnixDatagramConn using type switch i := conn.(type) {}
+		if fr, err := flowd.ParseFrame(bufReader); err != nil {
+			// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
+			// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
+			if nPrev > 0 {
+				// already tried once, discard previous fragment
+				fmt.Println("net in: ERROR parsing frame, discarding buffer:", err.Error())
+				nPrev = 0
+			} else {
+				// try again later using more arrived frames
+				if debug {
+					fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly:", err.Error())
+				} else if !quiet {
+					fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
+				}
+				nPrev = n
+			}
+		} else { // parsed fine
+			if debug {
+				fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
+			}
+
+			// check frame Port header field if it matches the name of this input endpoint
+			//FIXME which side does the header field rewriting? - better the sending side.
+			if ep.Url.Fragment != fr.Port {
+				fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment, " - discarding.")
+				// discard frame
+			} // else {	//TODO actually enforce this and make error in msg above
+			// forward frame to component
+			cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
+			//TODO two outputs saying just about the same seems useless
+			if debug {
+				fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
+			}
+			if !quiet {
+				fmt.Println("in xfer", nPrev+n, "bytes from", ep.Conn.RemoteAddr())
+			}
+
+			// reset previous packet size
+			nPrev = 0
+		}
+	}
 }
