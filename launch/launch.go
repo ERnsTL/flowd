@@ -22,52 +22,72 @@ const bufSize = 65535
 
 // type for component connection endpoint definition
 type endpoint struct {
-	Url        *url.URL
-	Addr       net.UDPAddr
-	Conn       *net.UDPConn
+	Url  *url.URL
+	Addr net.Addr
+	// TODO unoptimal to have both Conn and Listener on same struct
+	Conn       net.Conn
+	Listener   net.Listener
 	listenPort string
+	Ready      chan bool
 }
 
 type inputEndpoint endpoint
 type outputEndpoint endpoint
 
 func (e *outputEndpoint) Dial() {
-	// NOTE: net.ParseIP is not enough, returns nil for textual address -> resolve
-	oaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
-	if err != nil {
-		fmt.Println("ERROR: resolving output endpoint address for initial connection:", err)
-	}
-	//TODO make protocol-agnostic using net.DialAddr()
-	oconn, err := net.DialUDP("udp4", &net.UDPAddr{IP: net.ParseIP("0.0.0.0"), Port: 0}, oaddr)
-	if err != nil {
-		fmt.Println("ERROR: could not dial UDP output connection:", err)
-		os.Exit(3)
-	}
-	e.Conn = oconn
+	e.Ready = make(chan bool)
+	go func() {
+		try := 1
+	tryagain: //TODO could go into infinite loop. later the orchestrator has to be able to detect these kinds of errors
+		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host, 30*time.Second)
+		if err != nil {
+			nerr, ok := err.(net.Error)
+			if ok && try < 10 {
+				fmt.Fprintln(os.Stderr, "WARNING: could not dial connection and/or resolve address:", err, "error is permanent?", nerr.Temporary())
+				time.Sleep(1 * time.Second)
+				goto tryagain
+			} else {
+				fmt.Fprintln(os.Stderr, "ERROR: could not dial connection and/or resolve address:", err)
+			}
+			os.Exit(3)
+		}
+		e.Conn = oconn
+		e.Ready <- true
+	}()
 }
 
 func (e *inputEndpoint) Listen() {
-	// NOTE: net.ParseIP is not enough, returns nil for textual address -> resolve
-	iaddr, err := net.ResolveUDPAddr("udp4", e.Url.Host)
+	ilistener, err := net.Listen(e.Url.Scheme, e.Url.Host)
 	if err != nil {
-		fmt.Println("ERROR: could not resolve in endpoint address:", err)
-		os.Exit(2)
-	}
-	conn, err := net.ListenUDP("udp4", iaddr)
-	if err != nil {
-		fmt.Println("ERROR:", err)
+		fmt.Fprintln(os.Stderr, "ERROR: listening on ", e.Url.Host, ":", err)
 		os.Exit(4)
 	}
-	_, actualPort, _ := net.SplitHostPort(conn.LocalAddr().String())
+	_, actualPort, _ := net.SplitHostPort(ilistener.Addr().String())
 	//actualPort := strconv.Itoa(port)
 	//TODO decide whether to keep string or int representation
 	e.listenPort = actualPort
-	e.Conn = conn
+	e.Listener = ilistener
+
+	// accept one connection
+	e.Ready = make(chan bool)
+	go func(ep *inputEndpoint) {
+		// wait for incoming connection
+		if iconn, err := ep.Listener.Accept(); err != nil { //TODO accept with timeout -> so that orchestrator can detect something being wrong
+			fmt.Fprintln(os.Stderr, "ERROR: accepting connection on", ep.Listener.Addr(), ":")
+			os.Exit(4)
+		} else {
+			ep.Conn = iconn
+			ep.Listener.Close() // close listener for further connections
+			ep.Ready <- true
+		}
+	}(e)
 }
 
 //TODO seems useless, because Conn.Close can be called directly
 func (e *inputEndpoint) Close() {
 	e.Conn.Close()
+	// TODO what if listener is not connected yet? close it as well?
+	_ = e.Listener.Close()
 }
 func (e *outputEndpoint) Close() {
 	e.Conn.Close()
@@ -158,8 +178,10 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	if url.Scheme == "" {
 		return nil, errors.New("scheme missing")
 	}
-	if url.Scheme != "udp" && url.Scheme != "udp4" && url.Scheme != "udp6" {
-		return nil, errors.New("unimplemented scheme: only {udp,udp4,udp6} allowed")
+	if matched, err := regexp.MatchString(`^(tcp|tcp4|tcp6|unix|unixpacket)$`, url.Scheme); err != nil {
+		return nil, fmt.Errorf("could not parse scheme: %s", err)
+	} else if !matched {
+		return nil, errors.New("unimplemented scheme: only {tcp,tcp4,tcp6,unix,unixpacket} allowed")
 	}
 	if url.Host == "" {
 		return nil, errors.New("missing host:port or //")
@@ -214,8 +236,8 @@ func main() {
 	outEndpoints := outputEndpoints{}
 	var help, debug, quiet bool
 	var inFraming, outFraming bool
-	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. udp://localhost:0#portname")
-	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. udp://localhost:0#portname")
+	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. tcp://localhost:0#portname")
+	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. tcp://localhost:0#portname")
 	flag.BoolVar(&inFraming, "inframing", true, "perform frame decoding and routing on input endpoints")
 	flag.BoolVar(&outFraming, "outframing", true, "perform frame decoding and routing on output endpoints")
 	flag.BoolVar(&help, "h", false, "print usage information")
@@ -235,6 +257,41 @@ func main() {
 	inEndpoints.Listen()
 	defer inEndpoints.Close()
 	defer outEndpoints.Close()
+
+	// return port number
+	fmt.Println(inEndpoints["in"].listenPort) //FIXME port "in" may not exist
+
+	// make discoverable so that other components can connect
+	//TODO publish all input ports
+	pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._tcp", "some component", "_flowd._tcp", inEndpoints["in"].listenPort, "sometag=true")
+	if err := pub.Start(); err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(4)
+	}
+	defer pub.Process.Kill()
+
+	// wait for connections to become ready, otherwise we start the component without all connections set up and it might panic
+	//TODO make it possible to see realtime updates when one is connected (1st one may block displaying "Ready" for the others)
+	for name, _ := range inEndpoints {
+		ep := inEndpoints[name] //TODO not sure if this is necessary
+		if debug {
+			fmt.Println("waiting for ready from input", name)
+		}
+		<-ep.Ready
+		if !quiet {
+			fmt.Println("input", name, "is now connected")
+		}
+	}
+	for name, _ := range outEndpoints {
+		ep := outEndpoints[name] //TODO not sure if this is necessary
+		if debug {
+			fmt.Println("waiting for ready from output", name)
+		}
+		<-ep.Ready
+		if !quiet {
+			fmt.Println("output", name, "is now connected")
+		}
+	}
 
 	// start component as subprocess, with arguments
 	cmd := exec.Command(flag.Arg(0), flag.Args()[1:]...)
@@ -263,6 +320,7 @@ func main() {
 		// NOTE: io.Copy copies from right argument to left
 		for inEndpoint := range inEndpoints {
 			go func(ep *inputEndpoint) {
+				// setup direct copy without processing (since unframed)
 				if _, err := io.Copy(cin, ep.Conn); err != nil {
 					fmt.Println("ERROR: receiving from network input:", err, "Closing.")
 					ep.Conn.Close()
@@ -278,11 +336,13 @@ func main() {
 				var nPrev int
 				for {
 					// read from connection
-					n, addr, err := ep.Conn.ReadFromUDP(buf[nPrev:])
+					n, err := ep.Conn.Read(buf[nPrev:])
 					// NOTE: above can lead to reading only parts of an UDP packet even if buffer is large enough
+					// ###
 					if err != nil {
 						if err == io.EOF {
-							fmt.Println("EOF from network input. Closing.")
+							fmt.Println("EOF from network input", ep.Url.Fragment, "- closing.")
+							//TODO start listening again to allow re-connection
 						} else {
 							fmt.Println("ERROR: receiving from network input:", err, "Closing.")
 						}
@@ -290,12 +350,13 @@ func main() {
 						return
 					}
 					if debug {
-						fmt.Println("net in received", n, "bytes from", addr) //" with contents:", string(buf[0:n]))
+						fmt.Println("net in received", n, "bytes from", ep.Conn.RemoteAddr()) //" with contents:", string(buf[0:n]))
 					}
 					// decode frame
 					//bufReader := bytes.NewReader(buf[0 : n+nPrev])
 					bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn if it was TCP
 					//flowd.ParseFrame(ep.Conn)
+					// ### remove re-assembly, just join it to buffer (TODO an information packet can be really large -> something streaming)
 					if fr, err := flowd.ParseFrame(bufReader); err != nil {
 						// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
 						// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
@@ -330,7 +391,7 @@ func main() {
 							fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
 						}
 						if !quiet {
-							fmt.Println("in xfer", nPrev+n, "bytes from", addr)
+							fmt.Println("in xfer", nPrev+n, "bytes from", ep.Conn.RemoteAddr())
 						}
 
 						// reset previous packet size
@@ -421,18 +482,6 @@ func main() {
 
 	// declare network ports
 	//TODO
-
-	// make discoverable
-	//TODO publish all input ports
-	pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._udp", "some component", "_flowd._udp", inEndpoints["in"].listenPort, "sometag=true")
-	if err := pub.Start(); err != nil {
-		fmt.Println("ERROR:", err)
-		os.Exit(4)
-	}
-	defer pub.Process.Kill()
-
-	// return port number
-	fmt.Println(inEndpoints["in"].listenPort) //FIXME port "in" may not exist
 
 	// post success
 	//TODO subprocess logger
