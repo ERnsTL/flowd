@@ -61,15 +61,23 @@ func (e *outputEndpoint) Dial() {
 
 func (e *inputEndpoint) Listen() {
 	ilistener, err := net.Listen(e.Url.Scheme, e.Url.Host)
+	e.Listener = ilistener
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: listening on ", e.Url.Host, ":", err)
 		os.Exit(4)
 	}
-	_, actualPort, _ := net.SplitHostPort(ilistener.Addr().String())
-	//actualPort := strconv.Itoa(port)
-	//TODO decide whether to keep string or int representation
-	e.listenPort = actualPort
-	e.Listener = ilistener
+
+	// find out which port the listener has actually bound to
+	// NOTE: may be different in case of port 0
+	if e.Url.Scheme == "unix" || e.Url.Scheme == "unixpacket" {
+		e.listenPort = e.Url.Host
+	} else {
+		// for protocols with [host]:[port] format
+		_, actualPort, _ := net.SplitHostPort(ilistener.Addr().String())
+		//actualPort := strconv.Itoa(port)
+		//TODO decide whether to keep string or int representation
+		e.listenPort = actualPort
+	}
 
 	// accept one connection
 	e.Ready = make(chan bool)
@@ -159,7 +167,6 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	if url.User != nil {
 		if url.User.String() == "" && (url.Scheme == "unix" || url.Scheme == "unixpacket") {
 			// OK, this allows for transferring the "@" via the URL for Linux's abstract Unix domain sockets
-			url.Host = "@" + url.Host
 		} else {
 			return nil, errors.New("user part not nil: " + url.User.String())
 		}
