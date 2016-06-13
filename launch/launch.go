@@ -210,9 +210,15 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 	} else if !matched {
 		return nil, errors.New("unimplemented scheme: only {tcp,tcp4,tcp6,unix,unixpacket} allowed")
 	}
+	//TODO optimize unix- and unixpacket-specific logic all over this function
 	if url.Host == "" {
 		if url.Scheme == "unix" || url.Scheme == "unixpacket" {
-			// OK, this allows for transferring a path-bound Unix domain address
+			if url.User != nil {
+				// OK, this allows for transferring the "@" via the URL for Linux's abstract Unix domain sockets
+				url.Host = "@" + url.Host
+			} else {
+				// OK, this allows for transferring a path-bound Unix domain address
+			}
 		} else {
 			return nil, errors.New("missing host:port or //")
 		}
