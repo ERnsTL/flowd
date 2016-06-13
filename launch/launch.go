@@ -302,12 +302,22 @@ func main() {
 
 	// make discoverable so that other components can connect
 	//TODO publish all input ports
-	pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._tcp", "some component", "_flowd._tcp", inEndpoints["in"].listenPort, "sometag=true")
-	if err := pub.Start(); err != nil {
-		fmt.Println("ERROR:", err)
-		os.Exit(4)
+	//TODO does avahi maybe allow publishing Unix domain addresses too?
+	if !(inEndpoints["in"].Url.Scheme == "unix" || inEndpoints["in"].Url.Scheme == "unixpacket") {
+		var proto string
+		switch inEndpoints["in"].Url.Scheme {
+		case "tcp", "tcp4", "tcp6":
+			proto = "tcp"
+		case "udp", "udp4", "udp6":
+			proto = "udp"
+		}
+		pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._"+proto, "some component", "_flowd._"+proto, inEndpoints["in"].listenPort, "sometag=true")
+		if err := pub.Start(); err != nil {
+			fmt.Println("ERROR:", err)
+			os.Exit(4)
+		}
+		defer pub.Process.Kill()
 	}
-	defer pub.Process.Kill()
 
 	// wait for connections to become ready, otherwise we start the component without all connections set up and it might panic
 	//TODO make it possible to see realtime updates when one is connected (1st one may block displaying "Ready" for the others)
