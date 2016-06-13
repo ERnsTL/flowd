@@ -109,6 +109,8 @@ func TestEndpointAcceptsCorrectEndpoints(t *testing.T) {
 }
 
 //TODO update for no UDP, +unix and +unixpacket
+//TODO update url parsing for @flowd1234 and @/flowd/1234 and @flowd/1234 and /dev/shm/flowd/1234
+
 //TODO test cmdline flag parsing
 //TODO test port name parsing including array ports
 //TODO test missing component name
