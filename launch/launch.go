@@ -39,7 +39,7 @@ func (e *outputEndpoint) Dial() {
 	go func() {
 		try := 1
 	tryagain: //TODO could go into infinite loop. later the orchestrator has to be able to detect these kinds of errors
-		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host, 10*time.Second)
+		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host+e.Url.Path, 10*time.Second)
 		if err != nil {
 			nerr, ok := err.(net.Error)
 			if ok && try <= 10 {
@@ -172,7 +172,11 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 		}
 	}
 	if url.Path != "" {
-		return nil, errors.New("path part not nil")
+		if url.Scheme == "unix" || url.Scheme == "unixpacket" {
+			// OK, this allows for transferring a path-bound Unix domain address
+		} else {
+			return nil, errors.New("path part not nil (" + url.Path + ")")
+		}
 	}
 	if url.RawPath != "" {
 		return nil, errors.New("raw path part not nil")
@@ -207,7 +211,11 @@ func parseEndpointURL(value string) (url *url.URL, err error) {
 		return nil, errors.New("unimplemented scheme: only {tcp,tcp4,tcp6,unix,unixpacket} allowed")
 	}
 	if url.Host == "" {
-		return nil, errors.New("missing host:port or //")
+		if url.Scheme == "unix" || url.Scheme == "unixpacket" {
+			// OK, this allows for transferring a path-bound Unix domain address
+		} else {
+			return nil, errors.New("missing host:port or //")
+		}
 	} else {
 		if url.Scheme == "unix" || url.Scheme == "unixpacket" {
 			if url.User != nil {
