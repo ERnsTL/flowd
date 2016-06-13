@@ -38,7 +38,7 @@ func (e *outputEndpoint) Dial() {
 	e.Ready = make(chan bool)
 	go func() {
 		try := 1
-	tryagain: //TODO could go into infinite loop. later the orchestrator has to be able to detect these kinds of errors
+	tryagain: //TODO could go into infinite loop. later the orchestrator has to be able to detect temporary errors
 		oconn, err := net.DialTimeout(e.Url.Scheme, e.Url.Host+e.Url.Path, 10*time.Second)
 		if err != nil {
 			nerr, ok := err.(net.Error)
@@ -60,7 +60,7 @@ func (e *outputEndpoint) Dial() {
 }
 
 func (e *inputEndpoint) Listen() {
-	ilistener, err := net.Listen(e.Url.Scheme, e.Url.Host)
+	ilistener, err := net.Listen(e.Url.Scheme, e.Url.Host+e.Url.Path)
 	e.Listener = ilistener
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: listening on ", e.Url.Host, ":", err)
@@ -70,7 +70,7 @@ func (e *inputEndpoint) Listen() {
 	// find out which port the listener has actually bound to
 	// NOTE: may be different in case of port 0
 	if e.Url.Scheme == "unix" || e.Url.Scheme == "unixpacket" {
-		e.listenPort = e.Url.Host
+		e.listenPort = e.Url.Host + e.Url.Path
 	} else {
 		// for protocols with [host]:[port] format
 		_, actualPort, _ := net.SplitHostPort(ilistener.Addr().String())
