@@ -1,0 +1,2 @@
+'5s' -> INTERVAL Ticker(core/ticker) OUT -> IN Forward(core/passthru)
+Forward OUT -> IN Log(core/console)
