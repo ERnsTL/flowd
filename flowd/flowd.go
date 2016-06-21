@@ -44,19 +44,19 @@ func main() {
 		fmt.Println("subgraph name:", nw.Subgraph)
 		fmt.Println("processes:")
 		for _, p := range nw.Processes {
-			fmt.Println(p.String())
+			fmt.Println(" ", p.String())
 		}
 		fmt.Println("connections:")
 		for _, c := range nw.Connections {
-			fmt.Println(c.String())
+			fmt.Println(" ", c.String())
 		}
 		fmt.Println("input ports:")
 		for _, i := range nw.Inports {
-			fmt.Println(i.String())
+			fmt.Println(" ", i.String())
 		}
 		fmt.Println("output ports:")
 		for _, o := range nw.Outports {
-			fmt.Println(o.String())
+			fmt.Println(" ", o.String())
 		}
 	}
 }
