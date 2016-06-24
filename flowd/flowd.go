@@ -58,5 +58,23 @@ func main() {
 		for _, o := range nw.Outports {
 			fmt.Println(" ", o.String())
 		}
+
+		// network definition sanity checks
+		//TODO
+
+		// decide placement (know available machines, access method to them)
+		//TODO
+
+		// generate ports
+		//TODO
+
+		// subscribe to ctrl+c to do graceful shutdown
+		//TODO
+
+		// launch network
+		// TODO using go routines, display launch stdout
+
+		// detect voluntary network shutdown (how to decide that it should happen?)
+		//TODO
 	}
 }
