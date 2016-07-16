@@ -1,4 +1,8 @@
 #Some example network
 #EXPORT=xx:yy  -- name of subgraph? but not used in Golang parser
-'5s' -> INTERVAL Ticker(core/ticker) OUT -> IN Forward(core/passthru:mainconnection)
+# with IIP
+#'5s' -> INTERVAL Ticker(core/ticker) OUT -> IN Forward(core/passthru:mainconnection)
+# via network input port
+INPORT=Ticker.INTERVAL:NETINPORT
+Ticker(core/ticker) OUT -> IN Forward(core/passthru:mainconnection)
 Forward OUT -> IN[0] Log(core/console:key=value),INPORT=Forward.IN:GRAPHIN
