@@ -86,7 +86,9 @@ func main() {
 			printUsage()
 		}
 
-		fmt.Println("Reading network definition from file")
+		if debug {
+			fmt.Println("Reading network definition from file")
+		}
 		var err error
 		nwSource, err = os.Open(flag.Arg(0))
 		if err != nil {
@@ -95,7 +97,9 @@ func main() {
 		}
 	} else {
 		// get from STDIN
-		fmt.Println("Found something piped on STDIN, reading network definition from it")
+		if debug {
+			fmt.Println("Found something piped on STDIN, reading network definition from it")
+		}
 		nwSource = os.Stdin
 	}
 
@@ -112,39 +116,52 @@ func main() {
 
 	// parse and validate network
 	nw := &fbp.Fbp{Buffer: (string)(nwBytes)}
-	fmt.Println("init")
+	if debug {
+		fmt.Println("init")
+	}
 	nw.Init()
-	fmt.Println("parse")
+	if debug {
+		fmt.Println("parse")
+	}
 	if err := nw.Parse(); err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
-	fmt.Println("execute")
+	if debug {
+		fmt.Println("execute")
+	}
 	nw.Execute()
-	fmt.Println("validate")
+	if debug {
+		fmt.Println("validate")
+	}
 	if err := nw.Validate(); err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
-	fmt.Println("network definition OK")
+	if debug {
+		fmt.Println("network definition OK")
+	}
 
 	// display all data
-	fmt.Println("subgraph name:", nw.Subgraph)
-	fmt.Println("processes:")
-	for _, p := range nw.Processes {
-		fmt.Println(" ", p.String())
-	}
-	fmt.Println("connections:")
-	for _, c := range nw.Connections {
-		fmt.Println(" ", c.String())
-	}
-	fmt.Println("input ports:")
-	for name, i := range nw.Inports {
-		fmt.Printf(" %s: %s\n", name, i.String())
-	}
-	fmt.Println("output ports:")
-	for name, o := range nw.Outports {
-		fmt.Printf(" %s: %s\n", name, o.String())
+	if debug {
+		fmt.Println("subgraph name:", nw.Subgraph)
+		fmt.Println("processes:")
+		for _, p := range nw.Processes {
+			fmt.Println(" ", p.String())
+		}
+		fmt.Println("connections:")
+		for _, c := range nw.Connections {
+			fmt.Println(" ", c.String())
+		}
+		fmt.Println("input ports:")
+		for name, i := range nw.Inports {
+			fmt.Printf(" %s: %s\n", name, i.String())
+		}
+		fmt.Println("output ports:")
+		for name, o := range nw.Outports {
+			fmt.Printf(" %s: %s\n", name, o.String())
+		}
+		fmt.Println("end of parsed network info")
 	}
 
 	// network definition sanity checks
@@ -166,6 +183,7 @@ func main() {
 		procs[proc.Name] = proc
 	}
 	// add connections
+	fmt.Println("network:")
 	for _, fbpConn := range nw.Connections {
 		// prepare connection data
 		// check source
@@ -185,7 +203,7 @@ func main() {
 			//TODO implement
 		}
 
-		fmt.Printf("connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
+		fmt.Printf("  connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
 		fromPort := GeneratePortName(fbpConn.Source)
 		toPort := GeneratePortName(fbpConn.Target)
 
@@ -220,18 +238,36 @@ func main() {
 				break
 			}
 		}
-		if found {
-			// destination exists
-			fmt.Printf("connection: inport %s -> %s.%s\n", name, iport.Process, iport.Port)
-		} else {
+		if !found {
 			// destination missing
 			fmt.Println("ERROR: destination process missing for inport", name)
 			os.Exit(2)
+		} else if debug {
+			// destination found
+			fmt.Printf("  inport: %s -> %s.%s\n", name, iport.Process, iport.Port)
 		}
 
 		// add connections
-		//TODO need flag to know where to listen on (or FBP metadata)
-		//TODO implement
+		//TODO maybe also get that info from FBP network metadata
+		toProc := iport.Process
+		toPort := iport.Port
+		fromPort := name
+		if _, exists := inEndpoints[fromPort]; !exists {
+			// no endpoint address was given for that network inport
+			fmt.Println("ERROR: no endpoint address given resp. missing -in argument for inport", name)
+			os.Exit(2)
+		}
+		listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
+		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
+			LocalName:    toPort,
+			LocalAddress: listenAddress, //TODO"unix://@flowd/" + toProc,
+			RemoteName:   fromPort,
+			//TODO currently unused
+			//RemoteAddress: "unix://@flowd/" + fromProc,
+		})
+
+		// destination info
+		fmt.Printf("  inport: %s at %s -> %s.%s\n", name, listenAddress, iport.Process, iport.Port)
 	}
 	// add network outports
 	for name, oport := range nw.Outports {
@@ -245,7 +281,7 @@ func main() {
 		}
 		if found {
 			// source exists
-			fmt.Printf("connection: %s.%s -> outport %s\n", oport.Process, oport.Port, name)
+			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
 		} else {
 			// source missing
 			fmt.Println("ERROR: source process missing for outport", name)
@@ -253,8 +289,8 @@ func main() {
 		}
 
 		// add to connections
-		//TODO need flag to know where that port goes to
-		//TODO implement
+		//TODO maybe also get that info from FBP network metadata
+		//TODO implement - get info from flag where that port goes to
 	}
 
 	// subscribe to ctrl+c to do graceful shutdown
