@@ -31,6 +31,8 @@ type inputEndpoints map[string]*inputEndpoint
 type outputEndpoints map[string]*outputEndpoint
 
 // implement flag.Value interface
+//TODO these String() functions only return the first endpoint's string representation
+//TODO they are also NOT used for turning an endpoint URL into a string, these functions are only used by flag package
 func (e *inputEndpoints) String() string {
 	for _, endpoint := range *e {
 		return fmt.Sprintf("%s://%s#%s", endpoint.Url.Scheme, endpoint.Url.Host, endpoint.Url.Fragment)
@@ -168,6 +170,8 @@ func main() {
 	}
 
 	// network definition sanity checks
+	//TODO check for multiple connections to same component's port
+	//TODO decide if this should be allowed
 	//TODO
 
 	// decide placement (know available machines, access method to them)
@@ -204,7 +208,7 @@ func main() {
 			os.Exit(2)
 		} else if debug {
 			// destination found
-			fmt.Printf("  inport: %s -> %s.%s\n", name, iport.Process, iport.Port)
+			fmt.Printf("  inport (.fbp): %s -> %s.%s\n", name, iport.Process, iport.Port)
 		}
 
 		// prepare connection data
@@ -219,6 +223,9 @@ func main() {
 		}
 
 		// listen input port struct
+		// NOTE: resets the portname, will be added later.
+		//TODO decide if internal or external port name should be used
+		inEndpoints[fromPort].Url.Fragment = ""
 		listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
 		//TODO hack
 		listenAddress = strings.Replace(listenAddress, "%40", "", 1)
@@ -253,7 +260,7 @@ func main() {
 		}
 
 		if debug {
-			fmt.Printf("  connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
+			fmt.Printf("  connection (.fbp): source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
 		}
 
 		// prepare connection data
@@ -301,7 +308,7 @@ func main() {
 			os.Exit(2)
 		} else if debug {
 			// source exists
-			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
+			fmt.Printf("  outport (.fbp): %s.%s -> %s\n", oport.Process, oport.Port, name)
 		}
 
 		// prepare connection data
@@ -316,6 +323,9 @@ func main() {
 		}
 
 		// connecting output port struct
+		// NOTE: resets the portname, will be added later.
+		//TODO decide if internal or external port name should be used
+		outEndpoints[toPort].Url.Fragment = ""
 		remoteAddress := outEndpoints[toPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
 		//TODO hack
 		remoteAddress = strings.Replace(remoteAddress, "%40", "", 1)
@@ -353,7 +363,8 @@ func main() {
 				args = append(args, "-in", endpointUrl)
 			}
 			for _, op := range proc.OutPorts {
-				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.RemoteName)
+				// NOTE: launch and component need to know local name of its output endpoint, not the external name
+				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.LocalName)
 				args = append(args, "-out", endpointUrl)
 			}
 			args = append(args, procs[name].Path)
@@ -378,7 +389,10 @@ func main() {
 				exitChan <- name
 			}
 			//TODO cin, cout copy line-by-line
-			//TODO detect subprocess exit -> send info upstream
+			//TODO detect subprocess exit proper -> send info upstream
+			cmd.Wait()
+			exitChan <- name
+
 			defer cout.Close()
 			defer cin.Close()
 		}(proc.Name)
