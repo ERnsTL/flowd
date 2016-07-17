@@ -279,18 +279,37 @@ func main() {
 				break
 			}
 		}
-		if found {
-			// source exists
-			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
-		} else {
+		if !found {
 			// source missing
 			fmt.Println("ERROR: source process missing for outport", name)
 			os.Exit(2)
+		} else if debug {
+			// source exists
+			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
 		}
 
 		// add to connections
 		//TODO maybe also get that info from FBP network metadata
 		//TODO implement - get info from flag where that port goes to
+		fromProc := oport.Process
+		fromPort := oport.Port
+		toPort := name
+		if _, exists := outEndpoints[toPort]; !exists {
+			// no endpoint address was given for that network outport
+			fmt.Println("ERROR: no endpoint address given resp. missing -out argument for outport", name)
+			os.Exit(2)
+		}
+		remoteAddress := outEndpoints[toPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
+		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
+			LocalName: fromPort,
+			//TODO currently unused
+			//LocalAddress: "unix://@flowd/" + fromProc,
+			RemoteName:    toPort,
+			RemoteAddress: remoteAddress,
+		})
+
+		// destination info
+		fmt.Printf("  outport: %s.%s -> %s to %s\n", oport.Process, oport.Port, name, remoteAddress)
 	}
 
 	// subscribe to ctrl+c to do graceful shutdown
