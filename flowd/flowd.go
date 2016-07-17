@@ -87,7 +87,7 @@ func main() {
 		}
 
 		if debug {
-			fmt.Println("Reading network definition from file")
+			fmt.Println("Reading network definition from file", flag.Arg(0))
 		}
 		var err error
 		nwSource, err = os.Open(flag.Arg(0))
@@ -327,20 +327,33 @@ func main() {
 	// subscribe to ctrl+c to do graceful shutdown
 	//TODO
 
-	// launch network
-	//###
-	// TODO display launch stdout
+	// launch network using endpoint information generated before
 	for _, proc := range nw.Processes {
 		//TODO exit channel to goroutine
 		//TODO exit channel from goroutine
 		fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Component)
 
-		//TODO need to have ports generated here -> generate arguments for launch
+		// start component as subprocess, with arguments
+		go func(name string) {
+			proc := procs[name]
 
-		go func() {
-			// start component as subprocess, with arguments
-			//TODO generate arguments, which arguments?
-			cmd := exec.Command(flag.Arg(0), flag.Args()[1:]...)
+			// generate arguments for launch
+			var args []string
+			for _, ip := range proc.InPorts {
+				endpointUrl := fmt.Sprintf("%s#%s", ip.LocalAddress, ip.LocalName)
+				args = append(args, "-in", endpointUrl)
+			}
+			for _, op := range proc.OutPorts {
+				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.RemoteName)
+				args = append(args, "-out", endpointUrl)
+			}
+			args = append(args, procs[name].Path)
+
+			// TODO display launch stdout
+			if debug {
+				fmt.Println("DEBUG: arguments for launch:", args)
+			}
+			cmd := exec.Command("launch", args...)
 			cout, err := cmd.StdoutPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
@@ -356,7 +369,7 @@ func main() {
 			}
 			defer cout.Close()
 			defer cin.Close()
-		}()
+		}(proc.Name)
 	}
 
 	// detect voluntary network shutdown (how to decide that it should happen?)
