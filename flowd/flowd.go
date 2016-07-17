@@ -328,13 +328,15 @@ func main() {
 	//TODO
 
 	// launch network using endpoint information generated before
+	launch := make(map[string]*LaunchInstance)
+	exitChan := make(chan string)
 	for _, proc := range nw.Processes {
-		//TODO exit channel to goroutine
-		//TODO exit channel from goroutine
 		fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Component)
 
 		// start component as subprocess, with arguments
+		launch[proc.Name] = NewLaunchInstance()
 		go func(name string) {
+			//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 			proc := procs[name]
 
 			// generate arguments for launch
@@ -350,6 +352,7 @@ func main() {
 			args = append(args, procs[name].Path)
 
 			// TODO display launch stdout
+			// start launch subprocess
 			if debug {
 				fmt.Println("DEBUG: arguments for launch:", args)
 			}
@@ -365,14 +368,25 @@ func main() {
 			cmd.Stderr = os.Stderr
 			if err := cmd.Start(); err != nil {
 				fmt.Println("ERROR:", err)
-				os.Exit(2)
+				exitChan <- name
 			}
 			defer cout.Close()
 			defer cin.Close()
 		}(proc.Name)
 	}
 
-	// detect voluntary network shutdown (how to decide that it should happen?)
+	// run while there are still components running
+	//TODO is this practically useful behavior?
+	for len(launch) > 0 {
+		procName := <-exitChan
+		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
+		fmt.Println("WARNING: Component", procName, "has exited.")
+		delete(launch, procName)
+	}
+	fmt.Println("INFO: All components have exited. Exiting.")
+
+	// detect voluntary network shutdown
+	//TODO how to decide that it should happen? should 1 component be able to trigger network shutdown?
 	//TODO
 }
 
@@ -420,4 +434,12 @@ func printUsage() {
 	fmt.Println("Usage:", os.Args[0], "-in [inport-endpoint(s)]", "-out [outport-endpoint(s)]", "[network-def-file]")
 	flag.PrintDefaults()
 	os.Exit(1)
+}
+
+type LaunchInstance struct {
+	ExitTo chan bool // command launch instance to shut down
+}
+
+func NewLaunchInstance() *LaunchInstance {
+	return &LaunchInstance{ExitTo: make(chan bool)}
 }
