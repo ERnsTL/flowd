@@ -204,7 +204,7 @@ func main() {
 			fmt.Printf("  inport: %s -> %s.%s\n", name, iport.Process, iport.Port)
 		}
 
-		// create connection structs
+		// prepare connection data
 		//TODO maybe also get that info from FBP network metadata
 		toProc := iport.Process
 		toPort := iport.Port
@@ -214,6 +214,8 @@ func main() {
 			fmt.Println("ERROR: no endpoint address given resp. missing -in argument for inport", name)
 			os.Exit(2)
 		}
+
+		// listen input port struct
 		listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
 		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
 			LocalName:    toPort,
@@ -228,7 +230,6 @@ func main() {
 	}
 	// add regular internal connections
 	for _, fbpConn := range nw.Connections {
-		// prepare connection data
 		// check source
 		if fbpConn.Source != nil { // regular connection
 			//TODO implement
@@ -249,6 +250,8 @@ func main() {
 		if debug {
 			fmt.Printf("  connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
 		}
+
+		// prepare connection data
 		fromPort := GeneratePortName(fbpConn.Source)
 		toPort := GeneratePortName(fbpConn.Target)
 
@@ -296,9 +299,8 @@ func main() {
 			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
 		}
 
-		// create connection structs
+		// prepare connection data
 		//TODO maybe also get that info from FBP network metadata
-		//TODO implement - get info from flag where that port goes to
 		fromProc := oport.Process
 		fromPort := oport.Port
 		toPort := name
@@ -307,6 +309,8 @@ func main() {
 			fmt.Println("ERROR: no endpoint address given resp. missing -out argument for outport", name)
 			os.Exit(2)
 		}
+
+		// connecting output port struct
 		remoteAddress := outEndpoints[toPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
 		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
 			LocalName: fromPort,
