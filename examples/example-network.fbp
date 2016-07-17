@@ -6,3 +6,4 @@
 INPORT=Ticker.INTERVAL:NETINPORT
 Ticker(core/ticker) OUT -> IN Forward(core/passthru:mainconnection)
 Forward OUT -> IN[0] Log(core/console:key=value),INPORT=Forward.IN:GRAPHIN
+OUTPORT=Log.OUT:NETOUTPORT
