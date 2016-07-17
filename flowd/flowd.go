@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	termutil "github.com/andrew-d/go-termutil"
@@ -66,9 +67,11 @@ func main() {
 	// read program arguments
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
+	var launchPath string
 	var help, debug, quiet bool
 	flag.Var(&inEndpoints, "in", "endpoint(s) for FBP network inports in URL format, ie. tcp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "endpoint(s) for FBP network outports in URL format, ie. tcp://localhost:0#portname")
+	flag.StringVar(&launchPath, "launch", "launch", "path to the launch executable, defaults to look in PATH env")
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
@@ -217,6 +220,8 @@ func main() {
 
 		// listen input port struct
 		listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
+		//TODO hack
+		listenAddress = strings.Replace(listenAddress, "%40", "", 1)
 		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
 			LocalName:    toPort,
 			LocalAddress: listenAddress, //TODO"unix://@flowd/" + toProc,
@@ -312,6 +317,8 @@ func main() {
 
 		// connecting output port struct
 		remoteAddress := outEndpoints[toPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
+		//TODO hack
+		remoteAddress = strings.Replace(remoteAddress, "%40", "", 1)
 		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
 			LocalName: fromPort,
 			//TODO currently unused
@@ -356,7 +363,7 @@ func main() {
 			if debug {
 				fmt.Println("DEBUG: arguments for launch:", args)
 			}
-			cmd := exec.Command("launch", args...)
+			cmd := exec.Command(launchPath, args...)
 			cout, err := cmd.StdoutPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
@@ -370,6 +377,8 @@ func main() {
 				fmt.Println("ERROR:", err)
 				exitChan <- name
 			}
+			//TODO cin, cout copy line-by-line
+			//TODO detect subprocess exit -> send info upstream
 			defer cout.Close()
 			defer cin.Close()
 		}(proc.Name)
