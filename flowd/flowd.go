@@ -182,52 +182,9 @@ func main() {
 		}
 		procs[proc.Name] = proc
 	}
+
 	// add connections
 	fmt.Println("network:")
-	for _, fbpConn := range nw.Connections {
-		// prepare connection data
-		// check source
-		if fbpConn.Source != nil { // regular connection
-			//TODO implement
-		} else if fbpConn.Data != "" { // source is IIP
-			//TODO implement
-			fmt.Printf("ERROR: connection with IIP %s to %s: currently unimplemented\n", fbpConn.Data, fbpConn.Target)
-			os.Exit(2)
-		}
-		// check target
-		if fbpConn.Target != nil {
-			// regular connection
-			//TODO implement
-		} else {
-			// check for outport, otherwise error case (unknown situation)
-			//TODO implement
-		}
-
-		fmt.Printf("  connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
-		fromPort := GeneratePortName(fbpConn.Source)
-		toPort := GeneratePortName(fbpConn.Target)
-
-		fromProc := fbpConn.Source.Process
-		toProc := fbpConn.Target.Process
-
-		// connecting output port
-		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
-			LocalName: fromPort,
-			//TODO currently unused
-			//LocalAddress: "unix://@flowd/" + fromProc,
-			RemoteName:    toPort,
-			RemoteAddress: "unix://@flowd/" + toProc,
-		})
-
-		// listen input port
-		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
-			LocalName:    toPort,
-			LocalAddress: "unix://@flowd/" + toProc,
-			RemoteName:   fromPort,
-			//TODO currently unused
-			//RemoteAddress: "unix://@flowd/" + fromProc,
-		})
-	}
 	// add network inports
 	for name, iport := range nw.Inports {
 		// check if destination exists
@@ -247,7 +204,7 @@ func main() {
 			fmt.Printf("  inport: %s -> %s.%s\n", name, iport.Process, iport.Port)
 		}
 
-		// add connections
+		// create connection structs
 		//TODO maybe also get that info from FBP network metadata
 		toProc := iport.Process
 		toPort := iport.Port
@@ -269,6 +226,57 @@ func main() {
 		// destination info
 		fmt.Printf("  inport: %s at %s -> %s.%s\n", name, listenAddress, iport.Process, iport.Port)
 	}
+	// add regular internal connections
+	for _, fbpConn := range nw.Connections {
+		// prepare connection data
+		// check source
+		if fbpConn.Source != nil { // regular connection
+			//TODO implement
+		} else if fbpConn.Data != "" { // source is IIP
+			//TODO implement
+			fmt.Printf("ERROR: connection with IIP %s to %s: currently unimplemented\n", fbpConn.Data, fbpConn.Target)
+			os.Exit(2)
+		}
+		// check target
+		if fbpConn.Target != nil {
+			// regular connection
+			//TODO implement
+		} else {
+			// check for outport, otherwise error case (unknown situation)
+			//TODO implement
+		}
+
+		if debug {
+			fmt.Printf("  connection: source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
+		}
+		fromPort := GeneratePortName(fbpConn.Source)
+		toPort := GeneratePortName(fbpConn.Target)
+
+		fromProc := fbpConn.Source.Process
+		toProc := fbpConn.Target.Process
+
+		// connecting output port struct
+		remoteAddress := "unix://@flowd/" + toProc
+		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
+			LocalName: fromPort,
+			//TODO currently unused
+			//LocalAddress: "unix://@flowd/" + fromProc,
+			RemoteName:    toPort,
+			RemoteAddress: remoteAddress,
+		})
+
+		// listen input port struct
+		localAddress := "unix://@flowd/" + toProc
+		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
+			LocalName:    toPort,
+			LocalAddress: localAddress,
+			RemoteName:   fromPort,
+			//TODO currently unused
+			//RemoteAddress: "unix://@flowd/" + fromProc,
+		})
+
+		fmt.Printf("  connection: %s.%s at %s -> %s.%s at %s\n", fromProc, fromPort, localAddress, toProc, toPort, remoteAddress)
+	}
 	// add network outports
 	for name, oport := range nw.Outports {
 		// check if source exists
@@ -288,7 +296,7 @@ func main() {
 			fmt.Printf("  outport: %s.%s -> %s\n", oport.Process, oport.Port, name)
 		}
 
-		// add to connections
+		// create connection structs
 		//TODO maybe also get that info from FBP network metadata
 		//TODO implement - get info from flag where that port goes to
 		fromProc := oport.Process
@@ -316,6 +324,7 @@ func main() {
 	//TODO
 
 	// launch network
+	//###
 	// TODO display launch stdout
 	for _, proc := range nw.Processes {
 		//TODO exit channel to goroutine
