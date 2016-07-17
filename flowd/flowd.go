@@ -278,7 +278,7 @@ func main() {
 			//RemoteAddress: "unix://@flowd/" + fromProc,
 		})
 
-		fmt.Printf("  connection: %s.%s at %s -> %s.%s at %s\n", fromProc, fromPort, localAddress, toProc, toPort, remoteAddress)
+		fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
 	}
 	// add network outports
 	for name, oport := range nw.Outports {
