@@ -171,7 +171,7 @@ func main() {
 
 	// network definition sanity checks
 	//TODO check for multiple connections to same component's port
-	//TODO decide if this should be allowed
+	//TODO decide if this should be allowed - no not usually, because then frames might be interleaved - bad if ordering is important
 	//TODO
 
 	// decide placement (know available machines, access method to them)
