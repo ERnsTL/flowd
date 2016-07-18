@@ -198,26 +198,30 @@ func main() {
 	defer inEndpoints.Close()
 	defer outEndpoints.Close()
 
-	// return port number
-	fmt.Println(inEndpoints["in"].listenPort) //FIXME port "in" may not exist
+	if _, exists := inEndpoints["in"]; exists {
+		//TODO what if it does not exist? what to output? what if there is more than one input endpoint?
+		//TODO publish any port numbers on Zeroconf? maybe only the processing framework's inports -> move this to flowd
+		// return port number
+		fmt.Println(inEndpoints["in"].listenPort) //FIXME port "in" may not exist
 
-	// make discoverable so that other components can connect
-	//TODO publish all input ports
-	//TODO does avahi maybe allow publishing Unix domain addresses too?
-	if !(inEndpoints["in"].Url.Scheme == "unix" || inEndpoints["in"].Url.Scheme == "unixpacket") {
-		var proto string
-		switch inEndpoints["in"].Url.Scheme {
-		case "tcp", "tcp4", "tcp6":
-			proto = "tcp"
-		case "udp", "udp4", "udp6":
-			proto = "udp"
+		// make discoverable so that other components can connect
+		//TODO publish all input ports
+		//TODO does avahi maybe allow publishing Unix domain addresses too?
+		if !(inEndpoints["in"].Url.Scheme == "unix" || inEndpoints["in"].Url.Scheme == "unixpacket") {
+			var proto string
+			switch inEndpoints["in"].Url.Scheme {
+			case "tcp", "tcp4", "tcp6":
+				proto = "tcp"
+			case "udp", "udp4", "udp6":
+				proto = "udp"
+			}
+			pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._"+proto, "some component", "_flowd._"+proto, inEndpoints["in"].listenPort, "sometag=true")
+			if err := pub.Start(); err != nil {
+				fmt.Println("ERROR:", err)
+				os.Exit(4)
+			}
+			defer pub.Process.Kill()
 		}
-		pub := exec.Command("avahi-publish-service", "--service", "--subtype", "_web._sub._flowd._"+proto, "some component", "_flowd._"+proto, inEndpoints["in"].listenPort, "sometag=true")
-		if err := pub.Start(); err != nil {
-			fmt.Println("ERROR:", err)
-			os.Exit(4)
-		}
-		defer pub.Process.Kill()
 	}
 
 	// wait for connections to become ready, otherwise we start the component without all connections set up and it might panic
