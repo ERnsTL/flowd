@@ -22,7 +22,7 @@ func main() {
 	outframe := flowd.Frame{
 		Type:        "data",
 		BodyType:    "Message",
-		Port:        "out",
+		Port:        "OUT",
 		ContentType: "application/json",
 		Body:        nil,
 	}
