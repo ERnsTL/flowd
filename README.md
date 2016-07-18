@@ -24,84 +24,101 @@ GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
 
 ## Examples
 
-Components are currently run in reverse order (sink to source).
+WIP NOTE: Some places in the code and examples currently use ```unixpacket```, which is only available on Linux. If you run on OSX, you may have to change this in the code and network from ```unixpacket://``` to ```unix://```. For Windows, you may have to change to ```tcp``` or ```udp```.
+
+WIP NOTE: Some places in the code and examples currently use *abstract* Unix domain sockets starting with ```@```. These are not path-bound and available only on Linux. If you run on OSX, you may have to change this in the code and network to a path-bound name without the ```@```. For Windows, you may have to change ot ```tcp``` or ```udp```.
 
 ### Example 1
 
-The data flow for this example as follows:
+In this example, a simple processing pipeline is run using the network orchestrator / runtime, ```flowd```.
 
-```
-data file -> stdin -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
-```
-
-1. Run a sink:
+1. Run some receiver of the pipeline output:
 
   ```
-  bin/udp2stdout localhost:4000
+  bin/unix2stdout @flowd/print1/in
   ```
 
-  This should listen for the results.
+  This should listen for a connection.
 
-1. Run a processing component:
-
-  ```
-  bin/launch -in udp4://:0#in -out udp4://localhost:4000#out -inframing=false -outframing=false bin/filter-records
-  ```
-
-  This should run a simple filtering component, publish it on the network using mDNS and output the UDP port it listens on.
-
-1. Run a simple data source:
+1. Run the processing network, a simple pipeline in this case. You can give the name as argument or pipe it in.
 
   ```
-  port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
-  echo "found on port $port"
-  cat src/github.com/ERnsTL/flowd/examples/example-stream.json | \
-  bin/stdin2udp localhost:$port
+  bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT src/github.com/ERnsTL/flowd/examples/example-network.fbp
   ```
 
-  This looks up the component using mDNS, connects to it and sends it some JSON test data to filter.
+  or
+
+  ```
+  bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT < src/github.com/ERnsTL/flowd/examples/example-network.fbp
+  ```
+
+  This should start up the network and display that all ports are connected and the network *inport* listening.
+
+1. Send in some data for processing:
+
+  ```
+  cat src/github.com/ERnsTL/flowd/examples/example-list.json | bin/stdin2frame -bodytype FilterMessage -content-type application/json | bin/stdin2unix @flowd/network1/in
+  ```
+
+  This connects to the network and sends it some *framed* JSON test data to filter.
 
   Switching back to the data sink, you should now see the input data filtered on the Name attribute.
+
 
 ### Example 2
 
-This example is the same as example 1, but uses message framing. This allows the use of multiple and named ports on the input and output side and the creation of complex, non-linear processing networks.
+The same can also be done manually using the ```launch``` program. The orchestrator / runtime also calls this binary behind the scenes.
+
+You have to manually set up the components in reverse order (sink to source). This example is the same as example 1. It also uses *message / IP framing*. This allows the use of multiple and named *ports* on the input and output side and the creation of complex, non-linear processing networks. But it is also possible to set ```launch``` into unframed mode and work with streams instead of *messages / IPs*.
 
 The data flow for this example as follows:
 
 ```
-data file -> stdin -> frame -> stdout/in -> UDP -> stdin -> component -> stdout -> UDP -> stdout -> display
+data file -> stdin -> frame -> stdout/in -> Unix/TCP/UDP -> stdin -> component -> stdout -> Unix/TCP/UDP -> stdout -> display
 ```
 
 1. Run a sink:
 
   ```
-  bin/udp2stdout localhost:4000
+  bin/unix2stdout @flowd/print1/in
   ```
 
   This should listen for the results.
 
+1. Run an example copy component:
+
+  ```
+  bin/launch -in unixpacket://@flowd/copy/in#in -out unixpacket://@flowd/print1/in#out1 bin/copy out1
+  ```
+
 1. Run a processing component:
 
   ```
-  bin/launch -in udp4://:0#in -out udp4://localhost:4000#out bin/filter-records-framed
+  bin/launch -in unixpacket://@flowd/network1/in#in -out unixpacket://@flowd/copy/in#OUT bin/filter-records-framed
   ```
 
-  This should run the same filtering component as in example 1, but a version which uses message framing. Again, the component's ```in``` port is published on the network using mDNS and outputs the UDP port it listens on.
+  This should run a simple filtering component, waiting for connection on its *input endpoint*.
+
 
 1. Run a simple data source:
 
   ```
-  port=`avahi-browse -t -r "_flowd._udp"|grep port|uniq|cut -f2 --delimiter="["|cut -f1 --delimiter="]"`
-  echo "found on port $port"
-  cat src/github.com/ERnsTL/flowd/examples/example-list.json | \
-  bin/stdin2frame -debug -bodytype FilterMessage -content-type "application/json" | \
-  bin/stdin2udp localhost:$port
+  cat src/github.com/ERnsTL/flowd/examples/example-list.json | bin/stdin2frame -bodytype FilterMessage -content-type application/json | bin/stdin2unix @flowd/network1/in
   ```
 
-  This looks up the component using mDNS, connects to it and sends it some framed JSON test data to filter.
+  This connects to the network and sends it some *framed* JSON test data to filter.
 
   Switching back to the data sink, you should now see the input data filtered on the Name attribute.
+
+### Example 3
+
+You could also extend the above example 2 to copy to multiple *output endpoints*:
+
+```
+bin/launch -in unix://@flowd/copy/in#in -out unix://@flowd/print1/in#out1 -out unix://@flowd/print2/in#out2 bin/copy out1 out2
+```
+
+... and also start a second printer component accordingly. This would result in a Y-split in the network.
 
 ## Architecture
 
