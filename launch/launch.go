@@ -326,10 +326,12 @@ func main() {
 			for {
 				if frame, err := flowd.ParseFrame(bufr); err != nil {
 					if err == io.EOF {
-						fmt.Println("EOF from component stdout. Closing.")
+						fmt.Println("EOF from component stdout. Exiting.")
 					} else {
-						fmt.Println("ERROR parsing frame from component stdout:", err, "- closing.")
+						fmt.Println("ERROR parsing frame from component stdout:", err, "- Exiting.")
 					}
+					outEndpoints.Close()
+					return
 				} else { // frame complete now
 					if debug {
 						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
