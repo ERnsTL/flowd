@@ -24,7 +24,7 @@ GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
 
 ## Examples
 
-WIP NOTE: Some places in the code and examples currently use ```unixpacket```, which is only available on Linux. If you run on OSX, you may have to change this in the code and network from ```unixpacket://``` to ```unix://```. For Windows, you may have to change to ```tcp``` or ```udp```.
+WIP NOTE: Some places in the code and examples currently use ```unixpacket```, which is only available on Linux. If you run on OSX, you may have to change this in the code and network from ```unixpacket://``` to ```unix://```. For Windows, you may have to change to ```tcp``` or ```udp```. There is an [information page](https://groups.google.com/forum/?_escaped_fragment_=topic/golang-nuts/Rmxxba5rb8Y#!topic/golang-nuts/Rmxxba5rb8Y), which explains the differences a bit and how Go handles the different network types.
 
 WIP NOTE: Some places in the code and examples currently use *abstract* Unix domain sockets starting with ```@```. These are not path-bound and available only on Linux. If you run on OSX, you may have to change this in the code and network to a path-bound name without the ```@```. For Windows, you may have to change ot ```tcp``` or ```udp```.
 
