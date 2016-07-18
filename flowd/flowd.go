@@ -152,7 +152,7 @@ func main() {
 		fmt.Println("subgraph name:", nw.Subgraph)
 		fmt.Println("processes:")
 		for _, p := range nw.Processes {
-			fmt.Println(" ", p.String())
+			fmt.Println(" ", p.String(), p.Metadata)
 		}
 		fmt.Println("connections:")
 		for _, c := range nw.Connections {
@@ -358,31 +358,40 @@ func main() {
 
 			// generate arguments for launch
 			var args []string
+			// input endpoints
 			for _, ip := range proc.InPorts {
 				endpointUrl := fmt.Sprintf("%s#%s", ip.LocalAddress, ip.LocalName)
 				args = append(args, "-in", endpointUrl)
 			}
+			// output endpoints
 			for _, op := range proc.OutPorts {
 				// NOTE: launch and component need to know local name of its output endpoint, not the external name
 				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.LocalName)
 				args = append(args, "-out", endpointUrl)
 			}
+			// component pathname
 			args = append(args, procs[name].Path)
+			// component arguments
+			args = append(args, procs[name].Arguments...)
 
 			// TODO display launch stdout
 			// start launch subprocess
 			if debug {
-				fmt.Println("DEBUG: arguments for launch:", args)
+				fmt.Println("DEBUG: arguments for launch:", launchPath, args)
 			}
 			cmd := exec.Command(launchPath, args...)
-			cout, err := cmd.StdoutPipe()
-			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
-			}
-			cin, err := cmd.StdinPipe()
-			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
-			}
+			/*
+				cout, err := cmd.StdoutPipe()
+				if err != nil {
+					fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
+				}
+				cin, err := cmd.StdinPipe()
+				if err != nil {
+					fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
+				}
+				cmd.Stderr = os.Stderr
+			*/
+			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			if err := cmd.Start(); err != nil {
 				fmt.Println("ERROR:", err)
@@ -393,8 +402,8 @@ func main() {
 			cmd.Wait()
 			exitChan <- name
 
-			defer cout.Close()
-			defer cin.Close()
+			//defer cout.Close()
+			//defer cin.Close()
 		}(proc.Name)
 	}
 
@@ -423,6 +432,7 @@ const (
 
 type Process struct {
 	Path         string
+	Arguments    []string
 	Placement    Placement
 	Architecture string //x86, x86_64, armv7l, armv8
 	Name         string
@@ -441,8 +451,13 @@ type Port struct {
 }
 
 func NewProcess(proc *fbp.Process) *Process {
-	//TODO make use of arguments in proc.Metadata
-	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}}
+	// take over arguments in FBP metadata under key "args"
+	args := []string{}
+	if _, hasArgs := proc.Metadata["args"]; hasArgs {
+		args = strings.Split(proc.Metadata["args"], " ")
+	}
+	// return new Process struct
+	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}, Arguments: args}
 }
 
 func GeneratePortName(endpoint *fbp.Endpoint) string {
