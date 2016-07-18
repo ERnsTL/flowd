@@ -370,7 +370,7 @@ func main() {
 							}
 						}
 					} else {
-						fmt.Println("net out: ERROR: component tried sending to undeclared port. Exiting.")
+						fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", frame.Port)
 						outEndpoints.Close()
 						return
 					}
