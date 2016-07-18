@@ -459,7 +459,7 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 			// check frame Port header field if it matches the name of this input endpoint
 			//FIXME which side does the header field rewriting? - better the sending side.
 			if ep.Url.Fragment != fr.Port {
-				fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment, " - discarding.")
+				fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment) //, " - discarding.")
 				// discard frame
 			} // else {	//TODO actually enforce this and make error in msg above
 			// forward frame to component
