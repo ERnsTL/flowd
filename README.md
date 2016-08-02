@@ -157,7 +157,7 @@ Also, an *initial information packet*/frame is sent to the ```CONF``` input port
 'localhost:4000' -> CONF tcp-server
 ```
 
-This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior. So, there is also:
+This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior.
 
 ## Architecture
 
