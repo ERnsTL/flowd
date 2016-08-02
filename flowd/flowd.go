@@ -449,6 +449,7 @@ type Process struct {
 	Name         string
 	InPorts      []Port
 	OutPorts     []Port
+	IIPs         []Port //TODO maybe a better data structure for that?
 }
 
 type Port struct {
@@ -458,7 +459,7 @@ type Port struct {
 	RemoteName    string
 	RemoteAddress string
 
-	IIP string
+	IIP string //TODO regular connections have to carry that info around as well
 }
 
 func NewProcess(proc *fbp.Process) *Process {
