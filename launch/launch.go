@@ -219,6 +219,22 @@ func main() {
 		printUsage()
 	}
 
+	// if IIPs are requested, then inFraming is required
+	if len(iips) > 0 && !inFraming {
+		fmt.Println("ERROR: use of -iip flag requires -inframing=true")
+		os.Exit(1)
+	}
+
+	// check if the ports named in -iip flags exist
+	// NOTE: this check is not required, because it is common that this port has no network endpoint, eg. a CONF or OPTIONS port
+	/*
+		for _, port := range iips {
+			if _, exists := inEndpoints[port]; !exists {
+				fmt.Println("ERROR: the input port given in -iip flag does not exist:", port)
+			}
+		}
+	*/
+
 	// connect with other components
 	outEndpoints.Dial()
 	inEndpoints.Listen()
