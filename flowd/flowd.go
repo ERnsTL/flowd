@@ -375,6 +375,11 @@ func main() {
 				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.LocalName)
 				args = append(args, "-out", endpointUrl)
 			}
+			// initial information packets/frames = IIPs
+			for _, iip := range proc.IIPs {
+				iipArg := fmt.Sprintf("%s:%s", iip.LocalName, iip.IIP)
+				args = append(args, "-iip", iipArg)
+			}
 			// component pathname
 			args = append(args, procs[name].Path)
 			// component arguments
