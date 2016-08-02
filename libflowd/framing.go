@@ -34,11 +34,9 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	if len(types) != 2 {
 		return nil, errors.New("missing separator in Type header field")
 	}
-	//TODO read any remaining header fields into frame.Extensions
 	// NOTE: Port and Content-Type can be missing at the moment
 	f = &Frame{Type: types[0], BodyType: types[1], Port: header.Get("Port"), ContentType: header.Get("Content-Type"), Body: nil}
-
-	// read body
+	// read content length
 	if _, ok := header["Content-Length"]; !ok {
 		return nil, errors.New("missing Content-Length header field")
 	}
@@ -47,6 +45,22 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	if err != nil {
 		return nil, errors.New("converting content length to integer: " + err.Error())
 	}
+	// read any remaining header fields into frame.Extensions
+	//FIXME implement this correctly, also without the deletions
+	//TODO convert to map[string][]string, which http.Header and textproto.MIMEHeader are
+	delete(header, "Type")
+	delete(header, "Port")
+	delete(header, "Content-Type")
+	delete(header, "Content-Length")
+	if len(header) > 0 {
+		f.Extensions = make(map[string]string)
+		for key, values := range header {
+			//FIXME implement this correctly
+			f.Extensions[key] = values[0]
+			//fmt.Fprintf(os.Stderr, "framing got extension header %s = %s\n", key, values[0])
+		}
+	}
+	// read body
 	buf := make([]byte, lenInt)
 	if n, err := io.ReadFull(stream, buf); err != nil {
 		if err == io.EOF {
@@ -77,7 +91,15 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := printHeaderLine(tpw, "content-length", strconv.Itoa(len(*f.Body))); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
-	//TODO also marshal frame.Extensions header fields
+	if f.Extensions != nil {
+		for key, value := range f.Extensions {
+			if err := printHeaderLine(tpw, key, value); err != nil {
+				return errors.New("marshal extension header: " + err.Error())
+			} else {
+				//fmt.Fprintf(os.Stderr, "marshal extension header: %s = %s\n", key, value)
+			}
+		}
+	}
 	if err := finalizeHeader(tpw); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
