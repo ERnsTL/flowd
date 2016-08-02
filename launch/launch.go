@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -170,14 +171,40 @@ func (e *outputEndpoints) Close() {
 	}
 }
 
+// type to hold information about input frames/IPs, which are sent once as first packets onto the given input endpoint/port
+type initialIPs map[string]string
+
+// implement flag.Value interface
+func (iips *initialIPs) String() (str string) {
+	for inPort, data := range *iips {
+		if str != "" {
+			str += ","
+		}
+		str += fmt.Sprintf("%s:%s", inPort, data)
+	}
+	return str
+}
+func (iips *initialIPs) Set(value string) error {
+	//TODO decide if : is really a good separator in practice or if = would be a better separator
+	if iip := strings.SplitN(value, ":", 2); len(iip) != 2 {
+		return fmt.Errorf("malformed argument for flag -iip: %s", iip[0])
+	} else {
+		// split fine
+		(*iips)[iip[0]] = iip[1]
+	}
+	return nil
+}
+
 func main() {
 	// read program arguments
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
+	iips := initialIPs{}
 	var help, debug, quiet bool
 	var inFraming, outFraming bool
 	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. tcp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. tcp://localhost:0#portname")
+	flag.Var(&iips, "iip", "initial information packet/frame to be sent to an input port, ie. portname:freeformdata")
 	flag.BoolVar(&inFraming, "inframing", true, "perform frame decoding and routing on input endpoints")
 	flag.BoolVar(&outFraming, "outframing", true, "perform frame decoding and routing on output endpoints")
 	flag.BoolVar(&help, "h", false, "print usage information")
