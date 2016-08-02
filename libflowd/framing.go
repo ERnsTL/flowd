@@ -48,6 +48,7 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	// read any remaining header fields into frame.Extensions
 	//FIXME implement this correctly, also without the deletions
 	//TODO convert to map[string][]string, which http.Header and textproto.MIMEHeader are
+	//TODO decide if map[string]string would also suffice (are duplicate headers useful? maybe for layered information.)
 	delete(header, "Type")
 	delete(header, "Port")
 	delete(header, "Content-Type")
