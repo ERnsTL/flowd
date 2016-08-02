@@ -17,7 +17,7 @@ func main() {
 		//fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
 		//os.Exit(1)
 		os.Args = []string{"", "localhost:4000"}
-		fmt.Fprintln(os.Stderr, "INFO: No listen address given, using default", os.Args[1])
+		fmt.Fprintln(os.Stderr, "WARNING: No listen address given, using default", os.Args[1])
 	}
 
 	// list of established TCP connections
