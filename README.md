@@ -135,7 +135,7 @@ Start a simple TCP echo server using the following command:
 bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-echo-server.fbp
 ```
 
-This should parse, start up all ```launch``` instances, all components, connect all ports between components and start the listen socket.
+This should parse the network definition file, start up all ```launch``` instances, all components, connect all ports between components, deliver configuration information (*IIPs*) to the components and finally, start the listen socket.
 
 Then connect to it using, for example:
 
@@ -149,7 +149,10 @@ The data flow is as follows:
 
 ```
 TCP in -> tcp-server OUT port -> copy IN port -> copy OUT port -> tcp-server IN port (responses) -> TCP out
+'localhost:4000' -> CONF tcp-server
 ```
+
+Also, an *initial information packet*/frame is sent to the ```CONF``` input port of the ```tcp-server``` component. This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior.
 
 ## Architecture
 
@@ -181,6 +184,9 @@ Using several components, a network can be built. It is like a graph of componen
 * Unix domain endpoints (abstract and path-based)
 * TCP output endpoints try again to dial connection, later turn into warnings, later into an error. This makes it possible to start components resp. their ```launch``` instances in any order.
 * TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit input data or, if connection is lost, it can be resumed or that the source component can be re-launched.
+* Optional, but usually used framing format between component and launch and in between launch instances.
+* *Initial information packets* (IIPs) for component *parametrization*.
+* A few included example components (filter, copy, TCP server)
 
 ## Development
 
