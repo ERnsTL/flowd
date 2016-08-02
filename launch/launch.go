@@ -339,7 +339,31 @@ func main() {
 			}(inEndpoints[inEndpoint])
 		}
 	} else {
-		// NOTE: using manual buffering, though more debug output and we can do framing
+		// NOTE: using manual buffering (no io.Copy), though more debug output and we can do framing = manipulation of data in transit
+		// first deliver initial information packets/frames
+		if len(iips) > 0 {
+			for port, data := range iips {
+				dataBytes := []byte(data) //FIXME another useless conversion because of frame.Body being a pointer of []byte
+				iip := &flowd.Frame{
+					Type:        "data",
+					BodyType:    "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
+					Port:        port,
+					ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed //TODO really?
+					Extensions:  nil,
+					Body:        &dataBytes,
+				}
+				if !quiet {
+					fmt.Println("in xfer 1 IIP to", port)
+				}
+				if err := iip.Marshal(cin); err != nil {
+					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+					os.Exit(3)
+				}
+			}
+			// GC it
+			iips = nil
+		}
+		// now handle regular packets/frames
 		for inEndpoint := range inEndpoints {
 			go handleInputEndpoint(inEndpoints[inEndpoint], debug, quiet, cin)
 		}
