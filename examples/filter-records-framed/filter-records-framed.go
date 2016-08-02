@@ -58,6 +58,7 @@ func main() {
 		} else {
 			// frame result
 			outframe.Body = &body
+			outframe.Extensions = inframe.Extensions
 
 			// send it
 			outframe.Marshal(os.Stdout)
