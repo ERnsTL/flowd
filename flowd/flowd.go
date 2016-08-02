@@ -242,55 +242,61 @@ func main() {
 	}
 	// add regular internal connections
 	for _, fbpConn := range nw.Connections {
-		// check source
-		if fbpConn.Source != nil { // regular connection
-			//TODO implement
-		} else if fbpConn.Data != "" { // source is IIP
-			//TODO implement
-			fmt.Printf("ERROR: connection with IIP %s to %s: currently unimplemented\n", fbpConn.Data, fbpConn.Target)
-			os.Exit(2)
-		}
-		// check target
-		if fbpConn.Target != nil {
-			// regular connection
-			//TODO implement
-		} else {
-			// check for outport, otherwise error case (unknown situation)
-			//TODO implement
-		}
-
 		if debug {
 			fmt.Printf("  connection (.fbp): source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
 		}
 
-		// prepare connection data
-		fromPort := GeneratePortName(fbpConn.Source)
-		toPort := GeneratePortName(fbpConn.Target)
+		if fbpConn.Source != nil && fbpConn.Target != nil { // regular connection
+			// prepare connection data
+			fromPort := GeneratePortName(fbpConn.Source)
+			toPort := GeneratePortName(fbpConn.Target)
 
-		fromProc := fbpConn.Source.Process
-		toProc := fbpConn.Target.Process
+			fromProc := fbpConn.Source.Process
+			toProc := fbpConn.Target.Process
 
-		// connecting output port struct
-		remoteAddress := "unix://@flowd/" + toProc
-		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
-			LocalName: fromPort,
-			//TODO currently unused
-			//LocalAddress: "unix://@flowd/" + fromProc,
-			RemoteName:    toPort,
-			RemoteAddress: remoteAddress,
-		})
+			// connecting output port struct
+			remoteAddress := "unix://@flowd/" + toProc
+			procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
+				LocalName: fromPort,
+				//TODO currently unused
+				//LocalAddress: "unix://@flowd/" + fromProc,
+				RemoteName:    toPort,
+				RemoteAddress: remoteAddress,
+			})
 
-		// listen input port struct
-		localAddress := "unix://@flowd/" + toProc
-		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
-			LocalName:    toPort,
-			LocalAddress: localAddress,
-			RemoteName:   fromPort,
-			//TODO currently unused
-			//RemoteAddress: "unix://@flowd/" + fromProc,
-		})
+			// listen input port struct
+			localAddress := "unix://@flowd/" + toProc
+			procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
+				LocalName:    toPort,
+				LocalAddress: localAddress,
+				RemoteName:   fromPort,
+				//TODO currently unused
+				//RemoteAddress: "unix://@flowd/" + fromProc,
+			})
 
-		fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
+			fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
+		} else if fbpConn.Data != "" { // source is IIP
+			// prepare connection data
+			toPort := GeneratePortName(fbpConn.Target)
+
+			toProc := fbpConn.Target.Process
+
+			// listen input port struct
+			procs[toProc].IIPs = append(procs[toProc].IIPs, Port{
+				LocalName: toPort,
+				IIP:       fbpConn.Data,
+			})
+
+			fmt.Printf("  connection: IIP '%s' -> %s.%s\n", fbpConn.Data, toProc, toPort)
+		} else if fbpConn.Source == nil { // error condition
+			// NOTE: network inports are given separately in nw.Inports
+			fmt.Println("ERROR: connection has empty connection source:", fbpConn.String())
+			os.Exit(2)
+		} else if fbpConn.Target == nil { // error condition
+			// NOTE: network outports are given separately in nw.Outports
+			fmt.Println("ERROR: connection has empty connection target:", fbpConn.String())
+			os.Exit(2)
+		}
 	}
 	// add network outports
 	for name, oport := range nw.Outports {
