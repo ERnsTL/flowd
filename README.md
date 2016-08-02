@@ -149,10 +149,15 @@ The data flow is as follows:
 
 ```
 TCP in -> tcp-server OUT port -> copy IN port -> copy OUT port -> tcp-server IN port (responses) -> TCP out
+```
+
+Also, an *initial information packet*/frame is sent to the ```CONF``` input port of the ```tcp-server``` component:
+
+```
 'localhost:4000' -> CONF tcp-server
 ```
 
-Also, an *initial information packet*/frame is sent to the ```CONF``` input port of the ```tcp-server``` component. This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior.
+This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior. So, there is also:
 
 ## Architecture
 
@@ -186,7 +191,7 @@ Using several components, a network can be built. It is like a graph of componen
 * TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit input data or, if connection is lost, it can be resumed or that the source component can be re-launched.
 * Optional, but usually used framing format between component and launch and in between launch instances.
 * *Initial information packets* (IIPs) for component *parametrization*.
-* A few included example components (filter, copy, TCP server)
+* A few included example components (filter, copy, TCP server).
 
 ## Development
 
