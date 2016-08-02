@@ -14,13 +14,14 @@ import (
 
 func main() {
 	if len(os.Args) < 1+1 {
-		fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
-		os.Exit(1)
+		//fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
+		//os.Exit(1)
+		os.Args = []string{"", "localhost:4000"}
+		fmt.Fprintln(os.Stderr, "INFO: No listen address given, using default", os.Args[1])
 	}
 
+	// list of established TCP connections
 	conns := make(map[int]*net.TCPConn)
-
-	// STDIN: packets to send out (responses)
 
 	fmt.Fprintln(os.Stderr, "resolving address")
 	serverAddr, err := net.ResolveTCPAddr("tcp", os.Args[1])
@@ -48,8 +49,10 @@ func main() {
 				os.Exit(0) // TODO exit with non-zero code if error parsing frame
 				return
 			} else { // frame complete now
+				//TODO maybe useless temp variable
 				bodyLen := len(*frame.Body)
-				fmt.Fprintln(os.Stderr, "in xfer", bodyLen, "bytes")
+				//TODO if debug -- add flag
+				//fmt.Fprintln(os.Stderr, "tcp-server: frame in with", bodyLen, "bytes body")
 				/*
 					//TODO add debug flag; TODO add proper flag parsing
 					if debug {
@@ -69,13 +72,13 @@ func main() {
 					//TODO gracefully shut down / close all connections
 					os.Exit(1)
 				}
-				// check if frame has TCP-ID header
-				if connIdStr, exists := frame.Extensions["TCP-ID"]; exists {
+				// check if frame has TCP-ID in header
+				if connIdStr, exists := frame.Extensions["Tcp-Id"]; exists {
 					// check if TCP-ID header is integer number
 					if connId, err := strconv.Atoi(connIdStr); err != nil {
 						// TCP-ID header not an integer number
 						//TODO notification back to FBP network of error
-						fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer TCP-ID %s: %s - Exiting.\n", connIdStr, err)
+						fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Tcp-Id header %s: %s - Exiting.\n", connIdStr, err)
 						//TODO gracefully shut down / close all connections
 						os.Exit(1)
 					} else {
@@ -95,7 +98,7 @@ func main() {
 							} else {
 								// success
 								//TODO if !quiet - add that flag
-								fmt.Fprintln(os.Stderr, "net out: wrote", bytesWritten, "bytes to", conn.RemoteAddr())
+								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connId, bytesWritten, conn.RemoteAddr())
 							}
 						} else {
 							// TCP connection not found - could have been closed in meantime or wrong TCP-ID in frame header
@@ -106,7 +109,7 @@ func main() {
 					}
 				} else {
 					// TCP-ID extension header missing
-					fmt.Fprintln(os.Stderr, "ERROR: frame is missing TCP-ID header - Exiting.")
+					fmt.Fprintln(os.Stderr, "ERROR: frame is missing Tcp-Id header - Exiting.")
 					//TODO gracefully shut down / close all connections
 					os.Exit(1)
 				}
@@ -136,6 +139,7 @@ func main() {
 		conn.SetKeepAlivePeriod(5 * time.Second)
 		conns[id] = conn
 		go handleConnection(conn, id, closeChan)
+		//TODO overflow possibilities?
 		id += 1
 	}
 }
@@ -155,7 +159,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		BodyType:    "TCPPacket",
 		Port:        "OUT",
 		ContentType: "application/octet-stream",
-		Extensions:  map[string]string{"TCP-ID": strconv.Itoa(id), "TCP-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
+		Extensions:  map[string]string{"Tcp-Id": strconv.Itoa(id), "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:        nil,
 	}
 
@@ -174,7 +178,10 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 			// exit
 			return
 		}
-		fmt.Fprintf(os.Stderr, "%d: received: %s\n", id, buf[:bytesRead])
+		//TODO if debug - add flag
+		//fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s: %s\n", id, bytesRead, conn.RemoteAddr(), buf[:bytesRead])
+		//TODO if !quiet - add flag
+		fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s\n", id, bytesRead, conn.RemoteAddr())
 
 		// frame TCP packet into flowd frame
 		//TODO useless copying
