@@ -127,6 +127,30 @@ bin/launch -in unix://@flowd/copy/in#in -out unix://@flowd/print1/in#out1 -out u
 
 ... and also start a second printer component accordingly. This would result in a Y-split in the network.
 
+### Example 4
+
+Start a simple TCP echo server using the following command:
+
+```
+bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-echo-server.fbp
+```
+
+This should parse, start up all ```launch``` instances, all components, connect all ports between components and start the listen socket.
+
+Then connect to it using, for example:
+
+```
+nc -v localhost 4000
+```
+
+When you connect, you should see a message that it has accepted your connection. When you send data, you should see it sent to an intermediary copy component and further back to ```tcp-server```'s response port and back out via TCP to your client.
+
+The data flow is as follows:
+
+```
+TCP in -> tcp-server OUT port -> copy IN port -> copy OUT port -> tcp-server IN port (responses) -> TCP out
+```
+
 ## Architecture
 
 > This describes the current pre-alpha state. Far from all of the target architecture is currently present.
