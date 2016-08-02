@@ -14,16 +14,41 @@ import (
 
 func main() {
 	if len(os.Args) < 1+1 {
-		//fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
-		//os.Exit(1)
-		os.Args = []string{"", "localhost:4000"}
-		fmt.Fprintln(os.Stderr, "WARNING: No listen address given, using default", os.Args[1])
+		// require configuration on cmdline
+		/*
+			fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
+			os.Exit(1)
+		*/
+
+		// set default values if no configuration from cmdline
+		/*
+			os.Args = []string{"", "localhost:4000"}
+			fmt.Fprintln(os.Stderr, "WARNING: No listen address given, using default", os.Args[1])
+		*/
+
+		// get configuration from IIP = initial information packet/frame
+		fmt.Fprintln(os.Stderr, "wait for IIP")
+		stdin := bufio.NewReader(os.Stdin)
+		if iip, err := flowd.ParseFrame(stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR getting IIP from STDIN:", err, "- Exiting.")
+			os.Exit(1)
+		} else {
+			if iip.BodyType != "IIP" {
+				fmt.Fprintf(os.Stderr, "ERROR: data type of IIP is not 'IIP' but '%s' - Exiting.\n", iip.BodyType)
+				os.Exit(1)
+			} else if iip.Port != "CONF" {
+				fmt.Fprintf(os.Stderr, "ERROR: port of IIP is not 'CONF' but '%s' - Exiting.\n", iip.Port)
+				os.Exit(1)
+			}
+			os.Args = []string{"", string(*iip.Body)}
+		}
+		stdin = nil
 	}
 
 	// list of established TCP connections
 	conns := make(map[int]*net.TCPConn)
 
-	fmt.Fprintln(os.Stderr, "resolving address")
+	fmt.Fprintln(os.Stderr, "resolve address")
 	serverAddr, err := net.ResolveTCPAddr("tcp", os.Args[1])
 	CheckError(err)
 
@@ -34,9 +59,10 @@ func main() {
 	// handle responses from STDIN = from FBP network to TCP sockets
 	go func() {
 		//TODO what if there is no data waiting on STDIN? or if it is closed? would probably get EOF on Read, but check.
-		stdin := bufio.NewReader(os.Stdin)
+		// handle regular packets
 		for {
 			//TODO what if no complete frame has been received? -> try again later instead of closing.
+			stdin := bufio.NewReader(os.Stdin)
 			if frame, err := flowd.ParseFrame(stdin); err != nil {
 				if err == io.EOF {
 					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
