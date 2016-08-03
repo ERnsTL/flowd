@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -389,30 +390,40 @@ func main() {
 				fmt.Println("DEBUG: arguments for launch:", launchPath, args)
 			}
 			cmd := exec.Command(launchPath, args...)
-			/*
-				cout, err := cmd.StdoutPipe()
-				if err != nil {
-					fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
-				}
-				cin, err := cmd.StdinPipe()
-				if err != nil {
-					fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
-				}
-				cmd.Stderr = os.Stderr
-			*/
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+			lout, err := cmd.StdoutPipe()
+			if err != nil {
+				fmt.Println("ERROR: could not allocate pipe from launch stdout:", err)
+			}
+			lerr, err := cmd.StderrPipe()
+			if err != nil {
+				fmt.Println("ERROR: could not allocate pipe to launch stdin:", err)
+			}
 			if err := cmd.Start(); err != nil {
 				fmt.Println("ERROR:", err)
 				exitChan <- name
 			}
-			//TODO cin, cout copy line-by-line
+
+			// display launch stdout
+			go func() {
+				scanner := bufio.NewScanner(lout)
+				for scanner.Scan() {
+					fmt.Printf("%s.launch: %s\n", proc.Name, scanner.Text())
+				}
+			}()
+			// display launch stderr = output from its component
+			go func() {
+				scanner := bufio.NewScanner(lerr)
+				for scanner.Scan() {
+					fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
+				}
+			}()
+
 			//TODO detect subprocess exit proper -> send info upstream
 			cmd.Wait()
 			exitChan <- name
 
-			//defer cout.Close()
-			//defer cin.Close()
+			//defer lout.Close()
+			//defer lerr.Close()
 		}(proc.Name)
 	}
 
