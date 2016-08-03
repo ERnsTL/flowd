@@ -183,9 +183,9 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		bytesRead, err := conn.Read(buf)
 		if err != nil || bytesRead < 0 {
 			// EOF or other error
-			fmt.Fprintf(os.Stderr, "%d: ERROR: reading from connection %v: %s - closing.\n", id, conn, err)
+			fmt.Fprintf(os.Stderr, "%d: ERROR reading from %v: %s - closing.\n", id, conn.RemoteAddr(), err)
 			if err := conn.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "%d: ERROR: closing connection: %s", id, err)
+				fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s", id, err)
 				//TODO exit whole program? - something is wrong in that situation
 			}
 			// remove conn from list of connections
