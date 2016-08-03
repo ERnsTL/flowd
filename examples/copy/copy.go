@@ -18,7 +18,7 @@ func main() {
 			os.Exit(1)
 		*/
 		// get configuration from IIP = initial information packet/frame
-		fmt.Fprintln(os.Stderr, "copy: wait for IIP")
+		fmt.Fprintln(os.Stderr, "wait for IIP")
 		if iip, err := flowd.GetIIP("CONF"); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 			os.Exit(1)
@@ -30,7 +30,7 @@ func main() {
 			}
 		}
 	}
-	fmt.Fprintln(os.Stderr, "copy: got output ports ", outPorts)
+	fmt.Fprintln(os.Stderr, "got output ports", outPorts)
 
 	var frame *flowd.Frame //TDOO why is this pointer to Frame?
 	var err error
