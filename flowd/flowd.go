@@ -382,8 +382,6 @@ func main() {
 			}
 			// component pathname
 			args = append(args, procs[name].Path)
-			// component arguments
-			args = append(args, procs[name].Arguments...)
 
 			// TODO display launch stdout
 			// start launch subprocess
@@ -443,7 +441,6 @@ const (
 
 type Process struct {
 	Path         string
-	Arguments    []string
 	Placement    Placement
 	Architecture string //x86, x86_64, armv7l, armv8
 	Name         string
@@ -463,13 +460,8 @@ type Port struct {
 }
 
 func NewProcess(proc *fbp.Process) *Process {
-	// take over arguments in FBP metadata under key "args"
-	args := []string{}
-	if _, hasArgs := proc.Metadata["args"]; hasArgs {
-		args = strings.Split(proc.Metadata["args"], " ")
-	}
 	// return new Process struct
-	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}, Arguments: args}
+	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}}
 }
 
 func GeneratePortName(endpoint *fbp.Endpoint) string {
