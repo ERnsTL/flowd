@@ -16,7 +16,7 @@ type Frame struct {
 	Port        string
 	ContentType string
 	Extensions  map[string]string
-	Body        *[]byte
+	Body        []byte
 }
 
 // NOTE: require bufio.Reader not io.Reader, because textproto.Reader requires one. Making a local one would swallow any following frames into it.
@@ -70,7 +70,7 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 			return nil, errors.New(fmt.Sprintf("reading full frame body short read %d bytes of %d expected: %s", n, lenInt, err.Error()))
 		}
 	}
-	f.Body = &buf
+	f.Body = buf
 	return f, nil
 }
 
@@ -89,7 +89,7 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := printHeaderLine(tpw, "content-type", f.ContentType); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
-	if err := printHeaderLine(tpw, "content-length", strconv.Itoa(len(*f.Body))); err != nil {
+	if err := printHeaderLine(tpw, "content-length", strconv.Itoa(len(f.Body))); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
 	if f.Extensions != nil {
@@ -104,7 +104,7 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := finalizeHeader(tpw); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
-	if _, err := bufw.Write(*f.Body); err != nil { //TODO useless conversion
+	if _, err := bufw.Write(f.Body); err != nil {
 		return errors.New("marshal: writing body: " + err.Error())
 	}
 	if err := bufw.Flush(); err != nil {

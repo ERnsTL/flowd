@@ -343,14 +343,13 @@ func main() {
 		// first deliver initial information packets/frames
 		if len(iips) > 0 {
 			for port, data := range iips {
-				dataBytes := []byte(data) //FIXME another useless conversion because of frame.Body being a pointer of []byte
 				iip := &flowd.Frame{
 					Type:        "data",
 					BodyType:    "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
 					Port:        port,
 					ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed //TODO really?
 					Extensions:  nil,
-					Body:        &dataBytes,
+					Body:        []byte(data),
 				}
 				if !quiet {
 					fmt.Println("in xfer 1 IIP to", port)
@@ -401,7 +400,7 @@ func main() {
 					return
 				} else { // frame complete now
 					if debug {
-						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
+						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
 					}
 
 					// write out to network
@@ -522,7 +521,7 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 			}
 		} else { // parsed fine
 			if debug {
-				fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(*fr.Body))
+				fmt.Println("received frame type", fr.Type, "data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(fr.Body)) //TODO difference between this and string(fr.Body) ?
 			}
 
 			// check frame Port header field if it matches the name of this input endpoint

@@ -40,7 +40,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "ERROR: port of IIP is not 'CONF' but '%s' - Exiting.\n", iip.Port)
 				os.Exit(1)
 			}
-			os.Args = []string{"", string(*iip.Body)}
+			os.Args = []string{"", (string)(iip.Body)}
 		}
 		stdin = nil
 	}
@@ -75,8 +75,6 @@ func main() {
 				os.Exit(0) // TODO exit with non-zero code if error parsing frame
 				return
 			} else { // frame complete now
-				//TODO maybe useless temp variable
-				bodyLen := len(*frame.Body)
 				//TODO if debug -- add flag
 				//fmt.Fprintln(os.Stderr, "tcp-server: frame in with", bodyLen, "bytes body")
 				/*
@@ -111,14 +109,14 @@ func main() {
 						// check if there is a TCP connection known for that TCP-ID
 						if conn, exists := conns[connId]; exists {
 							// found connection, write frame body out
-							if bytesWritten, err := conn.Write(*frame.Body); err != nil {
+							if bytesWritten, err := conn.Write(frame.Body); err != nil {
 								//TODO check for EOF
 								fmt.Fprintf(os.Stderr, "net out: ERROR writing to TCP connection with %s: %s - closing.\n", conn.RemoteAddr(), err)
 								//TODO gracefully shut down / close all connections
 								os.Exit(1)
-							} else if bytesWritten < bodyLen {
+							} else if bytesWritten < len(frame.Body) {
 								// short write
-								fmt.Fprintf(os.Stderr, "net out: ERROR: short send to TCP connection with %s, only %d of %d bytes written - closing.\n", conn.RemoteAddr(), bytesWritten, bodyLen)
+								fmt.Fprintf(os.Stderr, "net out: ERROR: short send to TCP connection with %s, only %d of %d bytes written - closing.\n", conn.RemoteAddr(), bytesWritten, len(frame.Body))
 								//TODO gracefully shut down / close all connections
 								os.Exit(1)
 							} else {
@@ -210,10 +208,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s\n", id, bytesRead, conn.RemoteAddr())
 
 		// frame TCP packet into flowd frame
-		//TODO useless copying
-		var body []byte
-		body = buf[:bytesRead]
-		outframe.Body = &body
+		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
 		outframe.Marshal(os.Stdout)

@@ -37,7 +37,7 @@ func main() {
 
 		// parse JSON body
 		var records []map[string]interface{}
-		if err := json.Unmarshal(*inframe.Body, &records); err != nil {
+		if err := json.Unmarshal(inframe.Body, &records); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
@@ -57,7 +57,7 @@ func main() {
 			return
 		} else {
 			// frame result
-			outframe.Body = &body
+			outframe.Body = body
 			outframe.Extensions = inframe.Extensions
 
 			// send it

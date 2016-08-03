@@ -62,7 +62,7 @@ func main() {
 			BodyType:    bodyType,
 			Port:        port,
 			ContentType: contentType,
-			Body:        &bodyBytes,
+			Body:        bodyBytes,
 			Extensions:  map[string]string{},
 		}
 		if debug {
