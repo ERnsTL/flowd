@@ -1,6 +1,7 @@
 # simple example network
 INPORT=filter.IN:NETIN
-filter(bin/filter-records-framed) OUT -> IN copy(bin/copy:args=OUT1)
+filter(bin/filter-records-framed) OUT -> IN copy(bin/copy)
+'OUT1' -> CONF copy
 OUTPORT=copy.OUT1:NETOUT
 
 # testing the .fbp parser
