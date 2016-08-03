@@ -28,21 +28,12 @@ func main() {
 
 		// get configuration from IIP = initial information packet/frame
 		fmt.Fprintln(os.Stderr, "wait for IIP")
-		stdin := bufio.NewReader(os.Stdin)
-		if iip, err := flowd.ParseFrame(stdin); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR getting IIP from STDIN:", err, "- Exiting.")
+		if iip, err := flowd.GetIIP("CONF"); err != nil {
+			fmt.Println("ERROR getting IIP:", err, "- Exiting.")
 			os.Exit(1)
 		} else {
-			if iip.BodyType != "IIP" {
-				fmt.Fprintf(os.Stderr, "ERROR: data type of IIP is not 'IIP' but '%s' - Exiting.\n", iip.BodyType)
-				os.Exit(1)
-			} else if iip.Port != "CONF" {
-				fmt.Fprintf(os.Stderr, "ERROR: port of IIP is not 'CONF' but '%s' - Exiting.\n", iip.Port)
-				os.Exit(1)
-			}
-			os.Args = []string{"", (string)(iip.Body)}
+			os.Args = []string{"", iip}
 		}
-		stdin = nil
 	}
 
 	// list of established TCP connections
