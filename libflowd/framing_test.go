@@ -53,7 +53,7 @@ func TestFrameParsesAndMarshals(t *testing.T) {
 	assert.Equal(t, "TextMessage", frame.BodyType, "parsed wrong body type")
 	assert.Equal(t, "options", frame.Port, "parsed wrong port")
 	assert.Equal(t, "text/plain", frame.ContentType, "parsed wrong content type")
-	assert.Equal(t, "TEST", (string)(*frame.Body), "parsed wrong body")
+	assert.Equal(t, "TEST", (string)(frame.Body), "parsed wrong body")
 
 	// marshal
 	var buf2 bytes.Buffer

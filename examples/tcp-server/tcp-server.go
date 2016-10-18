@@ -13,6 +13,9 @@ import (
 )
 
 func main() {
+	// open connection to network
+	stdin := bufio.NewReader(os.Stdin)
+	// get parameters
 	if len(os.Args) < 1+1 {
 		// require configuration on cmdline
 		/*
@@ -28,7 +31,7 @@ func main() {
 
 		// get configuration from IIP = initial information packet/frame
 		fmt.Fprintln(os.Stderr, "wait for IIP")
-		if iip, err := flowd.GetIIP("CONF"); err != nil {
+		if iip, err := flowd.GetIIP("CONF", stdin); err != nil {
 			fmt.Println("ERROR getting IIP:", err, "- Exiting.")
 			os.Exit(1)
 		} else {
@@ -48,12 +51,12 @@ func main() {
 	CheckError(err)
 
 	// handle responses from STDIN = from FBP network to TCP sockets
-	go func() {
+	go func(stdin *bufio.Reader) {
 		//TODO what if there is no data waiting on STDIN? or if it is closed? would probably get EOF on Read, but check.
 		// handle regular packets
 		for {
 			//TODO what if no complete frame has been received? -> try again later instead of closing.
-			stdin := bufio.NewReader(os.Stdin)
+			//stdin := bufio.NewReader(os.Stdin)
 			if frame, err := flowd.ParseFrame(stdin); err != nil {
 				if err == io.EOF {
 					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
@@ -130,7 +133,7 @@ func main() {
 				}
 			}
 		}
-	}()
+	}(stdin)
 
 	// handle close notifications -> delete connection from map
 	var closeChan chan int

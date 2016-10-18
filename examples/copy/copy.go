@@ -10,6 +10,8 @@ import (
 )
 
 func main() {
+	// open connection to network
+	bufr := bufio.NewReader(os.Stdin)
 	// read list of output ports from program arguments
 	outPorts := os.Args[1:]
 	if len(outPorts) == 0 {
@@ -19,7 +21,7 @@ func main() {
 		*/
 		// get configuration from IIP = initial information packet/frame
 		fmt.Fprintln(os.Stderr, "wait for IIP")
-		if iip, err := flowd.GetIIP("CONF"); err != nil {
+		if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 			os.Exit(1)
 		} else {
@@ -32,9 +34,8 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr, "got output ports", outPorts)
 
-	var frame *flowd.Frame //TDOO why is this pointer to Frame?
+	var frame *flowd.Frame //TODO why is this pointer to Frame?
 	var err error
-	bufr := bufio.NewReader(os.Stdin)
 
 	for {
 		// read frame
@@ -46,7 +47,6 @@ func main() {
 		// send it to given output ports
 		for _, outPort := range outPorts {
 			frame.Port = outPort
-			//TODO optimize, marshal frame only once
 			if err := frame.Marshal(os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 			}

@@ -3,13 +3,12 @@ package flowd
 import (
 	"bufio"
 	"fmt"
-	"os"
 )
 
 // get configuration from IIP = initial information packet/frame
-//TODO what if several IIPs are expected, one each on multiple ports?
-func GetIIP(port string) (string, error) {
-	stdin := bufio.NewReader(os.Stdin) //TODO might this suck STDIN dry = read more than what is required for 1 frame, meaning lose any possibly following frames?
+// NOTE: reads a single/next IIP -> if multiple are expected on different ports, call multiple times
+// NOTE: reason for handing over reference to existing STDIN reader is because local readers suck the buffer dry -> if there are multiple frames waiting, these following would be discarded
+func GetIIP(port string, stdin *bufio.Reader) (string, error) {
 	if iip, err := ParseFrame(stdin); err != nil {
 		return "", fmt.Errorf("ERROR getting IIP from STDIN: %s", err)
 	} else {
