@@ -38,6 +38,7 @@ func main() {
 		}
 
 		// apply modification
+		//TODO make this configurable using "debug" parameter in IIP
 		fmt.Fprintln(os.Stderr, "got frame, modifying...")
 		modFunc(frame)
 		fmt.Fprintln(os.Stderr, "modified. forwarding now.")
