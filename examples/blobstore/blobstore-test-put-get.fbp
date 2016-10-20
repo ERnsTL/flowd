@@ -1,0 +1,31 @@
+# example network testing storage and retrieval of blob values
+# run using:
+##!/bin/bash
+#echo -n directories...
+#mkdir -p /tmp/blob-data/
+#mkdir -p /tmp/blob-tmp/
+#echo OK
+#network="src/github.com/ERnsTL/flowd/examples/blobstore/blobstore-test-put-get.fbp"
+#bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT $network
+
+# define and configure players
+'Blob-Name' -> CONF SetBlobName(bin/frame-modify)
+'/tmp/blob-data,/tmp/blob-tmp,careful' -> CONF Saver(bin/blobstore-put)
+'/tmp/blob-data,careful' -> CONF Retriever(bin/blobstore-get)
+
+# send some blob downstream to be saved
+'MYBLOB' -> IN SetBlobName OUT -> IN Saver
+#SetBlobName OUT -> IN Saver
+
+# ...and be retrieved some short time later
+'5s' -> CONF Sleeper(bin/sleep)
+'sensor1.temperature.value' -> IN Sleeper OUT -> IN Retriever
+
+# ...and export what was retrieved as NETOUT
+# attach for example unix2stdout tool to that port
+OUTPORT=Retriever.OUT:NETOUT
+
+# for configurable input instead of from IIP:
+#INPORT=SetBlobName.IN:NETIN
+# send input for example using:
+# echo "MYBLOB" | bin/stdin2frame -bodytype FilterMessage -content-type text/plain | bin/stdin2unix @flowd/network1/in
