@@ -10,6 +10,11 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+type ChatClient struct {
+	state    string
+	username string
+}
+
 func main() {
 	/*
 		// read list of output ports from program arguments
@@ -33,25 +38,61 @@ func main() {
 
 	var frame *flowd.Frame //TODO why is this pointer of Frame?
 	var err error
+	var id string // connection ID
 	bufr := bufio.NewReader(os.Stdin)
 
-	var state string
-	var username string
+	clients := map[string]*ChatClient{} // key = connection ID
+
+	// prepare commonly-used variables
+	closeCommand := &flowd.Frame{
+		Port:     "OUT",
+		Type:     "data",
+		BodyType: "TCPCloseConnection",
+		Extensions: map[string]string{
+			"Tcp-Id": "",
+		},
+	}
 
 	for {
 		// read frame
 		frame, err = flowd.ParseFrame(bufr)
+		// get connection ID
+		id = frame.Extensions["Tcp-Id"]
+
+		// check connection ID - known?
+		// NOTE: not necessary, because we should receive a n
+		/*
+			if id, found = frame.Extensions["Tcp-Id"]; !found {
+
+			}
+		*/
+		// handle according to BodyType
+		if frame.BodyType == "OpenNotification" {
+			fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", id)
+			// make new entry
+			clients[id] = &ChatClient{}
+			// pass - dont, in order to send welcome text
+			//continue
+		} else if frame.BodyType == "CloseNotification" {
+			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", id)
+			// remove entry
+			delete(clients, id)
+			// pass
+			continue
+		}
+
+		// extract entered line
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		inLine := strings.TrimSpace(string(frame.Body))
 
-		switch state {
+		switch clients[id].state {
 		case "", "login_user":
 			if len(inLine) > 0 {
 				// save username, ask for password
-				username = inLine
-				state = "login_pass"
+				clients[id].username = inLine
+				clients[id].state = "login_pass"
 				Respond(frame, "password: ")
 			} else {
 				frame.Body = []byte("username: ")
@@ -59,12 +100,14 @@ func main() {
 
 		case "login_pass":
 			if len(inLine) > 0 {
-				if username == "ernst" && inLine == "password" {
-					state = "cmdline"
+				if clients[id].username == "ernst" && inLine == "password" {
+					clients[id].state = "cmdline"
 					Respond(frame, fmt.Sprintf("ok, you are in.\n\n> "))
+					// write to log
+					fmt.Fprintf(os.Stderr, "%s: user %s logged in.\n", id, "ernst")
 				} else {
 					time.Sleep(2 * time.Second)
-					state = "login_user"
+					clients[id].state = "login_user"
 					Respond(frame, fmt.Sprintf("wrong.\n\nusername: "))
 				}
 			} else {
@@ -74,9 +117,11 @@ func main() {
 		case "cmdline":
 			switch inLine {
 			case "exit", "quit", "logout":
-				state = "login_user"
+				// send close request
+				fmt.Fprintf(os.Stderr, "%s: sending close command.\n", id)
+				frame = closeCommand
+				frame.Extensions["Tcp-Id"] = id
 				Respond(frame, fmt.Sprintf("kthxbye!\n"))
-				//TODO send close request as response
 			case "":
 				Respond(frame, "> ")
 			default:

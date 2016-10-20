@@ -50,6 +50,27 @@ func main() {
 	listener, err := net.ListenTCP("tcp", serverAddr)
 	CheckError(err)
 
+	// pre-declare often-used IPs/frames
+	closeNotification := flowd.Frame{
+		Port:     "OUT",
+		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
+		BodyType: "CloseNotification",
+		Extensions: map[string]string{
+			"Tcp-Id": "",
+			//"Tcp-Remote-Address": "",
+		},
+	}
+	//TODO is this really necessary? components could also simply check in local state (which they have to keep anyway) if connection is known or a new one
+	openNotification := flowd.Frame{
+		Port:     "OUT",
+		Type:     "data",
+		BodyType: "OpenNotification",
+		Extensions: map[string]string{
+			"Tcp-Id":             "",
+			"Tcp-Remote-Address": "",
+		},
+	}
+
 	// handle responses from STDIN = from FBP network to TCP sockets
 	go func(stdin *bufio.Reader) {
 		//TODO what if there is no data waiting on STDIN? or if it is closed? would probably get EOF on Read, but check.
@@ -77,12 +98,11 @@ func main() {
 						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
 					}
 				*/
+
 				//TODO check for non-data/control frames
 
-				//TODO how are connections closed regularly, ie. if client closes it after all is said and done?
-				//TODO way for FBP network to close connection after that frame.
+				///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
 
-				// write out to TCP network
 				//TODO error feedback for unknown/unconnected/closed TCP connections
 				// check if frame has any extension headers at all
 				if frame.Extensions == nil {
@@ -101,8 +121,8 @@ func main() {
 						os.Exit(1)
 					} else {
 						// check if there is a TCP connection known for that TCP-ID
-						if conn, exists := conns[connId]; exists {
-							// found connection, write frame body out
+						if conn, exists := conns[connId]; exists { // found connection
+							// write frame body out to TCP connection
 							if bytesWritten, err := conn.Write(frame.Body); err != nil {
 								//TODO check for EOF
 								fmt.Fprintf(os.Stderr, "net out: ERROR writing to TCP connection with %s: %s - closing.\n", conn.RemoteAddr(), err)
@@ -117,6 +137,13 @@ func main() {
 								// success
 								//TODO if !quiet - add that flag
 								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connId, bytesWritten, conn.RemoteAddr())
+							}
+
+							if frame.BodyType == "TCPCloseConnection" {
+								fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connId)
+								// close command received, close connection
+								conn.Close()
+								// NOTE: will be cleaned up on next conn.Read() in handleConnection()
 							}
 						} else {
 							// TCP connection not found - could have been closed in meantime or wrong TCP-ID in frame header
@@ -143,6 +170,10 @@ func main() {
 			id = <-closeChan
 			fmt.Fprintln(os.Stderr, "closer: deleting connection", id)
 			delete(conns, id)
+			// send close notification downstream
+			//TODO with reason (error or closed from other side/this side)
+			closeNotification.Extensions["Tcp-Id"] = strconv.Itoa(id)
+			closeNotification.Marshal(os.Stdout)
 		}
 	}()
 
@@ -156,6 +187,11 @@ func main() {
 		conn.SetKeepAlive(true)
 		conn.SetKeepAlivePeriod(5 * time.Second)
 		conns[id] = conn
+		// send new-connection notification downstream
+		openNotification.Extensions["Tcp-Id"] = strconv.Itoa(id)
+		openNotification.Extensions["Tcp-Remote-Address"] = fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr)) // copied from handleConnection()
+		openNotification.Marshal(os.Stdout)
+		// handle connection
 		go handleConnection(conn, id, closeChan)
 		//TODO overflow possibilities?
 		id += 1
@@ -186,6 +222,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		bytesRead, err := conn.Read(buf)
 		if err != nil || bytesRead < 0 {
 			// EOF or other error
+			//TODO check for EOF specifically by type assertion
 			fmt.Fprintf(os.Stderr, "%d: ERROR reading from %v: %s - closing.\n", id, conn.RemoteAddr(), err)
 			if err := conn.Close(); err != nil {
 				fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s", id, err)
