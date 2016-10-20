@@ -71,8 +71,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", id)
 			// make new entry
 			clients[id] = &ChatClient{}
-			// pass - dont, in order to send welcome text
-			//continue
+			// continue and send welcome message
 		} else if frame.BodyType == "CloseNotification" {
 			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", id)
 			// remove entry

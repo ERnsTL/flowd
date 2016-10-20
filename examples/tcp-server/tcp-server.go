@@ -163,7 +163,7 @@ func main() {
 	}(stdin)
 
 	// handle close notifications -> delete connection from map
-	var closeChan chan int
+	closeChan := make(chan int)
 	go func() {
 		var id int
 		for {
@@ -225,7 +225,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 			//TODO check for EOF specifically by type assertion
 			fmt.Fprintf(os.Stderr, "%d: ERROR reading from %v: %s - closing.\n", id, conn.RemoteAddr(), err)
 			if err := conn.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s", id, err)
+				fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s\n", id, err)
 				//TODO exit whole program? - something is wrong in that situation
 			}
 			// remove conn from list of connections
