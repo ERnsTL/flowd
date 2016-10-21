@@ -221,13 +221,26 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 	for {
 		bytesRead, err := conn.Read(buf)
 		if err != nil || bytesRead < 0 {
-			// EOF or other error
-			//TODO check for EOF specifically by type assertion
-			fmt.Fprintf(os.Stderr, "%d: ERROR reading from %v: %s - closing.\n", id, conn.RemoteAddr(), err)
-			if err := conn.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s\n", id, err)
-				//TODO exit whole program? - something is wrong in that situation
+			// check more specifically
+			if err == io.EOF {
+				// EOF = closed by peer or already closed @ STDIN handler goroutine or network error
+				fmt.Fprintf(os.Stderr, "%d: EOF on connection, closing.\n", id)
+			} else if neterr, isneterr := err.(net.Error); isneterr && neterr.Timeout() {
+				// network timeout
+				fmt.Fprintf(os.Stderr, "%d: ERROR reading from %v: timeout: %s, closing.\n", id, conn.RemoteAddr(), neterr)
+			} else {
+				// other error
+				fmt.Fprintf(os.Stderr, "%d: ERROR: %s - closing.\n", id, err)
 			}
+			// close connection
+			/*
+				NOTE: gives error if already closed by close command @ STDIN handler goroutine
+				if err := conn.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "%d: ERROR closing connection: %s\n", id, err)
+					//TODO exit whole program? - something is wrong in that situation
+				}
+			*/
+			_ = conn.Close()
 			// remove conn from list of connections
 			closeChan <- id
 			// exit
