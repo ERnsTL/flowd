@@ -205,13 +205,13 @@ In general, ```flowd``` puts focus on:
 
 5. *Can spread across multiple machines.* Component ports are forwarded by the ```launch``` program to network connections resp. sockets, not in-memory pipes (though that is of course possible). This enables the creation of distributed systems using the built-in included functionality. So, the FBP network concept can spread to and harness the computing power of multiple machines, all managed from a central ```flowd``` process.
 
-Downsides of this approach:
+Downsides of the approach taken by ```flowd```:
 
 1. *More copying.* This is a neccessary consequence since different programming languages are involved, which have different programming models, manage memory differently, manage objects and functions and methods totally differently. Therefore they need and require to be the masters of their own address space organization and each component runs as an own process. In order to communicate, data copying across these process and address space borders is neccessary. This is done via the reliable central entity in the operating system, the OS *kernel*. Therefore, system calls, CPU ring switches and buffer copying are the required consequence to cross these process borders.
 
   Future note: It may be possible to create a production-mode version, where the inter-process communication is changed from network connections to in-process communication, which would reduce the amount of data copying.
 
-If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow). Also check out the FBP runtimes and systems by J. Paul Morrison, NoFlo and their compatible runtimes.
+If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow). Also check out the FBP runtimes and systems by J. Paul Morrison and *NoFlo* and their compatible runtimes.
 
 ## Features
 
