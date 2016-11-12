@@ -199,7 +199,7 @@ In general, ```flowd``` puts focus on:
 
 2. *Re-use existing programs.* Every program, even a Unix pipe-based processing chain, which can output results either to a file or STDOUT, can be wrapped and re-used by ```flowd``` in an FBP processing network. Therefore, ```flowd``` can be used to extend the Unix pipe processing paradigm.
 
-3. *Easy to write components.* Open STDIN, read lines until you hit an empty line, parse the header fields, read the frame/IP body accordingly. Do some processing, write out a few lines of text = header lines, write out the body to STDOUT. If the component has anything to report, write it to STDOUT. No library to import, no complex data formats, no APIs.
+3. *Easy to write components.* Open STDIN, read lines until you hit an empty line, parse the header fields, read the frame/IP body accordingly. Do some processing, write out a few lines of text = header lines, write out the body to STDOUT. If the component has anything to report, write it to STDERR. No library to import, no complex data formats, no APIs.
 
 4. *Spreads across multiple cores.* The FBP networks of ```flowd``` - like those of other FBP runtimes and systems - intrinsically spread out to multiple CPUs resp. CPU cores. In the case of other systems it is because they are different threads, in ```flowd``` because they are seperate processes. This enables the saturation of all CPU cores and parallel processing to ensue in an easy way - simply by constructing a network of components, which all just read and write to/from STDIN and STDOUT.
 
