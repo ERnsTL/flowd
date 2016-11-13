@@ -12,7 +12,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const bufSize int = 65535
+const bufSize = 65535
 
 type OperatingMode int
 
@@ -239,7 +239,7 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 				fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
 			}
 			// set correct port
-			frame.Port = "out"
+			frame.Port = "OUT"
 			// send into FBP network
 			if err := frame.Marshal(os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
