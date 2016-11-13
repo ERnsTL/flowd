@@ -1,5 +1,6 @@
 # example usage of cmd component: SSH client connection (requires pubkey encryption set up)
 # start using:
+# bin/unix2stdout @flowd/print/in
 # bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-ssh-client.fbp
 
 '-debug -mode=each /usr/bin/ssh user@server cat -' -> CONF SSHClient(bin/cmd)
