@@ -12,6 +12,8 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+const bufSize int = 65535
+
 type OperatingMode int
 
 const (
@@ -52,7 +54,7 @@ func main() {
 	bufr := bufio.NewReader(os.Stdin)
 	// flag variables
 	var operatingMode OperatingMode
-	var inframing, outframing bool
+	var framing bool
 	var retry bool
 	var cmdargs []string
 	var debug, quiet bool
@@ -65,8 +67,7 @@ func main() {
 		// parse IIP
 		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
 		flags.Var(&operatingMode, "mode", "operating mode: one (command instance handling all IPs) or each (IP handled by new instance)")
-		flags.BoolVar(&inframing, "inframing", true, "true = send frame to command STDIN, false = send frame body to command STDIN")
-		flags.BoolVar(&outframing, "outframing", false, "perform frame encoding on command output, false means already framed")
+		flags.BoolVar(&framing, "framing", true, "true = frame mode, false = send frame body to command STDIN, frame the data from command STDOUT")
 		flags.BoolVar(&retry, "retry", false, "retry/restart command on non-zero return code")
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
@@ -74,7 +75,7 @@ func main() {
 			os.Exit(2)
 		}
 		if flags.NArg() == 0 {
-			fmt.Println("ERROR: missing command to run")
+			fmt.Fprintln(os.Stderr, "ERROR: missing command to run")
 			printUsage()
 			flags.PrintDefaults()
 			os.Exit(2)
@@ -89,7 +90,6 @@ func main() {
 	var cin io.WriteCloser
 	var cout io.ReadCloser
 
-	//TODO implement outframing ... couple inframing with outframing (most common case) -> one one flag "cmdframing"
 	//TODO implement timeout on subprocess
 	/*
 		// start
@@ -111,7 +111,8 @@ func main() {
 			fmt.Println("done")
 		}
 	*/
-	//TODO implement retry/restart
+	//TODO implement retry/restart in one mode
+	//TODO implement retry/restart in each mode
 
 	// main work loops
 	switch operatingMode {
@@ -125,10 +126,10 @@ func main() {
 		go handleCommandOutput(debug, cout)
 
 		// handle subprocess input
-		if inframing == true {
+		if framing == true {
 			// setup direct copy without processing (since already framed)
 			if _, err := io.Copy(cin, bufr); err != nil {
-				fmt.Println("ERROR: receiving from FBP network:", err, "Closing.")
+				fmt.Fprintln(os.Stderr, "ERROR: receiving from FBP network:", err, "Closing.")
 				os.Stdin.Close()
 				return
 			}
@@ -146,6 +147,8 @@ func main() {
 			frame, err = flowd.ParseFrame(bufr)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
+			} else if debug {
+				fmt.Fprintln(os.Stderr, "received frame:", string(frame.Body))
 			}
 
 			// handle each frame with a new instance
@@ -154,10 +157,14 @@ func main() {
 				cmd, cin, cout = startCommand(cmdargs)
 
 				// handle subprocess output
-				go handleCommandOutput(debug, cout)
+				if framing {
+					go handleCommandOutput(debug, cout)
+				} else {
+					go handleCommandOutputRaw(debug, cout)
+				}
 
 				// forward frame or frame body to subprocess
-				if inframing {
+				if framing {
 					// frame
 					if err := frame.Marshal(cin); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: marshaling frame to command STDIN:", err, "- Exiting.")
@@ -167,6 +174,13 @@ func main() {
 					// frame body
 					if _, err := cin.Write(frame.Body); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: writing frame body to command STDIN:", err, "- Exiting.")
+						os.Exit(3)
+					} else if debug {
+						fmt.Fprintln(os.Stderr, "sent frame body to subcommand STDIN:", string(frame.Body))
+					}
+					// done sending = close command STDIN
+					if err := cin.Close(); err != nil {
+						fmt.Fprintln(os.Stderr, "ERROR: could not close command STDIN after writing frame:", err, "- Exiting.")
 						os.Exit(3)
 					}
 				}
@@ -214,15 +228,56 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 	for {
 		if frame, err := flowd.ParseFrame(bufr); err != nil {
 			if err == io.EOF {
-				fmt.Println("EOF from command stdout. Exiting.")
+				fmt.Fprintln(os.Stderr, "EOF from command stdout. Exiting.")
 			} else {
-				fmt.Println("ERROR parsing frame from command stdout:", err, "- Exiting.")
+				fmt.Fprintln(os.Stderr, "ERROR parsing frame from command stdout:", err, "- Exiting.")
 			}
 			cout.Close()
 			return
 		} else { // frame complete now
-			if debug {
-				fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+			if debug == true {
+				fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+			}
+			// set correct port
+			frame.Port = "out"
+			// send into FBP network
+			if err := frame.Marshal(os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+				os.Stdout.Close()
+				return
+			}
+		}
+	}
+}
+
+func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
+	// prepare readers and variables
+	bufr := bufio.NewReader(cout)
+	buf := make([]byte, bufSize)
+	frame := &flowd.Frame{
+		Port:     "OUT",
+		Type:     "data",
+		BodyType: "Data",
+	}
+	// read loop
+	for {
+		if nbytes, err := bufr.Read(buf); err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(os.Stderr, "WARNING: EOF from command:", err, "- Closing.")
+				cout.Close()
+				return
+			} else {
+				fmt.Fprintln(os.Stderr, "ERROR: reading from command STDOUT:", err, "- Closing.")
+				cout.Close()
+				return
+			}
+		} else {
+			// frame it and send into FBP network
+			frame.Body = buf[0:nbytes]
+			if err := frame.Marshal(os.Stdout); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+				os.Stdout.Close()
+				return
 			}
 		}
 	}
