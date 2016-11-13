@@ -12,7 +12,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const bufSize = 65535
+const bufSize = 2 ^ 16
 
 type OperatingMode int
 

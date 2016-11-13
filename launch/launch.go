@@ -16,7 +16,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const bufSize = 65535
+const bufSize = 2 ^ 16
 
 // type for component connection endpoint definition
 type endpoint struct {
