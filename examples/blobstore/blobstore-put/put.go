@@ -6,11 +6,23 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
+
+/*
+TODO add locking on/off flag to options (if known just one blobstore-put and one blobstore-get active, then maybe not neccessary)
+TODO add locking so that one put does not interfere with another ongoing put:
+  lockfilename = /.[flowd-first 100 bytes-filename]-[if longer-target-filename-as-fnv1a-32-hash].lock
+	https://golang.org/pkg/hash/fnv/
+	https://stackoverflow.com/questions/19328957/golang-from-bytes-to-get-hexadecimal
+TODO use flock(5):
+	https://stackoverflow.com/questions/34710460/golang-flock-filelocking-throwing-panic-runtime-error-invalid-memory-address-o
+TODO add locking also to blockstore-get so that it gets fully-written value/blob/file
+*/
 
 func main() {
 	// parameters
@@ -55,7 +67,7 @@ func main() {
 				os.Exit(1)
 			}
 			if err := checkDirectoryCarefullyW(tmpdir); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: data directory unsuitable:", err)
+				fmt.Fprintln(os.Stderr, "ERROR: temporary directory unsuitable:", err)
 				os.Exit(1)
 			}
 		}
@@ -89,7 +101,7 @@ func main() {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
-		serial += 1
+		serial++
 
 		// check for header Blob-Name and get blobname
 		if blobname, found = inframe.Extensions["Blob-Name"]; !found {
@@ -112,6 +124,7 @@ func main() {
 		tmpfilename := fmt.Sprintf("%2d-%d-%d", time.Now().Day(), pid, serial)
 		tmpfilepath := filepath.Join(tmpdir, tmpfilename)
 		// write IP body to temporary file
+		//TODO race condition in there? (mitigation @ https://stackoverflow.com/questions/12518876/how-to-check-if-a-file-exists-in-go)
 		err = ioutil.WriteFile(tmpfilepath, inframe.Body, 0640)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not write to temporary blob file", tmpfilepath)
@@ -127,7 +140,7 @@ func main() {
 
 func checkDirectoryCarefullyW(dirpath string) error {
 	// check for path existence and it being a directory and having write permissions
-	testfilepath := filepath.Join(dirpath, "test")
+	testfilepath := filepath.Join(dirpath, "test"+strconv.Itoa(os.Getpid()))
 	if fileinfo, err := os.Stat(dirpath); err != nil || !fileinfo.IsDir() {
 		// report error
 		//TODO maybe report on ERROR outport?
