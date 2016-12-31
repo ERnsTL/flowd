@@ -236,7 +236,7 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 			return
 		} else { // frame complete now
 			if debug == true {
-				fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+				fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
 			}
 			// set correct port
 			frame.Port = "OUT"

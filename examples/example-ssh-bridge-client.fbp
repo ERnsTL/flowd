@@ -1,0 +1,16 @@
+# example usage of cmd component: FBP network bridge over SSH client connection (requires pubkey encryption set up)
+# first start example-ssh-bridge-server.fbp network (can also be done using SSH ;-), then start bridge client part using:
+# bin/flowd -quiet -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-ssh-bridge-client.fbp
+
+# framed network bridge via SSH to another part of the FBP network
+'-debug -mode=one /usr/bin/ssh user@server bin/stdin2unix2stdout @flowd/network1/in @flowd/bridge/in' -> CONF SSHClient(bin/cmd)
+# send one test data packet as "data source"
+'somedata' IN SSHClient
+# move output from other part of network to display component
+SSHClient OUT -> IN Display(bin/display)
+
+# could also forward out of network and process/display outside
+# OUTPORT=SSHClient.OUT:NETOUT
+# then start using:
+# bin/flowd -debug -launch bin/launch -out unixpacket://@flowd/print/in#NETOUT src/github.com/ERnsTL/flowd/examples/example-ssh-client.fbp
+# and display using bin/unix2stdout @flowd/print/in
