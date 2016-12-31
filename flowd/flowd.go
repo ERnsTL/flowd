@@ -381,6 +381,10 @@ func main() {
 				iipArg := fmt.Sprintf("%s:%s", iip.LocalName, iip.IIP)
 				args = append(args, "-iip", iipArg)
 			}
+			// forward debug flag to launch
+			if debug {
+				args = append(args, "-debug")
+			}
 			// component pathname
 			args = append(args, procs[name].Path)
 

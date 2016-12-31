@@ -95,7 +95,7 @@ func TestEndpointRejectsUncorrectEndpoints(t *testing.T) {
 	var err error
 	for _, estr := range nokendpoints {
 		err = e.Set(estr)
-		assert.Error(t, err, "endpoint malformed test entry %s", estr)
+		assert.Error(t, err, "endpoint malformed test entry ", estr)
 	}
 }
 
@@ -104,7 +104,7 @@ func TestEndpointAcceptsCorrectEndpoints(t *testing.T) {
 	var err error
 	for _, estr := range okendpoints {
 		err = e.Set(estr)
-		assert.NoError(t, err, "endpoint well-formed test entry %s", estr)
+		assert.NoError(t, err, "endpoint well-formed test entry ", estr)
 	}
 }
 

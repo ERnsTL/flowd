@@ -44,11 +44,11 @@ func main() {
 
 	fmt.Fprintln(os.Stderr, "resolve address")
 	serverAddr, err := net.ResolveTCPAddr("tcp", os.Args[1])
-	CheckError(err)
+	checkError(err)
 
 	fmt.Fprintln(os.Stderr, "open socket")
 	listener, err := net.ListenTCP("tcp", serverAddr)
-	CheckError(err)
+	checkError(err)
 
 	// pre-declare often-used IPs/frames
 	closeNotification := flowd.Frame{
@@ -111,17 +111,17 @@ func main() {
 					os.Exit(1)
 				}
 				// check if frame has TCP-ID in header
-				if connIdStr, exists := frame.Extensions["Tcp-Id"]; exists {
+				if connIDStr, exists := frame.Extensions["Tcp-Id"]; exists {
 					// check if TCP-ID header is integer number
-					if connId, err := strconv.Atoi(connIdStr); err != nil {
+					if connID, err := strconv.Atoi(connIDStr); err != nil {
 						// TCP-ID header not an integer number
 						//TODO notification back to FBP network of error
-						fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Tcp-Id header %s: %s - Exiting.\n", connIdStr, err)
+						fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Tcp-Id header %s: %s - Exiting.\n", connIDStr, err)
 						//TODO gracefully shut down / close all connections
 						os.Exit(1)
 					} else {
 						// check if there is a TCP connection known for that TCP-ID
-						if conn, exists := conns[connId]; exists { // found connection
+						if conn, exists := conns[connID]; exists { // found connection
 							// write frame body out to TCP connection
 							if bytesWritten, err := conn.Write(frame.Body); err != nil {
 								//TODO check for EOF
@@ -136,11 +136,11 @@ func main() {
 							} else {
 								// success
 								//TODO if !quiet - add that flag
-								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connId, bytesWritten, conn.RemoteAddr())
+								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connID, bytesWritten, conn.RemoteAddr())
 							}
 
 							if frame.BodyType == "TCPCloseConnection" {
-								fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connId)
+								fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connID)
 								// close command received, close connection
 								conn.Close()
 								// NOTE: will be cleaned up on next conn.Read() in handleConnection()
@@ -182,7 +182,7 @@ func main() {
 	var id int
 	for {
 		conn, err := listener.AcceptTCP()
-		CheckError(err)
+		checkError(err)
 		fmt.Fprintln(os.Stderr, "accepted connection from", conn.RemoteAddr())
 		conn.SetKeepAlive(true)
 		conn.SetKeepAlivePeriod(5 * time.Second)
@@ -194,11 +194,11 @@ func main() {
 		// handle connection
 		go handleConnection(conn, id, closeChan)
 		//TODO overflow possibilities?
-		id += 1
+		id++
 	}
 }
 
-func CheckError(err error) {
+func checkError(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
@@ -216,11 +216,16 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		Extensions:  map[string]string{"Tcp-Id": strconv.Itoa(id), "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:        nil,
 	}
+	//TODO neccessary to send Tcp-Remote-Address with every packet? Tcp-Remote-Address just on the OpenNotification, from then on just Tcp-Id is sufficient.
 
 	// process TCP packets
 	for {
 		bytesRead, err := conn.Read(buf)
-		if err != nil || bytesRead < 0 {
+		if err != nil || bytesRead <= 0 {
+			//TODO SetReadDeadline?? // Read can be made to time out and return a Error with Timeout() == true
+			// after a fixed time limit; see SetDeadline and SetReadDeadline.
+			//Read(b []byte) (n int, err error)
+			// NOTE: source @ https://stackoverflow.com/questions/12741386/how-to-know-tcp-connection-is-closed-in-golang-net-package
 			// check more specifically
 			if err == io.EOF {
 				// EOF = closed by peer or already closed @ STDIN handler goroutine or network error
