@@ -64,8 +64,9 @@ func main() {
 	}
 	/* NOTE:
 	OpenNotification is used to inform downstream component(s) of a new connection
-	and - once - send which address and port is on the other side.
-	Afterwards the Tcp-Id header is relevant for sending responses.
+	and - once - send which address and port is on the other side. Downstream components
+	can check, save etc. the address information, but for sending responses, the
+	Tcp-Id header is relevant.
 	*/
 	openNotification := flowd.Frame{
 		Port:     "OUT",
