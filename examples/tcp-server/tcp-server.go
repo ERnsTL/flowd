@@ -62,7 +62,11 @@ func main() {
 			//"Tcp-Remote-Address": "",
 		},
 	}
-	//TODO is this really necessary? components could also simply check in local state (which they have to keep anyway) if connection is known or a new one
+	/* NOTE:
+	OpenNotification is used to inform downstream component(s) of a new connection
+	and - once - send which address and port is on the other side.
+	Afterwards the Tcp-Id header is relevant for sending responses.
+	*/
 	openNotification := flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
