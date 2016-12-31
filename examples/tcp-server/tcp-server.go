@@ -12,6 +12,8 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+const bufSize = 65536
+
 func main() {
 	// open connection to network
 	stdin := bufio.NewReader(os.Stdin)
@@ -207,16 +209,15 @@ func checkError(err error) {
 
 func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 	// prepare data structures
-	buf := make([]byte, 65535)
+	buf := make([]byte, bufSize)
 	outframe := flowd.Frame{
 		Type:        "data",
 		BodyType:    "TCPPacket",
 		Port:        "OUT",
 		ContentType: "application/octet-stream",
-		Extensions:  map[string]string{"Tcp-Id": strconv.Itoa(id), "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
+		Extensions:  map[string]string{"Tcp-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:        nil,
 	}
-	//TODO neccessary to send Tcp-Remote-Address with every packet? Tcp-Remote-Address just on the OpenNotification, from then on just Tcp-Id is sufficient.
 
 	// process TCP packets
 	for {
