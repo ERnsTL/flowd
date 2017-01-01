@@ -1,6 +1,6 @@
 # TCP chat/console server
 # start using:
-# bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-http-server.fbp
+# bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/http-server.fbp
 # send test request:
 # wget --debug --post-data="my POST data" http://localhost:4000/
 
