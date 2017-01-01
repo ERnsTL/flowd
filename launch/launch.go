@@ -493,6 +493,7 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 	//nPrev := 0
 	bufr := bufio.NewReader(ep.Conn)
 	for {
+		// NOTE: calling to ParseFrame -> cannot know how many bytes were read by it
 		if fr, err := flowd.ParseFrame(bufr); err != nil {
 			/*
 
