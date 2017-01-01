@@ -427,7 +427,7 @@ func main() {
 					if e, exists := outEndpoints[frame.Port]; exists {
 						// rewrite frame.Port to match the other side's input port name
 						// NOTE: This makes multiple input ports possible
-						localPort = frame.Port
+						localPort = frame.Port //TODO any way to do without this variable?
 						frame.Port = e.RemotePort
 
 						// marshal
@@ -603,6 +603,7 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 
 // Extract local port name in URL/Endpoint.Fragment
 // format: [local]>[remote]
+//TODO this function will make problems with array ports -> use regex like in libflowd.ParseEndpointURL
 func fragmentLocal(fragment string) string {
 	if parts := strings.SplitN(fragment, ">", 2); len(parts) == 2 {
 		return parts[0]
@@ -613,6 +614,7 @@ func fragmentLocal(fragment string) string {
 
 // Extract remote port name in URL/Endpoint.Fragment
 // format: [local]>[remote]
+//TODO this function will make problems with array ports -> use regex like in libflowd.ParseEndpointURL
 func fragmentRemote(fragment string) string {
 	if parts := strings.SplitN(fragment, ">", 2); len(parts) == 2 {
 		return parts[1]
