@@ -192,7 +192,9 @@ func main() {
 	}
 
 	// add connections
-	fmt.Println("network:")
+	if debug {
+		fmt.Println("network:")
+	}
 	// add network inports
 	for name, iport := range nw.Inports {
 		// check if destination exists
@@ -239,7 +241,9 @@ func main() {
 		})
 
 		// destination info
-		fmt.Printf("  inport: %s at %s -> %s.%s\n", name, listenAddress, iport.Process, iport.Port)
+		if debug {
+			fmt.Printf("  inport: %s at %s -> %s.%s\n", name, listenAddress, iport.Process, iport.Port)
+		}
 	}
 	// add regular internal connections
 	for _, fbpConn := range nw.Connections {
@@ -275,7 +279,9 @@ func main() {
 				//RemoteAddress: "unix://@flowd/" + fromProc,
 			})
 
-			fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
+			if debug {
+				fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
+			}
 		} else if fbpConn.Data != "" { // source is IIP
 			// prepare connection data
 			toPort := GeneratePortName(fbpConn.Target)
@@ -288,7 +294,9 @@ func main() {
 				IIP:       fbpConn.Data,
 			})
 
-			fmt.Printf("  connection: IIP '%s' -> %s.%s\n", fbpConn.Data, toProc, toPort)
+			if debug {
+				fmt.Printf("  connection: IIP '%s' -> %s.%s\n", fbpConn.Data, toProc, toPort)
+			}
 		} else if fbpConn.Source == nil { // error condition
 			// NOTE: network inports are given separately in nw.Inports
 			fmt.Println("ERROR: connection has empty connection source:", fbpConn.String())
@@ -345,7 +353,9 @@ func main() {
 		})
 
 		// destination info
-		fmt.Printf("  outport: %s.%s -> %s to %s\n", oport.Process, oport.Port, name, remoteAddress)
+		if debug {
+			fmt.Printf("  outport: %s.%s -> %s to %s\n", oport.Process, oport.Port, name, remoteAddress)
+		}
 	}
 
 	// subscribe to ctrl+c to do graceful shutdown
@@ -355,7 +365,9 @@ func main() {
 	launch := make(map[string]*LaunchInstance)
 	exitChan := make(chan string)
 	for _, proc := range nw.Processes {
-		fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Component)
+		if !quiet {
+			fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Component)
+		}
 
 		// start component as subprocess, with arguments
 		launch[proc.Name] = NewLaunchInstance()
@@ -384,6 +396,10 @@ func main() {
 			// forward debug flag to launch
 			if debug {
 				args = append(args, "-debug")
+			}
+			// forward quiet flag to launch
+			if quiet {
+				args = append(args, "-quiet")
 			}
 			// component pathname
 			args = append(args, procs[name].Path)

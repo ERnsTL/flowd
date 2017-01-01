@@ -150,13 +150,17 @@ func (e *outputEndpoint) Close() {
 
 func (e *inputEndpoints) Listen() {
 	for name, ep := range *e {
-		fmt.Println("connecting input", name)
+		if !quiet {
+			fmt.Println("connecting input", name)
+		}
 		ep.Listen()
 	}
 }
 func (e *outputEndpoints) Dial() {
 	for name, ep := range *e {
-		fmt.Println("connecting output", name)
+		if !quiet {
+			fmt.Println("connecting output", name)
+		}
 		ep.Dial()
 	}
 }
@@ -195,12 +199,17 @@ func (iips *initialIPs) Set(value string) error {
 	return nil
 }
 
+// global variables
+var (
+	debug, quiet bool
+)
+
 func main() {
 	// read program arguments
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
 	iips := initialIPs{}
-	var help, debug, quiet bool
+	var help bool
 	var inFraming, outFraming bool
 	flag.Var(&inEndpoints, "in", "input endpoint(s) in URL format, ie. tcp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "output endpoint(s) in URL format, ie. tcp://localhost:0#portname")
