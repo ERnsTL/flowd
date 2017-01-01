@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 func ParseEndpointURL(value string) (url *url.URL, err error) {
@@ -48,15 +49,21 @@ func ParseEndpointURL(value string) (url *url.URL, err error) {
 	} else {
 		// check for well-formed port name
 		// NOTE: \w is word characters, (?: is grouping without extraction
-		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?`)
-		// NOTE: [0] is match of entire exp, [1] is port name, [2] is array port index
+		re := regexp.MustCompile(`(\w+)(?:\[(\d+)\])?(?:>(\w+)(?:\[(\d+)\])?)?`)
+		// NOTE: [0] is match of entire exp, [1] is port name, [2] is array port index, [3] is remote port name, [4] is remote array port index
 		matches := re.FindStringSubmatch(url.Fragment)
 		if matches[0] != url.Fragment {
-			return nil, errors.New("port name malformed, must be \\w+ or \\w+[index]")
+			return nil, errors.New("port name(s) malformed, must be \\w+ or \\w+[index] or \\w+>\\w+ or \\w+[index]>\\w+ or \\w+>w+[index] or \\w+[index]>\\w+[index]")
 		} else if len(matches[1]) > 1000 {
 			return nil, errors.New("port name too long, maximum allowable is 1000 UTF-8 runes")
 		} else if len(matches[2]) > 4 {
 			return nil, errors.New("port name array index too long, maximum allowable is 4 digits")
+		} else if strings.Contains(url.Fragment, ">") {
+			if len(matches[3]) > 1000 {
+				return nil, errors.New("remote port name too long, maximum allowable is 1000 UTF-8 runes")
+			} else if len(matches[4]) > 4 {
+				return nil, errors.New("remote port name array index too long, maximum allowable is 4 digits")
+			}
 		}
 		// TODO save the port name and index somewhere inside of ourselves to avoid duplicate work
 	}

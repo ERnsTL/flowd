@@ -27,6 +27,9 @@ type endpoint struct {
 	Listener   net.Listener
 	listenPort string
 	Ready      chan bool
+	// port names
+	LocalPort  string
+	RemotePort string
 }
 
 type inputEndpoint endpoint
@@ -57,7 +60,10 @@ func (e *inputEndpoints) Set(value string) error {
 	if parsedUrl, err := flowd.ParseEndpointURL(value); err != nil {
 		return err
 	} else {
-		(*e)[parsedUrl.Fragment] = &inputEndpoint{Url: parsedUrl}
+		(*e)[fragmentLocal(parsedUrl.Fragment)] = &inputEndpoint{
+			Url:       parsedUrl,
+			LocalPort: fragmentLocal(parsedUrl.Fragment),
+		}
 	}
 	return nil
 }
@@ -65,7 +71,11 @@ func (e *outputEndpoints) Set(value string) error {
 	if parsedUrl, err := flowd.ParseEndpointURL(value); err != nil {
 		return err
 	} else {
-		(*e)[parsedUrl.Fragment] = &outputEndpoint{Url: parsedUrl}
+		(*e)[fragmentLocal(parsedUrl.Fragment)] = &outputEndpoint{
+			Url:        parsedUrl,
+			LocalPort:  fragmentLocal(parsedUrl.Fragment),
+			RemotePort: fragmentRemote(parsedUrl.Fragment),
+		}
 	}
 	return nil
 }
@@ -398,6 +408,7 @@ func main() {
 		// NOTE: this using manual buffering
 		go func() {
 			bufr := bufio.NewReader(cout)
+			var localPort string
 			for {
 				if frame, err := flowd.ParseFrame(bufr); err != nil {
 					if err == io.EOF {
@@ -413,9 +424,11 @@ func main() {
 					}
 
 					// write out to network
-					//TODO error feedback for unknown/unconnected output ports
 					if e, exists := outEndpoints[frame.Port]; exists {
-						//TODO rewrite frame.Port to match the other side's input port name - and write the marshaled frame, not the buf
+						// rewrite frame.Port to match the other side's input port name
+						// NOTE: This makes multiple input ports possible
+						localPort = frame.Port
+						frame.Port = e.RemotePort
 
 						// marshal
 						//TODO optimize; could directly marshal to e.Conn, but would lose info how many bytes were written
@@ -423,29 +436,29 @@ func main() {
 						outw := bufio.NewWriter(&outbuf)
 						if err := frame.Marshal(outw); err != nil {
 							fmt.Println("net out: ERROR: marshalling frame:", err.Error(), "- closing.")
-							outEndpoints[frame.Port].Close()
+							outEndpoints[localPort].Close()
 							//TODO return as well = close down all output operations or allow one output to fail?
 						}
 
 						// write
 						if nout, err := e.Conn.Write(outbuf.Bytes()); err != nil {
-							fmt.Println("net out: ERROR: sending to output endpoint", frame.Port, ":", err.Error(), "- closing.")
-							outEndpoints[frame.Port].Close()
+							fmt.Println("net out: ERROR: sending to output endpoint", localPort, ":", err.Error(), "- closing.")
+							outEndpoints[localPort].Close()
 							//TODO return as well = close down all output operations or allow one output to fail?
 						} else if nout < outbuf.Len() {
-							fmt.Println("net out: ERROR: short send to output endpoint", frame.Port, ": only", nout, "of", outbuf.Len(), "bytes written - closing.")
-							outEndpoints[frame.Port].Close()
+							fmt.Println("net out: ERROR: short send to output endpoint", localPort, ": only", nout, "of", outbuf.Len(), "bytes written - closing.")
+							outEndpoints[localPort].Close()
 						} else {
 							//TODO having two outputs say the same seems useless
 							if debug {
-								fmt.Println("net out wrote", outbuf.Len(), "bytes to port", frame.Port, "over network with contents:", outbuf.String())
+								fmt.Println("net out wrote", outbuf.Len(), "bytes to port", localPort, "over network with contents:", outbuf.String())
 							}
 							if !quiet {
-								fmt.Println("out xfer", outbuf.Len(), "bytes to", frame.Port, "=", outEndpoints[frame.Port].Conn.RemoteAddr())
+								fmt.Println("out xfer", outbuf.Len(), "bytes to", localPort, "=", outEndpoints[localPort].Conn.RemoteAddr())
 							}
 						}
 					} else {
-						fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", frame.Port)
+						fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", localPort)
 						outEndpoints.Close()
 						return
 					}
@@ -492,14 +505,14 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 				_, portStr, _ := net.SplitHostPort(ep.Url.Host)
 				if portStr != "0" {
 					// can listen again since port is same (would have to change zeroconf announce)
-					fmt.Println("EOF from network input", ep.Url.Fragment, "- listening again.")
+					fmt.Println("EOF from network input", ep.LocalPort, "- listening again.")
 
 					// start listening again to allow re-connection
 					ep.ListenAgain(func() {
 						handleInputEndpoint(ep, debug, quiet, cin)
 					})
 				} else {
-					fmt.Println("EOF from network input", ep.Url.Fragment, "- closing.")
+					fmt.Println("EOF from network input", ep.LocalPort, "- closing.")
 				}
 			} else {
 				fmt.Println("ERROR: receiving from network input:", err, "Closing.")
@@ -562,11 +575,11 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 			}
 
 			// check frame Port header field if it matches the name of this input endpoint
-			//FIXME which side does the header field rewriting? - better the sending side.
-			if ep.Url.Fragment != fr.Port {
-				fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.Url.Fragment) //, " - discarding.")
+			if ep.LocalPort != fr.Port {
+				fmt.Println("net in: WARNING: frame for wrong/undeclared port", fr.Port, "- expected:", ep.LocalPort, " - discarding.")
 				// discard frame
-			} // else {	//TODO actually enforce this and make error in msg above
+				continue
+			}
 			// forward frame to component
 			//cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
 			if err := fr.Marshal(cin); err != nil {
@@ -585,5 +598,25 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 				nPrev = 0
 			*/
 		}
+	}
+}
+
+// Extract local port name in URL/Endpoint.Fragment
+// format: [local]>[remote]
+func fragmentLocal(fragment string) string {
+	if parts := strings.SplitN(fragment, ">", 2); len(parts) == 2 {
+		return parts[0]
+	} else {
+		return fragment
+	}
+}
+
+// Extract remote port name in URL/Endpoint.Fragment
+// format: [local]>[remote]
+func fragmentRemote(fragment string) string {
+	if parts := strings.SplitN(fragment, ">", 2); len(parts) == 2 {
+		return parts[1]
+	} else {
+		return fragment
 	}
 }

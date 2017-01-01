@@ -385,7 +385,7 @@ func main() {
 			// output endpoints
 			for _, op := range proc.OutPorts {
 				// NOTE: launch and component need to know local name of its output endpoint, not the external name
-				endpointUrl := fmt.Sprintf("%s#%s", op.RemoteAddress, op.LocalName)
+				endpointUrl := fmt.Sprintf("%s#%s>%s", op.RemoteAddress, op.LocalName, op.RemoteName)
 				args = append(args, "-out", endpointUrl)
 			}
 			// initial information packets/frames = IIPs
