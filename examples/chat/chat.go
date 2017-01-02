@@ -10,6 +10,8 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+const prompt = "> "
+
 type ChatClient struct {
 	state    string
 	username string
@@ -121,11 +123,13 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s: sending close command.\n", id)
 				frame = closeCommand
 				frame.Extensions["Tcp-Id"] = id
-				Respond(frame, fmt.Sprintf("kthxbye!\n"))
+				Respond(frame, fmt.Sprintln("kthxbye!"))
+			case "help":
+				Respond(frame, fmt.Sprintf("commands: exit, quit, logout\n%s", prompt))
 			case "":
-				Respond(frame, "> ")
+				Respond(frame, prompt)
 			default:
-				Respond(frame, fmt.Sprintf("unimplemented: %s\n> ", inLine))
+				Respond(frame, fmt.Sprintf("unimplemented: %s\n%s", inLine, prompt))
 			}
 		}
 
