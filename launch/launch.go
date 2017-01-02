@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/miolini/datacounter"
 )
 
 const bufSize = 65536
@@ -383,7 +383,7 @@ func main() {
 		}
 		// now handle regular packets/frames
 		for inEndpoint := range inEndpoints {
-			go handleInputEndpoint(inEndpoints[inEndpoint], debug, quiet, cin)
+			go handleInputEndpoint(inEndpoints[inEndpoint], cin)
 		}
 	}
 
@@ -406,65 +406,7 @@ func main() {
 		}
 	} else {
 		// NOTE: this using manual buffering
-		go func() {
-			bufr := bufio.NewReader(cout)
-			var localPort string
-			for {
-				if frame, err := flowd.ParseFrame(bufr); err != nil {
-					if err == io.EOF {
-						fmt.Println("EOF from component stdout. Exiting.")
-					} else {
-						fmt.Println("ERROR parsing frame from component stdout:", err, "- Exiting.")
-					}
-					outEndpoints.Close()
-					return
-				} else { // frame complete now
-					if debug {
-						fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
-					}
-
-					// write out to network
-					if e, exists := outEndpoints[frame.Port]; exists {
-						// rewrite frame.Port to match the other side's input port name
-						// NOTE: This makes multiple input ports possible
-						localPort = frame.Port //TODO any way to do without this variable?
-						frame.Port = e.RemotePort
-
-						// marshal
-						//TODO optimize; could directly marshal to e.Conn, but would lose info how many bytes were written
-						var outbuf bytes.Buffer
-						outw := bufio.NewWriter(&outbuf)
-						if err := frame.Marshal(outw); err != nil {
-							fmt.Println("net out: ERROR: marshalling frame:", err.Error(), "- closing.")
-							outEndpoints[localPort].Close()
-							//TODO return as well = close down all output operations or allow one output to fail?
-						}
-
-						// write
-						if nout, err := e.Conn.Write(outbuf.Bytes()); err != nil {
-							fmt.Println("net out: ERROR: sending to output endpoint", localPort, ":", err.Error(), "- closing.")
-							outEndpoints[localPort].Close()
-							//TODO return as well = close down all output operations or allow one output to fail?
-						} else if nout < outbuf.Len() {
-							fmt.Println("net out: ERROR: short send to output endpoint", localPort, ": only", nout, "of", outbuf.Len(), "bytes written - closing.")
-							outEndpoints[localPort].Close()
-						} else {
-							//TODO having two outputs say the same seems useless
-							if debug {
-								fmt.Println("net out wrote", outbuf.Len(), "bytes to port", localPort, "over network with contents:", outbuf.String())
-							}
-							if !quiet {
-								fmt.Println("out xfer", outbuf.Len(), "bytes to", localPort, "=", outEndpoints[localPort].Conn.RemoteAddr())
-							}
-						}
-					} else {
-						fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", localPort)
-						outEndpoints.Close()
-						return
-					}
-				}
-			}
-		}()
+		go handleOutputEndpoint(outEndpoints, cout)
 	}
 
 	// trigger on signal (SIGHUP, SIGUSR1, SIGUSR2, etc.) to reconnect, reconfigure etc.
@@ -479,6 +421,7 @@ func main() {
 
 	cmd.Wait()
 	// send out any remaining output from component stdout
+	//TODO do that using done channel or similar
 	time.Sleep(2 * time.Second)
 }
 
@@ -488,20 +431,22 @@ func printUsage() {
 	os.Exit(1)
 }
 
-func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.WriteCloser) {
-	//buf := make([]byte, bufSize)
-	//nPrev := 0
-	bufr := bufio.NewReader(ep.Conn)
+func handleInputEndpoint(ep *inputEndpoint, cin io.WriteCloser) {
+	var oldCount uint64
+	countr := datacounter.NewReaderCounter(ep.Conn)
+	bufr := bufio.NewReader(countr)
 	for {
-		// NOTE: calling to ParseFrame -> cannot know how many bytes were read by it
+		/*
+			TODO check if these possibilities are handled:
+			1) got less than a full header (pre-\r\n)
+			2) got a perfectly full header (just before body)
+			3) got header and part of body
+			4) got perfectly full frame
+			5) more than a full message
+			6) purposefully or otherwise malformed frames/garbage, not even header received within timeout -> timeout or buffer full
+			7) keeping track of number of connections per source IP - if too many with not a header received -> DoS-type attack
+		*/
 		if fr, err := flowd.ParseFrame(bufr); err != nil {
-			/*
-
-				// read from connection
-				// NOTE: can result in just a part of an UDP packet even if buffer is large enough and even if sent from localhost :-(
-				n, err := ep.Conn.Read(buf[nPrev:])
-				if err != nil {
-			*/
 			if err == io.EOF {
 				_, portStr, _ := net.SplitHostPort(ep.Url.Host)
 				if portStr != "0" {
@@ -510,7 +455,7 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 
 					// start listening again to allow re-connection
 					ep.ListenAgain(func() {
-						handleInputEndpoint(ep, debug, quiet, cin)
+						handleInputEndpoint(ep, cin)
 					})
 				} else {
 					fmt.Println("EOF from network input", ep.LocalPort, "- closing.")
@@ -520,56 +465,6 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 			}
 			ep.Conn.Close()
 			return
-			/*
-				}
-				if debug {
-					fmt.Println("net in received", n, "bytes from", ep.Conn.RemoteAddr(), " with contents:", string(buf[nPrev:nPrev+n]))
-				}
-			*/
-			/*
-				/// check if header delimiter is already to be found in receive buffer
-				if !bytes.Contains(buf[0:nPrev+n], []byte("\r\n\r\n")) {
-					if debug {
-						fmt.Println("net in: DEBUG: header not yet fully received, waiting for next read")
-					}
-					// remember how much was already received
-					nPrev += n
-					// do next read
-					continue
-				}
-			*/
-			// decode frame
-			/*
-				FIXME handle possibilities:
-				1) got less than a full header (pre-\r\n)
-				2) got a perfectly full header (just before body)
-				3) got header and part of body
-				4) got perfectly full frame
-				5) more than a full message
-				6) purposefully or otherwise malformed frames/garbage, not even header received within timeout -> timeout or buffer full
-				7) keeping track of number of connections per source IP - if too many with not a header received -> DoS-type attack
-			*/
-			/*
-				//bufReader := bytes.NewReader(buf[0 : n+nPrev])
-				bufReader := bufio.NewReader(bytes.NewReader(buf[0 : n+nPrev])) //TODO optimize; could directly ParseFrame from conn
-				//flowd.ParseFrame(ep.Conn)
-				if fr, err := flowd.ParseFrame(bufReader); err != nil {
-					// failed to parse, try re-assembly using max. 2 fragments, buf[0:nPrev-1] and buf[nPrev:nPrev+n]
-					// NOTE: an io.Scanner with a ScanFunc could also be used, but this is simpler
-					if nPrev > 0 {
-						// already tried once, discard previous fragment
-						fmt.Println("net in: ERROR parsing frame, discarding buffer:", err.Error())
-						nPrev = 0
-					} else {
-						// try again later using more arrived frames
-						if debug {
-							fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly:", err.Error())
-						} else if !quiet {
-							fmt.Println("net in: WARNING uncomplete/malformed frame, trying re-assembly")
-						}
-						nPrev = n
-					}
-			*/
 		} else { // parsed fine
 			if debug {
 				fmt.Println("received frame type", fr.Type, "and data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(fr.Body)) //TODO difference between this and string(fr.Body) ?
@@ -582,22 +477,68 @@ func handleInputEndpoint(ep *inputEndpoint, debug bool, quiet bool, cin io.Write
 				continue
 			}
 			// forward frame to component
-			//cin.Write(buf[0 : n+nPrev]) // NOTE: simply sending in whole buf would make body JSON decoder error because of \x00 bytes beyond payload
 			if err := fr.Marshal(cin); err != nil {
-				fmt.Println("net in: WARNING: could not marshal received frame into component STDIN, dropping it.")
+				fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 			}
-			/*
-				//TODO two outputs saying just about the same seems useless
-				if debug {
-					fmt.Println("STDIN wrote", nPrev+n, "bytes to component stdin")
-				}
-				if !quiet {
-					fmt.Println("in xfer", nPrev+n, "bytes from", ep.Conn.RemoteAddr())
+
+			// status message
+			if debug {
+				//fmt.Println("STDIN wrote", nPrev+n, "bytes from", ep.Conn.RemoteAddr(), "to component stdin")
+				fmt.Println("STDIN wrote", countr.Count()-oldCount, "bytes from", ep.Conn.RemoteAddr(), "to component stdin")
+			} else if !quiet {
+				fmt.Println("in xfer", countr.Count()-oldCount, "bytes on", fr.Port, "from", ep.Conn.RemoteAddr())
+			}
+			oldCount = countr.Count()
+		}
+	}
+}
+
+func handleOutputEndpoint(outEndpoints outputEndpoints, cout io.ReadCloser) {
+	countr := datacounter.NewReaderCounter(cout)
+	bufr := bufio.NewReader(countr)
+	var countw *datacounter.WriterCounter
+	var localPort string
+	for {
+		if frame, err := flowd.ParseFrame(bufr); err != nil {
+			if err == io.EOF {
+				fmt.Println("EOF from component stdout. Exiting.")
+			} else {
+				fmt.Println("ERROR parsing frame from component stdout:", err, "- Exiting.")
+			}
+			outEndpoints.Close()
+			return
+		} else { // frame complete now
+			if debug {
+				fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+			}
+
+			// write out to network
+			if e, exists := outEndpoints[frame.Port]; exists {
+
+				// rewrite frame.Port to match the other side's input port name
+				// NOTE: This makes multiple input ports possible
+				localPort = frame.Port //TODO any way to do without this variable?
+				frame.Port = e.RemotePort
+
+				// marshal and write
+				countw = datacounter.NewWriterCounter(e.Conn) //TODO could save this WriterCounter in Endpoint struct
+				if err := frame.Marshal(countw); err != nil {
+					fmt.Println("net out: ERROR: marshalling frame into output endpoint", localPort, ":", err.Error(), "- closing.")
+					outEndpoints[localPort].Close()
+					//TODO return as well = close down all output operations or allow one output to fail?
 				}
 
-				// reset previous packet size
-				nPrev = 0
-			*/
+				// status message
+				if debug {
+					fmt.Println("net out wrote", countw.Count(), "bytes to port", localPort, "=", outEndpoints[localPort].Conn.RemoteAddr(), "with body:", string(frame.Body))
+				} else if !quiet {
+					fmt.Println("out xfer", countw.Count(), "bytes to", localPort, "=", outEndpoints[localPort].Conn.RemoteAddr())
+				}
+			} else {
+				fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", localPort)
+				outEndpoints.Close()
+				return
+			}
 		}
 	}
 }
