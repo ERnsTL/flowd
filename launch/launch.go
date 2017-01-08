@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -467,7 +468,10 @@ func handleInputEndpoint(ep *inputEndpoint, cin io.WriteCloser) {
 			return
 		} else { // parsed fine
 			if debug {
-				fmt.Println("received frame type", fr.Type, "and data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(fr.Body)) //TODO difference between this and string(fr.Body) ?
+				//fmt.Println("received frame type", fr.Type, "and data type", fr.BodyType, "for port", fr.Port, "with body:", (string)(fr.Body)) //TODO difference between this and string(fr.Body) ?
+				var buf bytes.Buffer
+				fr.Marshal(&buf)
+				fmt.Println("received frame type", fr.Type, "and data type", fr.BodyType, "for port", fr.Port, "with contents:", buf.String()) //, (string)(fr.Body)) //TODO difference between this and string(fr.Body) ?
 			}
 
 			// check frame Port header field if it matches the name of this input endpoint
@@ -509,7 +513,10 @@ func handleOutputEndpoint(outEndpoints outputEndpoints, cout io.ReadCloser) {
 			return
 		} else { // frame complete now
 			if debug {
-				fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+				//fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+				var buf bytes.Buffer
+				frame.Marshal(&buf)
+				fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with contents:", buf.String())
 			}
 
 			// write out to network
