@@ -159,6 +159,16 @@ Also, an *initial information packet*/frame is sent to the ```CONF``` input port
 
 This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior.
 
+## Visualization Example
+
+*flowd* can export the network graph structure into *GraphViz* format for visualization.
+
+The following commands will export a network to STDOUT, convert it to a PNG raster image, view it and clean up:
+
+```
+bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
+```
+
 ## Architecture
 
 > This describes the current pre-alpha state. Far from all of the target architecture is currently present.

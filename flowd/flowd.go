@@ -71,13 +71,14 @@ func main() {
 	inEndpoints := inputEndpoints{}
 	outEndpoints := outputEndpoints{}
 	var launchPath string
-	var help, debug, quiet bool
+	var help, debug, quiet, graph bool
 	flag.Var(&inEndpoints, "in", "endpoint(s) for FBP network inports in URL format, ie. tcp://localhost:0#portname")
 	flag.Var(&outEndpoints, "out", "endpoint(s) for FBP network outports in URL format, ie. tcp://localhost:0#portname")
 	flag.StringVar(&launchPath, "launch", "launch", "path to the launch executable, defaults to look in PATH env")
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+	flag.BoolVar(&graph, "graph", false, "output visualization of given network in GraphViz format and exit")
 	flag.Parse()
 	if help {
 		printUsage()
@@ -174,6 +175,17 @@ func main() {
 	//TODO check for multiple connections to same component's port
 	//TODO decide if this should be allowed - no not usually, because then frames might be interleaved - bad if ordering is important
 	//TODO
+
+	// output graph visualization
+	// NOTE: originally intended to output the parsed graph (fbp.Fbp type), but that does not have Inports and Outports process names nicely available and IIP special cases
+	if graph {
+		if err := exportNetworkGraph(nw); err != nil {
+			fmt.Println("ERROR: generating graph visualization: ", err)
+			os.Exit(1)
+		} else {
+			return
+		}
+	}
 
 	// decide placement (know available machines, access method to them)
 	//TODO
