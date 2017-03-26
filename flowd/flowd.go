@@ -5,76 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"net/url"
 	"os"
 	"os/exec"
-	"strings"
 
-	"github.com/ERnsTL/flowd/libflowd"
-	termutil "github.com/andrew-d/go-termutil"
-	"github.com/oleksandr/fbp"
+	flowd "github.com/ERnsTL/flowd/libflowd"
+	"github.com/miolini/datacounter"
 )
-
-// type to hold information about an endpoint
-// NOTE: duplicate from lanuch.go, because it seems unpossible to locally extend an imported struct with new methods
-type endpoint struct {
-	Url *url.URL
-	//possibly more needed
-}
-
-type inputEndpoint endpoint
-type outputEndpoint endpoint
-
-// types to hold information on a collection of endpoints, ie. all input endpoints
-// NOTE: using map of pointers, because map elements are not addressable
-type inputEndpoints map[string]*inputEndpoint
-type outputEndpoints map[string]*outputEndpoint
-
-// implement flag.Value interface
-//TODO these String() functions only return the first endpoint's string representation
-//TODO they are also NOT used for turning an endpoint URL into a string, these functions are only used by flag package
-func (e *inputEndpoints) String() string {
-	for _, endpoint := range *e {
-		return fmt.Sprintf("%s://%s#%s", endpoint.Url.Scheme, endpoint.Url.Host, endpoint.Url.Fragment)
-	}
-	return ""
-}
-func (e *outputEndpoints) String() string {
-	for _, endpoint := range *e {
-		return fmt.Sprintf("%s://%s#%s", endpoint.Url.Scheme, endpoint.Url.Host, endpoint.Url.Fragment)
-	}
-	return ""
-}
-
-// NOTE: can be called multiple times if there are multiple occurrences of the -in resp. -out flags
-// NOTE: if only one occurrence shall be allowed, check if a required property is already set
-func (e *inputEndpoints) Set(value string) error {
-	if parsedUrl, err := flowd.ParseEndpointURL(value); err != nil {
-		return err
-	} else {
-		(*e)[parsedUrl.Fragment] = &inputEndpoint{Url: parsedUrl}
-	}
-	return nil
-}
-func (e *outputEndpoints) Set(value string) error {
-	if parsedUrl, err := flowd.ParseEndpointURL(value); err != nil {
-		return err
-	} else {
-		(*e)[parsedUrl.Fragment] = &outputEndpoint{Url: parsedUrl}
-	}
-	return nil
-}
 
 func main() {
 	// read program arguments
-	inEndpoints := inputEndpoints{}
-	outEndpoints := outputEndpoints{}
-	var launchPath string
 	var help, debug, quiet, graph bool
-	flag.Var(&inEndpoints, "in", "endpoint(s) for FBP network inports in URL format, ie. tcp://localhost:0#portname")
-	flag.Var(&outEndpoints, "out", "endpoint(s) for FBP network outports in URL format, ie. tcp://localhost:0#portname")
-	flag.StringVar(&launchPath, "launch", "launch", "path to the launch executable, defaults to look in PATH env")
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
@@ -85,90 +25,14 @@ func main() {
 	}
 
 	// get network definition
-	var nwSource io.ReadCloser
-	if termutil.Isatty(os.Stdin.Fd()) {
-		// get from file
-		if flag.NArg() != 1 {
-			fmt.Println("ERROR: missing network definition file to run")
-			printUsage()
-		}
-
-		if debug {
-			fmt.Println("Reading network definition from file", flag.Arg(0))
-		}
-		var err error
-		nwSource, err = os.Open(flag.Arg(0))
-		if err != nil {
-			fmt.Println(err.Error())
-			os.Exit(1)
-		}
-	} else {
-		// get from STDIN
-		if debug {
-			fmt.Println("Found something piped on STDIN, reading network definition from it")
-		}
-		nwSource = os.Stdin
-	}
-
-	// read network definition
-	nwBytes, err := ioutil.ReadAll(nwSource)
-	if err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	if err := nwSource.Close(); err != nil {
-		fmt.Println("ERROR: could not close network definition source:", err.Error())
-		os.Exit(1)
-	}
+	nwBytes := getNetworkDefinition(debug)
 
 	// parse and validate network
-	nw := &fbp.Fbp{Buffer: (string)(nwBytes)}
-	if debug {
-		fmt.Println("init")
-	}
-	nw.Init()
-	if debug {
-		fmt.Println("parse")
-	}
-	if err := nw.Parse(); err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	if debug {
-		fmt.Println("execute")
-	}
-	nw.Execute()
-	if debug {
-		fmt.Println("validate")
-	}
-	if err := nw.Validate(); err != nil {
-		fmt.Println(err.Error())
-		os.Exit(1)
-	}
-	if debug {
-		fmt.Println("network definition OK")
-	}
+	nw := parseNetworkDefinition(nwBytes, debug)
 
 	// display all data
 	if debug {
-		fmt.Println("subgraph name:", nw.Subgraph)
-		fmt.Println("processes:")
-		for _, p := range nw.Processes {
-			fmt.Println(" ", p.String(), p.Metadata)
-		}
-		fmt.Println("connections:")
-		for _, c := range nw.Connections {
-			fmt.Println(" ", c.String())
-		}
-		fmt.Println("input ports:")
-		for name, i := range nw.Inports {
-			fmt.Printf(" %s: %s\n", name, i.String())
-		}
-		fmt.Println("output ports:")
-		for name, o := range nw.Outports {
-			fmt.Printf(" %s: %s\n", name, o.String())
-		}
-		fmt.Println("end of parsed network info")
+		displayNetworkDefinition(nw)
 	}
 
 	// network definition sanity checks
@@ -187,246 +51,45 @@ func main() {
 		}
 	}
 
-	// decide placement (know available machines, access method to them)
-	//TODO
-
 	// generate network data structures
-	// prepare list of processes
-	procs := make(map[string]*Process)
-	for _, fbpProc := range nw.Processes {
-		proc := NewProcess(fbpProc)
-		if _, exists := procs[proc.Name]; exists {
-			// error case
-			fmt.Println("ERROR: process already exists by that name:", proc.Name)
-			os.Exit(1)
-		}
-		procs[proc.Name] = proc
-	}
-
-	// add connections
-	if debug {
-		fmt.Println("network:")
-	}
-	// add network inports
-	for name, iport := range nw.Inports {
-		// check if destination exists
-		found := false
-		for _, proc := range nw.Processes {
-			if proc.Name == iport.Process {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// destination missing
-			fmt.Println("ERROR: destination process missing for inport", name)
-			os.Exit(2)
-		} else if debug {
-			// destination found
-			fmt.Printf("  inport (.fbp): %s -> %s.%s\n", name, iport.Process, iport.Port)
-		}
-
-		// prepare connection data
-		//TODO maybe also get that info from FBP network metadata
-		toProc := iport.Process
-		toPort := iport.Port
-		fromPort := name
-		if _, exists := inEndpoints[fromPort]; !exists {
-			// no endpoint address was given for that network inport
-			fmt.Println("ERROR: no endpoint address given resp. missing -in argument for inport", name)
-			os.Exit(2)
-		}
-
-		// listen input port struct
-		// NOTE: resets the portname, will be added later.
-		//TODO decide if internal or external port name should be used
-		inEndpoints[fromPort].Url.Fragment = ""
-		listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
-		//TODO hack
-		listenAddress = strings.Replace(listenAddress, "%40", "", 1)
-		procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
-			LocalName:    toPort,
-			LocalAddress: listenAddress, //TODO"unix://@flowd/" + toProc,
-			RemoteName:   fromPort,
-			//TODO currently unused
-			//RemoteAddress: "unix://@flowd/" + fromProc,
-		})
-
-		// destination info
-		if debug {
-			fmt.Printf("  inport: %s at %s -> %s.%s\n", name, listenAddress, iport.Process, iport.Port)
-		}
-	}
-	// add regular internal connections
-	for _, fbpConn := range nw.Connections {
-		if debug {
-			fmt.Printf("  connection (.fbp): source=%s, target=%s, data=%s\n", fbpConn.Source, fbpConn.Target, fbpConn.Data)
-		}
-
-		if fbpConn.Source != nil && fbpConn.Target != nil { // regular connection
-			// prepare connection data
-			fromPort := GeneratePortName(fbpConn.Source)
-			toPort := GeneratePortName(fbpConn.Target)
-
-			fromProc := fbpConn.Source.Process
-			toProc := fbpConn.Target.Process
-
-			// connecting output port struct
-			remoteAddress := "unix://@flowd/" + toProc
-			procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
-				LocalName: fromPort,
-				//TODO currently unused
-				//LocalAddress: "unix://@flowd/" + fromProc,
-				RemoteName:    toPort,
-				RemoteAddress: remoteAddress,
-			})
-
-			// listen input port struct
-			localAddress := "unix://@flowd/" + toProc
-			procs[toProc].InPorts = append(procs[toProc].InPorts, Port{
-				LocalName:    toPort,
-				LocalAddress: localAddress,
-				RemoteName:   fromPort,
-				//TODO currently unused
-				//RemoteAddress: "unix://@flowd/" + fromProc,
-			})
-
-			if debug {
-				fmt.Printf("  connection: %s.%s -> %s.%s at %s\n", fromProc, fromPort, toProc, toPort, remoteAddress)
-			}
-		} else if fbpConn.Data != "" { // source is IIP
-			// prepare connection data
-			toPort := GeneratePortName(fbpConn.Target)
-
-			toProc := fbpConn.Target.Process
-
-			// listen input port struct
-			procs[toProc].IIPs = append(procs[toProc].IIPs, Port{
-				LocalName: toPort,
-				IIP:       fbpConn.Data,
-			})
-
-			if debug {
-				fmt.Printf("  connection: IIP '%s' -> %s.%s\n", fbpConn.Data, toProc, toPort)
-			}
-		} else if fbpConn.Source == nil { // error condition
-			// NOTE: network inports are given separately in nw.Inports
-			fmt.Println("ERROR: connection has empty connection source:", fbpConn.String())
-			os.Exit(2)
-		} else if fbpConn.Target == nil { // error condition
-			// NOTE: network outports are given separately in nw.Outports
-			fmt.Println("ERROR: connection has empty connection target:", fbpConn.String())
-			os.Exit(2)
-		}
-	}
-	// add network outports
-	for name, oport := range nw.Outports {
-		// check if source exists
-		found := false
-		for _, proc := range nw.Processes {
-			if proc.Name == oport.Process {
-				found = true
-				break
-			}
-		}
-		if !found {
-			// source missing
-			fmt.Println("ERROR: source process missing for outport", name)
-			os.Exit(2)
-		} else if debug {
-			// source exists
-			fmt.Printf("  outport (.fbp): %s.%s -> %s\n", oport.Process, oport.Port, name)
-		}
-
-		// prepare connection data
-		//TODO maybe also get that info from FBP network metadata
-		fromProc := oport.Process
-		fromPort := oport.Port
-		toPort := name
-		if _, exists := outEndpoints[toPort]; !exists {
-			// no endpoint address was given for that network outport
-			fmt.Println("ERROR: no endpoint address given resp. missing -out argument for outport", name)
-			os.Exit(2)
-		}
-
-		// connecting output port struct
-		// NOTE: resets the portname, will be added later.
-		//TODO decide if internal or external port name should be used
-		outEndpoints[toPort].Url.Fragment = ""
-		remoteAddress := outEndpoints[toPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
-		//TODO hack
-		remoteAddress = strings.Replace(remoteAddress, "%40", "", 1)
-		procs[fromProc].OutPorts = append(procs[fromProc].OutPorts, Port{
-			LocalName: fromPort,
-			//TODO currently unused
-			//LocalAddress: "unix://@flowd/" + fromProc,
-			RemoteName:    toPort,
-			RemoteAddress: remoteAddress,
-		})
-
-		// destination info
-		if debug {
-			fmt.Printf("  outport: %s.%s -> %s to %s\n", oport.Process, oport.Port, name, remoteAddress)
-		}
-	}
+	procs := networkDefinition2Processes(nw, debug)
 
 	// subscribe to ctrl+c to do graceful shutdown
 	//TODO
 
-	// launch network using endpoint information generated before
-	launch := make(map[string]*LaunchInstance)
+	// launch network
+	instances := make(ComponentInstances)
 	exitChan := make(chan string)
-	for _, proc := range nw.Processes {
+	// launch handler for NETOUT, if required
+	if len(nw.Outports) > 0 {
+		netout := newComponentInstance()
+		go handleNetOut(netout)
+		instances["NETOUT"] = netout
+	}
+	// launch processes
+	for _, proc := range procs {
 		if !quiet {
-			fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Component)
+			fmt.Printf("launching %s (component: %s)\n", proc.Name, proc.Path)
 		}
 
 		// start component as subprocess, with arguments
-		launch[proc.Name] = NewLaunchInstance()
-		go func(name string) {
+		instances[proc.Name] = newComponentInstance()
+		go func(name string) { //TODO move into own function
 			//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 			proc := procs[name]
 
-			// generate arguments for launch
-			var args []string
-			// input endpoints
-			for _, ip := range proc.InPorts {
-				endpointUrl := fmt.Sprintf("%s#%s", ip.LocalAddress, ip.LocalName)
-				args = append(args, "-in", endpointUrl)
-			}
-			// output endpoints
-			for _, op := range proc.OutPorts {
-				// NOTE: launch and component need to know local name of its output endpoint, not the external name
-				endpointUrl := fmt.Sprintf("%s#%s>%s", op.RemoteAddress, op.LocalName, op.RemoteName)
-				args = append(args, "-out", endpointUrl)
-			}
-			// initial information packets/frames = IIPs
-			for _, iip := range proc.IIPs {
-				iipArg := fmt.Sprintf("%s:%s", iip.LocalName, iip.IIP)
-				args = append(args, "-iip", iipArg)
-			}
-			// forward debug flag to launch
-			if debug {
-				args = append(args, "-debug")
-			}
-			// forward quiet flag to launch
-			if quiet {
-				args = append(args, "-quiet")
-			}
-			// component pathname
-			args = append(args, procs[name].Path)
-
-			// TODO display launch stdout
-			// start launch subprocess
-			if debug {
-				fmt.Println("DEBUG: arguments for launch:", launchPath, args)
-			}
-			cmd := exec.Command(launchPath, args...)
-			lout, err := cmd.StdoutPipe()
+			// start component as subprocess, with arguments
+			cmd := exec.Command(proc.Path)
+			cout, err := cmd.StdoutPipe()
 			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe from launch stdout:", err)
+				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
 			}
-			lerr, err := cmd.StderrPipe()
+			cin, err := cmd.StdinPipe()
+			if err != nil {
+				fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
+			}
+			//cmd.Stderr = os.Stderr
+			cerr, err := cmd.StderrPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe to launch stdin:", err)
 			}
@@ -434,26 +97,51 @@ func main() {
 				fmt.Println("ERROR:", err)
 				exitChan <- name
 			}
+			defer cout.Close()
+			defer cin.Close()
 
-			// display launch stdout
+			// display component stderr
 			go func() {
-				scanner := bufio.NewScanner(lout)
-				for scanner.Scan() {
-					fmt.Printf("%s.launch: %s\n", proc.Name, scanner.Text())
-				}
-			}()
-			// display launch stderr = output from its component
-			go func() {
-				scanner := bufio.NewScanner(lerr)
+				scanner := bufio.NewScanner(cerr)
 				for scanner.Scan() {
 					fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
 				}
 			}()
 
+			// first deliver initial information packets/frames
+			if len(proc.IIPs) > 0 {
+				for port, data := range proc.IIPs {
+					iip := &flowd.Frame{
+						Type:        "data",
+						BodyType:    "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
+						Port:        port,
+						ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed //TODO really?
+						Extensions:  nil,
+						Body:        []byte(data),
+					}
+					if !quiet {
+						fmt.Println("in xfer 1 IIP to", port)
+					}
+					if err := iip.Marshal(cin); err != nil {
+						fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+						os.Exit(3)
+					}
+				}
+				// GC it
+				proc.IIPs = nil
+			}
+
+			// start handler for regular packets/frames
+			go handleComponentInput(instances[proc.Name].Input, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
+
+			// NOTE: this using manual buffering
+			go handleComponentOutput(proc, instances, cout, debug, quiet)
+
 			//TODO detect subprocess exit proper -> send info upstream
 			cmd.Wait()
 			exitChan <- name
 
+			//TODO
 			//defer lout.Close()
 			//defer lerr.Close()
 		}(proc.Name)
@@ -461,70 +149,171 @@ func main() {
 
 	// run while there are still components running
 	//TODO is this practically useful behavior?
-	for len(launch) > 0 {
+	for len(instances) > 0 {
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
-		fmt.Println("WARNING: Component", procName, "has exited.")
-		delete(launch, procName)
+		fmt.Println("WARNING: Process", procName, "has exited.")
+		delete(instances, procName)
 	}
-	fmt.Println("INFO: All components have exited. Exiting.")
+	fmt.Println("INFO: All processes have exited. Exiting.")
 
 	// detect voluntary network shutdown
 	//TODO how to decide that it should happen? should 1 component be able to trigger network shutdown?
-	//TODO
 }
 
-// NOTE: enums in Go @ https://stackoverflow.com/questions/14426366/what-is-an-idiomatic-way-of-representing-enums-in-go
-type Placement int
+func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteCloser, debug bool, quiet bool) {
+	countw := datacounter.NewWriterCounter(cin)
+	var oldCount uint64
+	var frame SourceFrame
+	for {
+		// wait for frame
+		frame = <-input
 
-const (
-	Local Placement = iota
-	Remote
-)
+		// check for EOF = channel got closed -> exit goroutine
+		if frame.Source == nil {
+			fmt.Println("EOF from network input channel - closing.")
+			break
+		}
 
-type Process struct {
-	Path         string
-	Placement    Placement
-	Architecture string //x86, x86_64, armv7l, armv8
-	Name         string
-	InPorts      []Port
-	OutPorts     []Port
-	IIPs         []Port //TODO maybe a better data structure for that?
+		// received fine
+		if debug {
+			fmt.Println("received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO difference between this and string(fr.Body) ?
+		}
+
+		// check frame Port header field if it matches the name of this input endpoint
+		//TODO convert from array to map
+		found := false
+		for _, port := range proc.InPorts {
+			if port.LocalPort == frame.Port {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fmt.Println("net in: WARNING: frame for wrong/undeclared inport", frame.Port, " - discarding.")
+			// discard frame
+			continue
+		}
+		// forward frame to component
+		if err := frame.Marshal(countw); err != nil {
+			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
+		}
+
+		// status message
+		if debug {
+			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin")
+		} else if !quiet {
+			fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
+		}
+		oldCount = countw.Count()
+	}
 }
 
-type Port struct {
-	LocalName    string
-	LocalAddress string
+func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser, debug bool, quiet bool) {
+	defer cout.Close()
+	countr := datacounter.NewReaderCounter(cout)
+	bufr := bufio.NewReader(countr)
+	var oldCount uint64
+	var frame *flowd.Frame
+	var err error
+	for {
+		frame, err = flowd.ParseFrame(bufr)
 
-	RemoteName    string
-	RemoteAddress string
+		// check for error
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("EOF from component stdout. Exiting.")
+			} else {
+				fmt.Println("ERROR parsing frame from component stdout:", err, "- Exiting.")
+			}
+			return
+		}
 
-	IIP string //TODO regular connections have to carry that info around as well
+		if debug {
+			fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with contents:", string(frame.Body))
+		}
+
+		// write out to network
+		//TODO convert from array to map
+		var outPort *Port
+		for _, port := range proc.OutPorts {
+			if port.LocalPort == frame.Port {
+				outPort = &port
+				break
+			}
+		}
+		// check for valid outport
+		if outPort == nil {
+			fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", outPort.LocalPort)
+			return
+		}
+
+		// rewrite frame.Port to match the other side's input port name
+		// NOTE: This makes multiple input ports possible
+		frame.Port = outPort.RemotePort
+
+		// send to input channel of target process
+		instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
+		//TODO if accurate output byte count is desired (mabe in debug mode)
+		/*
+			countw = datacounter.NewWriterCounter(e.Conn) //TODO could save this WriterCounter in Endpoint struct
+			if err := frame.Marshal(countw); err != nil {
+				fmt.Println("net out: ERROR: marshalling frame into output endpoint", localPort, ":", err.Error(), "- closing.")
+				outEndpoints[localPort].Close()
+				//TODO return as well = close down all output operations or allow one output to fail?
+			}
+		*/
+
+		// status message
+		//TODO byte count is not entirely accurate since Port was changed
+		if debug {
+			fmt.Println("net out wrote", countr.Count()-oldCount, "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
+		} else if !quiet {
+			fmt.Println("out xfer", countr.Count()-oldCount, "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
+		}
+		oldCount = countr.Count()
+	}
 }
 
-func NewProcess(proc *fbp.Process) *Process {
-	// return new Process struct
-	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}}
-}
+func handleNetOut(instance *ComponentInstance) {
+	var frame SourceFrame
+	for {
+		frame = <-instance.Input
 
-func GeneratePortName(endpoint *fbp.Endpoint) string {
-	if endpoint.Index == nil {
-		return endpoint.Port
-	} else {
-		return fmt.Sprintf("%s[%d]", endpoint.Port, *endpoint.Index)
+		// check for EOF
+		if frame.Source == nil {
+			fmt.Println("NETOUT received EOF on channel, exiting.")
+			break
+		}
+
+		//TODO implement FBP websocket protocol and send to that
+		fmt.Printf("NETOUT received frame from %s for port %s: %s - Discarding.\n", frame.Source.Name, frame.Port, string(frame.Body))
 	}
 }
 
 func printUsage() {
-	fmt.Println("Usage:", os.Args[0], "-in [inport-endpoint(s)]", "-out [outport-endpoint(s)]", "[network-def-file]")
+	//TODOfmt.Println("Usage:", os.Args[0], "-in [inport-endpoint(s)]", "-out [outport-endpoint(s)]", "[network-def-file]")
+	fmt.Println("Usage:", os.Args[0], "[network-def-file]")
 	flag.PrintDefaults()
 	os.Exit(1)
 }
 
-type LaunchInstance struct {
-	ExitTo chan bool // command launch instance to shut down
+// ComponentInstances is the collection type for holding the ComponentInstance list
+type ComponentInstances map[string]*ComponentInstance
+
+// ComponentInstance contains state about a running network process
+type ComponentInstance struct {
+	//TODO only keep sendable chans here, return receiving channels from newComponentInstance()
+	ExitTo chan bool        // tell command handler - and therefore component - to shut down
+	Input  chan SourceFrame // handler inbox for sending a frame to it
 }
 
-func NewLaunchInstance() *LaunchInstance {
-	return &LaunchInstance{ExitTo: make(chan bool)}
+func newComponentInstance() *ComponentInstance {
+	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame)}
+}
+
+// SourceFrame contains an actual frame plus sender information used in handler functions
+type SourceFrame struct {
+	*flowd.Frame
+	Source *Process
 }
