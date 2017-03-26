@@ -13,10 +13,10 @@ import (
 
 func main() {
 	var help, debug bool
-	var bodyType, port, contentType string
+	var bodyType, port string //, contentType string
 	flag.StringVar(&bodyType, "bodytype", "", "data type of the frame body")
 	flag.StringVar(&port, "port", "in", "port name for which this frame is destined")
-	flag.StringVar(&contentType, "content-type", "text/plain", "MIME content type of the frame body")
+	//flag.StringVar(&contentType, "content-type", "text/plain", "MIME content type of the frame body")
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "print debug messages to stderr")
 	flag.Parse()
@@ -58,12 +58,12 @@ func main() {
 		}
 		bodyBytes := body.Bytes() //TODO optimize
 		frame := &flowd.Frame{
-			Type:        "data",
-			BodyType:    bodyType,
-			Port:        port,
-			ContentType: contentType,
-			Body:        bodyBytes,
-			Extensions:  map[string]string{},
+			Type:     "data",
+			BodyType: bodyType,
+			Port:     port,
+			//ContentType: contentType,
+			Body:       bodyBytes,
+			Extensions: map[string]string{},
 		}
 		if debug {
 			frame.Marshal(os.Stderr)
@@ -78,7 +78,7 @@ func main() {
 	}
 }
 
-func CheckError(err error) {
+func checkError(err error) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
@@ -86,7 +86,8 @@ func CheckError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "-bodytype [data-type]", "-content-type [mime-type]", "-port [name]")
+	//fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "-bodytype [data-type]", "-content-type [mime-type]", "-port [name]")
+	fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "-bodytype [data-type]", "-port [name]")
 	flag.PrintDefaults()
 	os.Exit(1)
 }

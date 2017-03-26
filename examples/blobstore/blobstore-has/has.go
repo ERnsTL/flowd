@@ -60,12 +60,12 @@ func main() {
 	// pre-declare to reduce GC allocations
 	var inframe *flowd.Frame
 	outframe := flowd.Frame{
-		Type:        "data",
-		BodyType:    "BlobExistence",
-		Port:        "OUT",
-		ContentType: "text/plain; charset=utf-8",
-		Extensions:  map[string]string{},
-		Body:        nil,
+		Type:     "data",
+		BodyType: "BlobExistence",
+		Port:     "OUT",
+		//ContentType: "text/plain; charset=utf-8",
+		Extensions: map[string]string{},
+		Body:       nil,
 	}
 	trueBytes := []byte("TRUE")
 	falseBytes := []byte("FALSE")

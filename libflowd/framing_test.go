@@ -41,7 +41,8 @@ func TestFrameHasRequiredMethods(t *testing.T) {
 
 func TestFrameParsesAndMarshals(t *testing.T) {
 	// parse
-	frameStr := fmt.Sprintf("%s\r\n%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TextMessage", "Port: options", "Content-Type: text/plain", "Content-Length: 4", "TEST")
+	//frameStr := fmt.Sprintf("%s\r\n%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TextMessage", "Port: options", "Content-Type: text/plain", "Content-Length: 4", "TEST")
+	frameStr := fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TextMessage", "Port: options", "Content-Length: 4", "TEST")
 	//r := strings.NewReader(frameStr)
 	var frame *flowd.Frame
 	var err error
@@ -52,7 +53,7 @@ func TestFrameParsesAndMarshals(t *testing.T) {
 	assert.Equal(t, "data", frame.Type, "parsed wrong data type")
 	assert.Equal(t, "TextMessage", frame.BodyType, "parsed wrong body type")
 	assert.Equal(t, "options", frame.Port, "parsed wrong port")
-	assert.Equal(t, "text/plain", frame.ContentType, "parsed wrong content type")
+	//assert.Equal(t, "text/plain", frame.ContentType, "parsed wrong content type")
 	assert.Equal(t, "TEST", (string)(frame.Body), "parsed wrong body")
 
 	// marshal

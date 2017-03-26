@@ -83,7 +83,7 @@ func main() {
 			Type:        "data",
 			BodyType:    "Message",
 			Port:        "ERROR",
-			ContentType: "text/plain; charset=UTF-8",
+			//ContentType: "text/plain; charset=UTF-8",
 			Body:        nil,
 		}
 	*/

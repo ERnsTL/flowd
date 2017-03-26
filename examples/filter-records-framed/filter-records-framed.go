@@ -20,11 +20,11 @@ func main() {
 	var inframe *flowd.Frame
 	var err error
 	outframe := flowd.Frame{
-		Type:        "data",
-		BodyType:    "Message",
-		Port:        "OUT",
-		ContentType: "application/json",
-		Body:        nil,
+		Type:     "data",
+		BodyType: "Message",
+		Port:     "OUT",
+		//ContentType: "application/json",
+		Body: nil,
 	}
 
 	for {

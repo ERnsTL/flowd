@@ -216,12 +216,12 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 	// prepare data structures
 	buf := make([]byte, bufSize)
 	outframe := flowd.Frame{
-		Type:        "data",
-		BodyType:    "TCPPacket",
-		Port:        "OUT",
-		ContentType: "application/octet-stream",
-		Extensions:  map[string]string{"Tcp-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
-		Body:        nil,
+		Type:     "data",
+		BodyType: "TCPPacket",
+		Port:     "OUT",
+		//ContentType: "application/octet-stream",
+		Extensions: map[string]string{"Tcp-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
+		Body:       nil,
 	}
 
 	// process TCP packets

@@ -60,11 +60,11 @@ func main() {
 	// pre-declare to reduce GC allocations
 	var inframe *flowd.Frame
 	outframe := flowd.Frame{
-		Type:        "data",
-		BodyType:    "BlobListEntry",
-		Port:        "OUT",
-		ContentType: "text/plain; charset=utf-8",
-		Body:        nil,
+		Type:     "data",
+		BodyType: "BlobListEntry",
+		Port:     "OUT",
+		//ContentType: "text/plain; charset=utf-8",
+		Body: nil,
 	}
 	bracketO := flowd.Frame{
 		Type:     "control",

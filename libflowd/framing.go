@@ -10,50 +10,55 @@ import (
 	"strings"
 )
 
+// Frame is a central structure used for carrying information through the processing network
 type Frame struct {
-	Type        string
-	BodyType    string
-	Port        string
-	ContentType string
-	Extensions  map[string]string
-	Body        []byte
+	Type       string
+	BodyType   string
+	Port       string
+	Extensions map[string]string
+	Body       []byte
 }
 
+// ParseFrame reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
 // NOTE: require bufio.Reader not io.Reader, because textproto.Reader requires one. Making a local one would swallow any following frames into it.
 func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	// read headers
 	textReader := textproto.NewReader(stream) //TODO To avoid denial of service attacks, the provided bufio.Reader should be reading from an io.LimitReader or similar Reader to bound the size of responses.
 	header, err := textReader.ReadMIMEHeader()
+	var port []string
+	var ipType []string
+	var found bool
 	if err != nil {
 		return nil, errors.New("cannot parse into frame header: " + err.Error())
 	}
-	if _, ok := header["Type"]; !ok {
+	if ipType, found = header["Type"]; !found {
 		return nil, errors.New("missing Type header field")
 	}
-	types := strings.SplitN(header.Get("Type"), ".", 2)
+	if port, found = header["Port"]; !found {
+		return nil, errors.New("missing Port header field")
+	}
+	types := strings.SplitN(ipType[0], ".", 2)
 	if len(types) != 2 {
 		return nil, errors.New("missing separator in Type header field")
 	}
-	// NOTE: Port and Content-Type can be missing at the moment
-	f = &Frame{Type: types[0], BodyType: types[1], Port: header.Get("Port"), ContentType: header.Get("Content-Type"), Body: nil}
+	// initialize frame structure
+	f = &Frame{Type: types[0], BodyType: types[1], Port: port[0], Body: nil}
 	// read content length
-	if _, ok := header["Content-Length"]; !ok {
+	var lenStr []string
+	if lenStr, found = header["Content-Length"]; !found {
 		return nil, errors.New("missing Content-Length header field")
 	}
-	lenStr := header.Get("Content-Length")
-	lenInt, err := strconv.Atoi(lenStr)
+	lenInt, err := strconv.Atoi(lenStr[0])
 	if err != nil {
 		return nil, errors.New("converting content length to integer: " + err.Error())
 	}
 	// read any remaining header fields into frame.Extensions
-	//FIXME implement this correctly, also without the deletions
-	//TODO convert to map[string][]string, which http.Header and textproto.MIMEHeader are
-	//TODO decide if map[string]string would also suffice (are duplicate headers useful? maybe for layered information.)
-	delete(header, "Type")
-	delete(header, "Port")
-	delete(header, "Content-Type")
-	delete(header, "Content-Length")
-	if len(header) > 0 {
+	//FIXME optimize: do without the deletions
+	//TODO decide if map[string]string suffices (are duplicate headers useful? maybe for layered information.)
+	if len(header) > 3 {
+		delete(header, "Type")
+		delete(header, "Port")
+		delete(header, "Content-Length")
 		f.Extensions = make(map[string]string)
 		for key, values := range header {
 			//FIXME implement this correctly
@@ -66,14 +71,15 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	if n, err := io.ReadFull(stream, buf); err != nil {
 		if err == io.EOF {
 			return nil, errors.New("reading full frame body encountered EOF: " + err.Error())
-		} else {
-			return nil, errors.New(fmt.Sprintf("reading full frame body short read %d bytes of %d expected: %s", n, lenInt, err.Error()))
 		}
+		return nil, fmt.Errorf("reading full frame body short read %d bytes of %d expected: %s", n, lenInt, err.Error())
 	}
 	f.Body = buf
 	return f, nil
 }
 
+// Marshal serializes an IP into a data stream, like STDIN into a network process or a network connection
+//TODO avoid allocating buffered writer on every call
 func (f *Frame) Marshal(stream io.Writer) error {
 	if f == nil {
 		return errors.New("refusing to marshal nil frame")
@@ -86,9 +92,6 @@ func (f *Frame) Marshal(stream io.Writer) error {
 	if err := printHeaderLine(tpw, "port", f.Port); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
-	if err := printHeaderLine(tpw, "content-type", f.ContentType); err != nil {
-		return errors.New("marshal: " + err.Error())
-	}
 	if err := printHeaderLine(tpw, "content-length", strconv.Itoa(len(f.Body))); err != nil {
 		return errors.New("marshal: " + err.Error())
 	}
@@ -96,9 +99,8 @@ func (f *Frame) Marshal(stream io.Writer) error {
 		for key, value := range f.Extensions {
 			if err := printHeaderLine(tpw, key, value); err != nil {
 				return errors.New("marshal extension header: " + err.Error())
-			} else {
-				//fmt.Fprintf(os.Stderr, "marshal extension header: %s = %s\n", key, value)
 			}
+			//fmt.Fprintf(os.Stderr, "marshal extension header: %s = %s\n", key, value)
 		}
 	}
 	if err := finalizeHeader(tpw); err != nil {

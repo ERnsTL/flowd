@@ -69,11 +69,11 @@ func main() {
 	var inframe *flowd.Frame
 	var err error
 	outframe := flowd.Frame{
-		Type:        "data",
-		BodyType:    "BlobChanged",
-		Port:        "OUT",
-		ContentType: "text/plain; charset=utf-8",
-		Body:        nil,
+		Type:     "data",
+		BodyType: "BlobChanged",
+		Port:     "OUT",
+		//ContentType: "text/plain; charset=utf-8",
+		Body: nil,
 	}
 	var blobname string
 
