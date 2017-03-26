@@ -254,19 +254,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 
 		// send to input channel of target process
 		instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
-		//TODO if accurate output byte count is desired (mabe in debug mode)
-		/*
-			countw = datacounter.NewWriterCounter(e.Conn) //TODO could save this WriterCounter in Endpoint struct
-			if err := frame.Marshal(countw); err != nil {
-				fmt.Println("net out: ERROR: marshalling frame into output endpoint", localPort, ":", err.Error(), "- closing.")
-				outEndpoints[localPort].Close()
-				//TODO return as well = close down all output operations or allow one output to fail?
-			}
-		*/
 
 		// status message
-		//TODO byte count is not entirely accurate since Port was changed
 		if debug {
+			// NOTE: if accurate byte count was desired, then add -uint64(len(outPort.LocalPort))+uint64(len(outPort.RemotePort))
 			fmt.Println("net out wrote", countr.Count()-oldCount, "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
 		} else if !quiet {
 			fmt.Println("out xfer", countr.Count()-oldCount, "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
