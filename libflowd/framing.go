@@ -19,6 +19,30 @@ type Frame struct {
 	Body       []byte
 }
 
+/*
+NOTE to self:
+1) lowercase header fields
+2) optional CR in CRLF
+3) no space before header value
+4) change Content-Length to length
+
+Examples:
+
+Type: data.MessageTypeRN
+Port: OUTRN
+Content-Length: 10RN
+Tcp-Id: 123RN
+RN
+= 70 bytes
+
+type:data.MessageTypeN
+port:OUTN
+length:10N
+tcp-id:123N
+N
+= 53 bytes
+*/
+
 // ParseFrame reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
 // NOTE: require bufio.Reader not io.Reader, because textproto.Reader requires one. Making a local one would swallow any following frames into it.
 func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
