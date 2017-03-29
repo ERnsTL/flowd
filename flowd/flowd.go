@@ -15,9 +15,11 @@ import (
 func main() {
 	// read program arguments
 	var help, debug, quiet, graph bool
+	var olc string
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+	flag.StringVar(&olc, "olc", "", "host:port for online configuration using JSON FBP protocol")
 	flag.BoolVar(&graph, "graph", false, "output visualization of given network in GraphViz format and exit")
 	flag.Parse()
 	if help {
@@ -29,6 +31,10 @@ func main() {
 
 	// parse and validate network
 	nw := parseNetworkDefinition(nwBytes, debug)
+	if olc != "" && (len(nw.Inports) > 0 || len(nw.Outports) > 0) {
+		fmt.Println("ERROR: NETIN and NETOUT only allowed with -olc, otherwise use communication components")
+		os.Exit(1)
+	}
 
 	// display all data
 	if debug {
@@ -145,6 +151,11 @@ func main() {
 			//defer lout.Close()
 			//defer lerr.Close()
 		}(proc.Name)
+	}
+
+	// start up online configuration
+	if olc != "" {
+		//TODO
 	}
 
 	// run while there are still components running
