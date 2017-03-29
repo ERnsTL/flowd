@@ -56,10 +56,10 @@ In this example, a simple processing pipeline is run using the network orchestra
 
   You can find out more about the ```.fbp``` network description grammar here:
 
-    * [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
-    * [his .fbp parser source](https://github.com/jpaulm/parsefbp)
-    * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
-    * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
+  * [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
+  * [his .fbp parser source](https://github.com/jpaulm/parsefbp)
+  * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
+  * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
 
 1. Send in some data for processing:
 
