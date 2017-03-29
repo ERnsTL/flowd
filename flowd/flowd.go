@@ -32,7 +32,7 @@ func main() {
 	// parse and validate network
 	nw := parseNetworkDefinition(nwBytes, debug)
 	if olc != "" && (len(nw.Inports) > 0 || len(nw.Outports) > 0) {
-		fmt.Println("ERROR: NETIN and NETOUT only allowed with -olc, otherwise use communication components")
+		fmt.Println("ERROR: NETIN and NETOUT require -olc, otherwise use TCP/UDP/SSH/UNIX/etc. components")
 		os.Exit(1)
 	}
 
