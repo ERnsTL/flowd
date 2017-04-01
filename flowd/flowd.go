@@ -155,7 +155,7 @@ func main() {
 
 	// start up online configuration
 	if olc != "" {
-		//TODO
+		startOLC(olc)
 	}
 
 	// run while there are still components running

@@ -241,6 +241,12 @@ Running tests:
   GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
   ```
 
+Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
+
+  ```
+  fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
+  ```
+
 ## License
 
 GNU LGPLv3+
