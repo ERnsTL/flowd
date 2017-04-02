@@ -1,0 +1,18 @@
+# UNIX chat/console server
+# start using:
+#   bin/flowd -debug src/github.com/ERnsTL/flowd/examples/unix-server.fbp
+# connect using, for example:
+#   socat - UNIX-CLIENT:/tmp/mychatserver
+#   socat - ABSTRACT-CLIENT:mychatserver/test
+
+unix(bin/unix-server) OUT -> IN chat(bin/chat) OUT -> IN unix
+
+# abstract UNIX socket are also supported, e.g. @path/path/path
+'unix:@mychatserver/test' -> CONF unix
+
+# regular filesystem-bound UNIX socket:
+#'unix:/tmp/mychatserver' -> CONF unix
+
+# packet-oriented UNIX sockets (SEQPACKET) are also supported (untested, TODO):
+#'unixpacket:@mychatserver/test' -> CONF unix
+#'unixpacket:/tmp/mychatserver' -> CONF unix
