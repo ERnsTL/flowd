@@ -34,7 +34,7 @@ func main() {
 		// get configuration from IIP = initial information packet/frame
 		fmt.Fprintln(os.Stderr, "wait for IIP")
 		if iip, err := flowd.GetIIP("CONF", stdin); err != nil {
-			fmt.Println("ERROR getting IIP:", err, "- Exiting.")
+			fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 			os.Exit(1)
 		} else {
 			os.Args = []string{"", iip}
@@ -58,23 +58,23 @@ func main() {
 		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
 		BodyType: "CloseNotification",
 		Extensions: map[string]string{
-			"Tcp-Id": "",
-			//"Tcp-Remote-Address": "",
+			"Conn-Id": "",
+			//"Remote-Address": "",
 		},
 	}
 	/* NOTE:
 	OpenNotification is used to inform downstream component(s) of a new connection
 	and - once - send which address and port is on the other side. Downstream components
 	can check, save etc. the address information, but for sending responses, the
-	Tcp-Id header is relevant.
+	Conn-Id header is relevant.
 	*/
 	openNotification := flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
 		BodyType: "OpenNotification",
 		Extensions: map[string]string{
-			"Tcp-Id":             "",
-			"Tcp-Remote-Address": "",
+			"Conn-Id":        "",
+			"Remote-Address": "",
 		},
 	}
 
@@ -85,7 +85,8 @@ func main() {
 		for {
 			//TODO what if no complete frame has been received? -> try again later instead of closing.
 			//stdin := bufio.NewReader(os.Stdin)
-			if frame, err := flowd.ParseFrame(stdin); err != nil {
+			frame, err := flowd.ParseFrame(stdin)
+			if err != nil {
 				if err == io.EOF {
 					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
 				} else {
@@ -96,75 +97,75 @@ func main() {
 				//TODO gracefully shut down / close all connections
 				os.Exit(0) // TODO exit with non-zero code if error parsing frame
 				return
-			} else { // frame complete now
-				//TODO if debug -- add flag
-				//fmt.Fprintln(os.Stderr, "tcp-server: frame in with", bodyLen, "bytes body")
-				/*
-					//TODO add debug flag; TODO add proper flag parsing
-					if debug {
-						fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
-					}
-				*/
+			}
 
-				//TODO check for non-data/control frames
+			//TODO if debug -- add flag
+			//fmt.Fprintln(os.Stderr, "tcp-server: frame in with", bodyLen, "bytes body")
+			/*
+				//TODO add debug flag; TODO add proper flag parsing
+				if debug {
+					fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
+				}
+			*/
 
-				///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+			//TODO check for non-data/control frames
 
-				//TODO error feedback for unknown/unconnected/closed TCP connections
-				// check if frame has any extension headers at all
-				if frame.Extensions == nil {
-					fmt.Fprintln(os.Stderr, "ERROR: frame is missing extension headers - Exiting.")
+			///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+
+			//TODO error feedback for unknown/unconnected/closed TCP connections
+			// check if frame has any extension headers at all
+			if frame.Extensions == nil {
+				fmt.Fprintln(os.Stderr, "ERROR: frame is missing extension headers - Exiting.")
+				//TODO gracefully shut down / close all connections
+				os.Exit(1)
+			}
+			// check if frame has Conn-Id in header
+			if connIDStr, exists := frame.Extensions["Conn-Id"]; exists {
+				// check if Conn-Id header is integer number
+				if connID, err := strconv.Atoi(connIDStr); err != nil {
+					// Conn-Id header not an integer number
+					//TODO notification back to FBP network of error
+					fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Conn-Id header %s: %s - Exiting.\n", connIDStr, err)
 					//TODO gracefully shut down / close all connections
 					os.Exit(1)
-				}
-				// check if frame has TCP-ID in header
-				if connIDStr, exists := frame.Extensions["Tcp-Id"]; exists {
-					// check if TCP-ID header is integer number
-					if connID, err := strconv.Atoi(connIDStr); err != nil {
-						// TCP-ID header not an integer number
-						//TODO notification back to FBP network of error
-						fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Tcp-Id header %s: %s - Exiting.\n", connIDStr, err)
-						//TODO gracefully shut down / close all connections
-						os.Exit(1)
-					} else {
-						// check if there is a TCP connection known for that TCP-ID
-						if conn, exists := conns[connID]; exists { // found connection
-							// write frame body out to TCP connection
-							if bytesWritten, err := conn.Write(frame.Body); err != nil {
-								//TODO check for EOF
-								fmt.Fprintf(os.Stderr, "net out: ERROR writing to TCP connection with %s: %s - closing.\n", conn.RemoteAddr(), err)
-								//TODO gracefully shut down / close all connections
-								os.Exit(1)
-							} else if bytesWritten < len(frame.Body) {
-								// short write
-								fmt.Fprintf(os.Stderr, "net out: ERROR: short send to TCP connection with %s, only %d of %d bytes written - closing.\n", conn.RemoteAddr(), bytesWritten, len(frame.Body))
-								//TODO gracefully shut down / close all connections
-								os.Exit(1)
-							} else {
-								// success
-								//TODO if !quiet - add that flag
-								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connID, bytesWritten, conn.RemoteAddr())
-							}
-
-							if frame.BodyType == "TCPCloseConnection" {
-								fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connID)
-								// close command received, close connection
-								conn.Close()
-								// NOTE: will be cleaned up on next conn.Read() in handleConnection()
-							}
-						} else {
-							// TCP connection not found - could have been closed in meantime or wrong TCP-ID in frame header
-							//TODO notification back to FBP network of undeliverable message
+				} else {
+					// check if there is a TCP connection known for that Conn-Id
+					if conn, exists := conns[connID]; exists { // found connection
+						// write frame body out to TCP connection
+						if bytesWritten, err := conn.Write(frame.Body); err != nil {
+							//TODO check for EOF
+							fmt.Fprintf(os.Stderr, "net out: ERROR writing to TCP connection with %s: %s - closing.\n", conn.RemoteAddr(), err)
 							//TODO gracefully shut down / close all connections
 							os.Exit(1)
+						} else if bytesWritten < len(frame.Body) {
+							// short write
+							fmt.Fprintf(os.Stderr, "net out: ERROR: short send to TCP connection with %s, only %d of %d bytes written - closing.\n", conn.RemoteAddr(), bytesWritten, len(frame.Body))
+							//TODO gracefully shut down / close all connections
+							os.Exit(1)
+						} else {
+							// success
+							//TODO if !quiet - add that flag
+							fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connID, bytesWritten, conn.RemoteAddr())
 						}
+
+						if frame.BodyType == "CloseConnection" {
+							fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connID)
+							// close command received, close connection
+							conn.Close()
+							// NOTE: will be cleaned up on next conn.Read() in handleConnection()
+						}
+					} else {
+						// TCP connection not found - could have been closed in meantime or wrong Conn-Id in frame header
+						//TODO notification back to FBP network of undeliverable message
+						//TODO gracefully shut down / close all connections
+						os.Exit(1)
 					}
-				} else {
-					// TCP-ID extension header missing
-					fmt.Fprintln(os.Stderr, "ERROR: frame is missing Tcp-Id header - Exiting.")
-					//TODO gracefully shut down / close all connections
-					os.Exit(1)
 				}
+			} else {
+				// Conn-Id extension header missing
+				fmt.Fprintln(os.Stderr, "ERROR: frame is missing Conn-Id header - Exiting.")
+				//TODO gracefully shut down / close all connections
+				os.Exit(1)
 			}
 		}
 	}(stdin)
@@ -179,7 +180,7 @@ func main() {
 			delete(conns, id)
 			// send close notification downstream
 			//TODO with reason (error or closed from other side/this side)
-			closeNotification.Extensions["Tcp-Id"] = strconv.Itoa(id)
+			closeNotification.Extensions["Conn-Id"] = strconv.Itoa(id)
 			closeNotification.Marshal(os.Stdout)
 		}
 	}()
@@ -195,8 +196,8 @@ func main() {
 		conn.SetKeepAlivePeriod(5 * time.Second)
 		conns[id] = conn
 		// send new-connection notification downstream
-		openNotification.Extensions["Tcp-Id"] = strconv.Itoa(id)
-		openNotification.Extensions["Tcp-Remote-Address"] = fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr)) // copied from handleConnection()
+		openNotification.Extensions["Conn-Id"] = strconv.Itoa(id)
+		openNotification.Extensions["Remote-Address"] = fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr)) // copied from handleConnection()
 		openNotification.Marshal(os.Stdout)
 		// handle connection
 		go handleConnection(conn, id, closeChan)
@@ -220,7 +221,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		BodyType: "TCPPacket",
 		Port:     "OUT",
 		//ContentType: "application/octet-stream",
-		Extensions: map[string]string{"Tcp-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Tcp-Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
+		Extensions: map[string]string{"Conn-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:       nil,
 	}
 

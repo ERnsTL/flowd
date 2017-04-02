@@ -12,6 +12,7 @@ import (
 
 const prompt = "> "
 
+// ChatClient holds the state of a connected client
 type ChatClient struct {
 	state    string
 	username string
@@ -49,9 +50,9 @@ func main() {
 	closeCommand := &flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
-		BodyType: "TCPCloseConnection",
+		BodyType: "CloseConnection",
 		Extensions: map[string]string{
-			"Tcp-Id": "",
+			"Conn-Id": "",
 		},
 	}
 
@@ -59,12 +60,12 @@ func main() {
 		// read frame
 		frame, err = flowd.ParseFrame(bufr)
 		// get connection ID
-		id = frame.Extensions["Tcp-Id"]
+		id = frame.Extensions["Conn-Id"]
 
 		// check connection ID - known?
 		// NOTE: not necessary, because we should receive a n
 		/*
-			if id, found = frame.Extensions["Tcp-Id"]; !found {
+			if id, found = frame.Extensions["Conn-Id"]; !found {
 
 			}
 		*/
@@ -122,7 +123,7 @@ func main() {
 				// send close request
 				fmt.Fprintf(os.Stderr, "%s: sending close command.\n", id)
 				frame = closeCommand
-				frame.Extensions["Tcp-Id"] = id
+				frame.Extensions["Conn-Id"] = id
 				Respond(frame, fmt.Sprintln("kthxbye!"))
 			case "help":
 				Respond(frame, fmt.Sprintf("commands: exit, quit, logout\n%s", prompt))
@@ -141,6 +142,7 @@ func main() {
 	}
 }
 
+// Respond is a helper function to quickly set a frame body from a string
 func Respond(f *flowd.Frame, text string) {
 	f.Body = []byte(text)
 }
