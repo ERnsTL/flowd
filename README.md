@@ -247,6 +247,8 @@ Running tests for the JSON FBP network protocol: Follow [the basic instructions]
   fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
   ```
 
+Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
+
 ## License
 
 GNU LGPLv3+
