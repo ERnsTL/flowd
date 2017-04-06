@@ -2,17 +2,23 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
+
+var (
+	debug, quiet bool //TODO is that a good idea? concurrent variable access? performance?
+)
 
 func main() {
 	// open connection to network
@@ -25,13 +31,44 @@ func main() {
 		os.Exit(1)
 	}
 	//TODO parse using flags package -> -maxconn flag and listen address as free parameter
+	// parse IIP
+	flags := flag.NewFlagSet("unix-server", flag.ContinueOnError)
+	var retry, bridge bool
+	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
+	flags.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
+	flags.BoolVar(&debug, "debug", false, "give detailed event output")
+	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
+		printUsage()
+		flags.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
+		printUsage()
+		flags.PrintDefaults()
+		os.Exit(2)
+	}
+
+	//TODO implement
+	if retry {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -retry currently unimplemented - exiting.")
+		os.Exit(2)
+	}
+	//TODO implement
+	if bridge {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -bridge currently unimplemented - exiting.")
+		os.Exit(2)
+	}
 
 	// parse listen address as URL
-	listenURL, err := url.ParseRequestURI(iip)
+	// NOTE: no double slashes after semicolon, otherwise what is given after that
+	// gets put into .Host and .Path and @ (for abstract sockets) cannot be recognized
+	listenURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
 	listenNetwork := listenURL.Scheme
 	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
-	//os.Exit(1)
 	listenPath := listenURL.Opaque
 	if listenNetwork == "unixgram" {
 		fmt.Fprintln(os.Stderr, "ERROR: network 'unixgram' unimplemented, refer to unixgram-server component - Exiting.") //TODO implement that
@@ -203,6 +240,10 @@ func checkError(err error) {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
 	}
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]\n")
 }
 
 func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
