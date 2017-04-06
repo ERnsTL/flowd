@@ -29,7 +29,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
 		os.Exit(1)
 	}
-	//TODO parse using flags package -> -retry/-reconnect flag, -bridge = current mode or -body
 	// parse IIP
 	flags := flag.NewFlagSet("tcp-client", flag.ContinueOnError)
 	var retry, bridge bool
@@ -50,6 +49,12 @@ func main() {
 		os.Exit(2)
 	}
 	hostPort := flags.Args()[0]
+
+	//TODO implement
+	if retry {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -retry currently unimplemented - exiting.")
+		os.Exit(2)
+	}
 
 	fmt.Fprintln(os.Stderr, "resolving addresses")
 	serverAddr, err := net.ResolveTCPAddr("tcp", hostPort)
@@ -140,6 +145,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, "got close command, closing connection.")
 					// close command received, close connection
 					conn.Close()
+					//TODO send into closeChan, dont close it here
 				}
 			}
 		}()
