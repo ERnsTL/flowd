@@ -134,7 +134,7 @@ func main() {
 				}
 
 				//TODO check for non-data/control frames
-				///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+				//FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
 				//TODO error feedback for unknown/unconnected/closed TCP connections
 
 				// write frame body out to UNIX connection
