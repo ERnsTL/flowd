@@ -1,4 +1,5 @@
-flowd: An application structuring system based on flow-based programming (FBP).
+flowd: An application structuring system based on flow-based programming (FBP)
+with basic components and example network definitions.
 Copyright (C) 2016, 2017 Ernst Rohlicek
 
 
