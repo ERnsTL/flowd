@@ -137,7 +137,7 @@ func main() {
 				}
 
 				if frame.BodyType == "CloseConnection" {
-					fmt.Fprintf(os.Stderr, "got close command, closing connection.\n")
+					fmt.Fprintln(os.Stderr, "got close command, closing connection.")
 					// close command received, close connection
 					conn.Close()
 				}
@@ -189,7 +189,7 @@ func handleConnection(conn *net.TCPConn, closeChan chan<- bool) {
 			// check more specifically
 			if err == io.EOF {
 				// EOF = closed by peer or already closed @ STDIN handler goroutine or network error
-				fmt.Fprintf(os.Stderr, "tcp in: EOF on connection, closing.\n")
+				fmt.Fprintln(os.Stderr, "tcp in: EOF on connection, closing.")
 			} else if neterr, isneterr := err.(net.Error); isneterr && neterr.Timeout() {
 				// network timeout
 				fmt.Fprintf(os.Stderr, "tcp in: ERROR reading from %v: timeout: %s, closing.\n", conn.RemoteAddr(), neterr)
@@ -213,7 +213,7 @@ func handleConnection(conn *net.TCPConn, closeChan chan<- bool) {
 		}
 
 		if debug {
-			fmt.Fprintf(os.Stderr, "read %d bytes from %s: %s\n", bytesRead, conn.RemoteAddr(), buf[:bytesRead])
+			fmt.Fprintf(os.Stderr, "tcp in: read %d bytes from %s: %s\n", bytesRead, conn.RemoteAddr(), buf[:bytesRead])
 		} else if !quiet {
 			fmt.Fprintf(os.Stderr, "tcp in: read %d bytes from %s\n", bytesRead, conn.RemoteAddr())
 		}
