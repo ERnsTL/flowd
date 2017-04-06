@@ -2,14 +2,14 @@
 # start using:
 # bin/flowd src/github.com/ERnsTL/flowd/examples/unix-client-server-test.fbp
 
-# UNIX server and display what comes in
+# UNIX server with listen address and display what comes in
 unixs(bin/unix-server) OUT -> IN display(bin/display)
 'unix:@flowdtest/myunixserver' -> CONF unixs
 
 # UNIX client and send some data to UNIX server
 delayConn(bin/sleep) OUT -> CONF unixc(bin/unix-client)
 
-# allow UNIX server to start, then send it its target address to CONF
+# allow UNIX server to start, then send it its remote address to CONF
 '3s' -> CONF delayConn
 'unix:@flowdtest/myunixserver' -> IN delayConn
 

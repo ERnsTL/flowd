@@ -44,7 +44,7 @@ func main() {
 		os.Exit(2)
 	}
 	if flags.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "ERROR: missing target address - exiting.")
+		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
 		printUsage()
 		flags.PrintDefaults()
 		os.Exit(2)
