@@ -2,11 +2,14 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -14,42 +17,69 @@ import (
 
 const bufSize = 65536
 
+var (
+	debug, quiet bool //TODO is that a good idea performance-wise?
+)
+
 func main() {
-	// open connection to network
+	// open connection to FBP network
 	stdin := bufio.NewReader(os.Stdin)
-	// get parameters
-	if len(os.Args) < 1+1 {
-		// require configuration on cmdline
-		/*
-			fmt.Fprintln(os.Stderr, "Usage:", os.Args[0], "[host]:[port]")
-			os.Exit(1)
-		*/
-
-		// set default values if no configuration from cmdline
-		/*
-			os.Args = []string{"", "localhost:4000"}
-			fmt.Fprintln(os.Stderr, "WARNING: No listen address given, using default", os.Args[1])
-		*/
-
-		// get configuration from IIP = initial information packet/frame
-		fmt.Fprintln(os.Stderr, "wait for IIP")
-		if iip, err := flowd.GetIIP("CONF", stdin); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-			os.Exit(1)
-		} else {
-			os.Args = []string{"", iip}
-		}
+	// get configuration from IIP = initial information packet/frame
+	fmt.Fprintln(os.Stderr, "wait for IIP")
+	iip, err := flowd.GetIIP("CONF", stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
+		os.Exit(1)
 	}
+	// parse IIP
+	flags := flag.NewFlagSet("tcp-server", flag.ContinueOnError)
+	var bridge bool
+	var maxconn int
+	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
+	flags.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
+	flags.BoolVar(&debug, "debug", false, "give detailed event output")
+	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
+		printUsage()
+		flags.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if flags.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
+		printUsage()
+		flags.PrintDefaults()
+		os.Exit(2)
+	}
+
+	//TODO implement
+	if bridge {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -bridge currently unimplemented - exiting.")
+		os.Exit(2)
+	}
+	//TODO implement
+	if maxconn > 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -maxconn currently unimplemented - exiting.")
+		os.Exit(2)
+	}
+
+	// parse listen address as URL
+	// NOTE: add double slashes after semicolon so that host:port is put into .Host
+	listenURL, err := url.ParseRequestURI(flags.Args()[0])
+	checkError(err)
+	listenNetwork := listenURL.Scheme
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	listenHost := listenURL.Host
 
 	// list of established TCP connections
 	conns := make(map[int]*net.TCPConn)
 
 	fmt.Fprintln(os.Stderr, "resolve address")
-	serverAddr, err := net.ResolveTCPAddr("tcp", os.Args[1])
+	serverAddr, err := net.ResolveTCPAddr(listenNetwork, listenHost)
 	checkError(err)
 
 	fmt.Fprintln(os.Stderr, "open socket")
-	listener, err := net.ListenTCP("tcp", serverAddr)
+	listener, err := net.ListenTCP(serverAddr.Network(), serverAddr)
 	checkError(err)
 
 	// pre-declare often-used IPs/frames
@@ -99,18 +129,15 @@ func main() {
 				return
 			}
 
-			//TODO if debug -- add flag
-			//fmt.Fprintln(os.Stderr, "tcp-server: frame in with", bodyLen, "bytes body")
-			/*
-				//TODO add debug flag; TODO add proper flag parsing
-				if debug {
-					fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
-				}
-			*/
+			if debug {
+				fmt.Fprintln(os.Stderr, "received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
+			} else if !quiet {
+				fmt.Fprintln(os.Stderr, "frame in with", len(frame.Body), "bytes body")
+			}
 
 			//TODO check for non-data/control frames
 
-			///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+			//FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
 
 			//TODO error feedback for unknown/unconnected/closed TCP connections
 			// check if frame has any extension headers at all
@@ -211,6 +238,10 @@ func checkError(err error) {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
 	}
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "IIP format: [flags] [tcp|tcp4|tcp6]://[host][:port]\n")
 }
 
 func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
