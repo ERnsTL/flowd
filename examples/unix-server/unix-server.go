@@ -30,7 +30,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	}
-	//TODO parse using flags package -> -maxconn flag and listen address as free parameter
 	// parse IIP
 	flags := flag.NewFlagSet("unix-server", flag.ContinueOnError)
 	var bridge bool
