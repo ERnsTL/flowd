@@ -33,9 +33,10 @@ func main() {
 	//TODO parse using flags package -> -maxconn flag and listen address as free parameter
 	// parse IIP
 	flags := flag.NewFlagSet("unix-server", flag.ContinueOnError)
-	var retry, bridge bool
+	var bridge bool
+	var maxconn int
 	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
-	flags.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
+	flags.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
 	flags.BoolVar(&debug, "debug", false, "give detailed event output")
 	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
@@ -52,13 +53,13 @@ func main() {
 	}
 
 	//TODO implement
-	if retry {
-		fmt.Fprintln(os.Stderr, "ERROR: flag -retry currently unimplemented - exiting.")
+	if bridge {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -bridge currently unimplemented - exiting.")
 		os.Exit(2)
 	}
 	//TODO implement
-	if bridge {
-		fmt.Fprintln(os.Stderr, "ERROR: flag -bridge currently unimplemented - exiting.")
+	if maxconn > 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: flag -maxconn currently unimplemented - exiting.")
 		os.Exit(2)
 	}
 
