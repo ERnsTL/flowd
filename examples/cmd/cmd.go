@@ -14,14 +14,17 @@ import (
 
 const bufSize = 2 ^ 16
 
+// OperatingMode is a type redifinition for the enumeration below.
 type OperatingMode int
 
+// One and Each are the two operating modes.
+// One = One running instance, Each starts one instance per IP.
 const (
 	One OperatingMode = iota
 	Each
 )
 
-// implement flag.Value interface
+// Implement flag.Value interface
 func (op *OperatingMode) String() string {
 	op2 := *op //FIXME how to do this correctly? type switch?
 	switch op2 {
@@ -32,11 +35,12 @@ func (op *OperatingMode) String() string {
 	default:
 		if op == nil {
 			return "nil"
-		} else {
-			return "ERROR value out of range"
 		}
+		return "ERROR value out of range"
 	}
 }
+
+// Set the operating mode. Also required for the flag.Value interface.
 func (op *OperatingMode) Set(value string) error {
 	switch value {
 	case "one":
@@ -77,12 +81,11 @@ func main() {
 		if flags.NArg() == 0 {
 			fmt.Fprintln(os.Stderr, "ERROR: missing command to run")
 			printUsage()
-			flags.PrintDefaults()
+			flags.PrintDefaults() // prints to STDERR
 			os.Exit(2)
 		}
 		cmdargs = flags.Args()
 	}
-	//fmt.Fprintf(os.Stderr, "starting up in operating mode: %s, output framing: %t, retry: %t \n", operatingMode.String(), outframing, retry)
 	fmt.Fprintln(os.Stderr, "starting up, command is", strings.Join(cmdargs, " "))
 
 	// prepare subprocess variables
@@ -200,7 +203,6 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: cmd [flags] [cmdpath] [args]...")
-	os.Exit(2)
 }
 
 func startCommand(cmdargs []string) (cmd *exec.Cmd, cin io.WriteCloser, cout io.ReadCloser) {
@@ -226,7 +228,8 @@ func startCommand(cmdargs []string) (cmd *exec.Cmd, cin io.WriteCloser, cout io.
 func handleCommandOutput(debug bool, cout io.ReadCloser) {
 	bufr := bufio.NewReader(cout)
 	for {
-		if frame, err := flowd.ParseFrame(bufr); err != nil {
+		frame, err := flowd.ParseFrame(bufr)
+		if err != nil {
 			if err == io.EOF {
 				fmt.Fprintln(os.Stderr, "EOF from command stdout. Exiting.")
 			} else {
@@ -234,18 +237,19 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 			}
 			cout.Close()
 			return
-		} else { // frame complete now
-			if debug == true {
-				fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
-			}
-			// set correct port
-			frame.Port = "OUT"
-			// send into FBP network
-			if err := frame.Marshal(os.Stdout); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
-				os.Stdout.Close()
-				return
-			}
+		}
+
+		// got a complete frame
+		if debug == true {
+			fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
+		}
+		// set correct port
+		frame.Port = "OUT"
+		// send into FBP network
+		if err := frame.Marshal(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+			os.Stdout.Close()
+			return
 		}
 	}
 }
@@ -261,24 +265,25 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 	}
 	// read loop
 	for {
-		if nbytes, err := bufr.Read(buf); err != nil {
+		nbytes, err := bufr.Read(buf)
+		if err != nil {
 			if err == io.EOF {
 				fmt.Fprintln(os.Stderr, "WARNING: EOF from command:", err, "- Closing.")
 				cout.Close()
 				return
-			} else {
-				fmt.Fprintln(os.Stderr, "ERROR: reading from command STDOUT:", err, "- Closing.")
-				cout.Close()
-				return
 			}
-		} else {
-			// frame it and send into FBP network
-			frame.Body = buf[0:nbytes]
-			if err := frame.Marshal(os.Stdout); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
-				os.Stdout.Close()
-				return
-			}
+			// other error
+			fmt.Fprintln(os.Stderr, "ERROR: reading from command STDOUT:", err, "- Closing.")
+			cout.Close()
+			return
+		}
+
+		// frame command output and send into FBP network
+		frame.Body = buf[0:nbytes]
+		if err := frame.Marshal(os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+			os.Stdout.Close()
+			return
 		}
 	}
 }
