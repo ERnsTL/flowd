@@ -55,7 +55,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	// parse listen address as URL
+	// parse remote address as URL
 	// NOTE: no double slashes after semicolon, otherwise what is given after that
 	// gets put into .Host and .Path and @ (for abstract sockets) cannot be recognized
 	remoteURL, err := url.ParseRequestURI(flags.Args()[0])

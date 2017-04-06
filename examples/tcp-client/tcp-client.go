@@ -56,7 +56,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	// parse listen address as URL
+	// parse remote address as URL
 	// NOTE: add double slashes after semicolon so that host:port is put into .Host
 	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
