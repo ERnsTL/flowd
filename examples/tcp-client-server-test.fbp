@@ -1,0 +1,19 @@
+# testdata -> tcp-client -> tcp-server -> display test
+# start using:
+# bin/flowd src/github.com/ERnsTL/flowd/examples/tcp-client-server-test.fbp
+
+# TCP server and display what comes in
+tcps(bin/tcp-server) OUT -> IN display(bin/display)
+'localhost:4000' -> CONF tcps
+
+# TCP client and send some data to TCP server
+delayConn(bin/sleep) OUT -> CONF tcpc(bin/tcp-client) 
+
+# allow TCP server to start, then send it its target address to CONF
+'3s' -> CONF delayConn
+'localhost:4000' -> IN delayConn
+
+# send some data with delay
+delayData(bin/sleep) OUT -> IN tcpc
+'5s' -> CONF delayData
+'some testdata from TCP client!' -> IN delayData
