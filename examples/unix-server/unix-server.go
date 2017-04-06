@@ -130,18 +130,16 @@ func main() {
 				os.Exit(0) // TODO exit with non-zero code if error parsing frame
 				return
 			}
-			//TODO if debug -- add flag
-			//fmt.Fprintln(os.Stderr, "unix-server: frame in with", bodyLen, "bytes body")
-			/*
-				//TODO add debug flag; TODO add proper flag parsing
-				if debug {
-					fmt.Println("STDOUT received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(*frame.Body))
-				}
-			*/
+
+			if debug {
+				fmt.Fprintln(os.Stderr, "received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
+			} else if !quiet {
+				fmt.Fprintln(os.Stderr, "frame in with", len(frame.Body), "bytes body")
+			}
 
 			//TODO check for non-data/control frames
 
-			///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+			//FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
 
 			//TODO error feedback for unknown/unconnected/closed UNIX connections
 			// check if frame has any extension headers at all
