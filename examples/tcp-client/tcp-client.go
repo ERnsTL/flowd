@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -48,7 +49,6 @@ func main() {
 		flags.PrintDefaults()
 		os.Exit(2)
 	}
-	hostPort := flags.Args()[0]
 
 	//TODO implement
 	if retry {
@@ -56,16 +56,24 @@ func main() {
 		os.Exit(2)
 	}
 
+	// parse listen address as URL
+	// NOTE: add double slashes after semicolon so that host:port is put into .Host
+	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
+	checkError(err)
+	remoteNetwork := remoteURL.Scheme
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	remoteHost := remoteURL.Host
+
 	fmt.Fprintln(os.Stderr, "resolving addresses")
-	serverAddr, err := net.ResolveTCPAddr("tcp", hostPort)
+	serverAddr, err := net.ResolveTCPAddr(remoteNetwork, remoteHost)
 	checkError(err)
 
-	localAddr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:0")
+	localAddr, err := net.ResolveTCPAddr(remoteNetwork, "localhost:0")
 	checkError(err)
 
 	// TODO refactor to actually be able to retry connections and try to reconnect
 	fmt.Fprintln(os.Stderr, "connecting...")
-	conn, err := net.DialTCP("tcp", localAddr, serverAddr)
+	conn, err := net.DialTCP(serverAddr.Network(), localAddr, serverAddr)
 	checkError(err)
 	defer conn.Close()
 	fmt.Fprintln(os.Stderr, "connected")
@@ -121,7 +129,7 @@ func main() {
 				}
 
 				//TODO check for non-data/control frames
-				///FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
+				//FIXME send close notification downstream also in error cases (we close conn) or if client shuts down connection (EOF)
 				//TODO error feedback for unknown/unconnected/closed TCP connections
 
 				// write frame body out to TCP connection
