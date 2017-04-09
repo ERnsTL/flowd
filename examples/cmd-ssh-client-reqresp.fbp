@@ -1,0 +1,9 @@
+# example usage of cmd component: SSH client connection (requires pubkey encryption set up)
+# start using:
+# bin/flowd -debug src/github.com/ERnsTL/flowd/examples/ssh-client-reqresp.fbp
+
+# unframed/raw request-response to arbitrary command, here done via SSH
+'-debug -mode=each -framing=false /usr/bin/ssh user@server at -' -> CONF SSHClient(bin/cmd)
+'somedata' IN SSHClient
+#OUTPORT=SSHClient.OUT:NETOUT
+SSHClient OUT -> IN display(bin/display)
