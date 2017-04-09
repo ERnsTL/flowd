@@ -20,7 +20,13 @@ type Process struct {
 	Name     string
 	InPorts  []Port
 	OutPorts []Port
-	IIPs     map[string]string
+	IIPs     []IIP
+}
+
+// IIP holds information about an IIP to be delivered
+type IIP struct {
+	Port string
+	Data string
 }
 
 // Port holds connection information about a process port (connection), whether input or output
@@ -233,7 +239,7 @@ func networkDefinition2Processes(nw *fbp.Fbp, debug bool) Network {
 			toProc := fbpConn.Target.Process
 
 			// listen input port struct
-			procs[toProc].IIPs[toPort] = fbpConn.Data
+			procs[toProc].IIPs = append(procs[toProc].IIPs, IIP{toPort, fbpConn.Data})
 
 			if debug {
 				fmt.Printf("  connection: IIP '%s' -> %s.%s\n", fbpConn.Data, toProc, toPort)
@@ -292,7 +298,7 @@ func networkDefinition2Processes(nw *fbp.Fbp, debug bool) Network {
 
 func newProcess(proc *fbp.Process) *Process {
 	// return new Process struct
-	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}, IIPs: map[string]string{}}
+	return &Process{Path: proc.Component, Name: proc.Name, InPorts: []Port{}, OutPorts: []Port{}, IIPs: []IIP{}}
 }
 
 func generatePortName(endpoint *fbp.Endpoint) string {

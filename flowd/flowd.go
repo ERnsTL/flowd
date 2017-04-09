@@ -115,27 +115,28 @@ func main() {
 			}()
 
 			// first deliver initial information packets/frames
-			if len(proc.IIPs) > 0 {
-				for port, data := range proc.IIPs {
-					iip := &flowd.Frame{
-						Type:     "data",
-						BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
-						Port:     port,
-						//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
-						Extensions: nil,
-						Body:       []byte(data),
-					}
-					if !quiet {
-						fmt.Println("in xfer 1 IIP to", port)
-					}
-					if err := iip.Marshal(cin); err != nil {
-						fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
-						os.Exit(3)
-					}
+			for i := 0; i < len(proc.IIPs); i++ {
+				iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
+				port := iipInfo.Port
+				data := iipInfo.Data
+				iip := &flowd.Frame{
+					Type:     "data",
+					BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
+					Port:     port,
+					//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
+					Extensions: nil,
+					Body:       []byte(data),
 				}
-				// GC it
-				proc.IIPs = nil
+				if !quiet {
+					fmt.Printf("in xfer 1 IIP to %s.%s\n", name, port)
+				}
+				if err := iip.Marshal(cin); err != nil {
+					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+					os.Exit(3)
+				}
 			}
+			// GC it
+			proc.IIPs = nil
 
 			// start handler for regular packets/frames
 			go handleComponentInput(instances[proc.Name].Input, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
