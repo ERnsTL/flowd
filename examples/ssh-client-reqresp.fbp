@@ -8,7 +8,7 @@
 #'-mode one -agent -hostkey "ssh-ed25519 .... user@server" -i /home/user/.ssh/id_rsa tcp://user@server echo IT WORKS!' -> CONF ssh
 
 # can use known_hosts for host key verfication (must have connected using ssh client once)
-#'-debug -mode=one -agent -i /home/ernst/.ssh/id_ed25519 tcp://space@bermuda echo IT WORKS' -> CONF ssh
+#'-debug -mode=one -agent -i /home/user/.ssh/id_ed25519 tcp://space@bermuda echo IT WORKS' -> CONF ssh
 
 # example with mode=each
 # sends two packets to ssh client -> STDIN of cat -> STDOUT -> comes back -> display component
