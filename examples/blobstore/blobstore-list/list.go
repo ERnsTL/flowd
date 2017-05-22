@@ -66,16 +66,8 @@ func main() {
 		//ContentType: "text/plain; charset=utf-8",
 		Body: nil,
 	}
-	bracketO := flowd.Frame{
-		Type:     "control",
-		BodyType: "BracketOpen",
-		Port:     "OUT",
-	}
-	bracketC := flowd.Frame{
-		Type:     "control",
-		BodyType: "BracketClose",
-		Port:     "OUT",
-	}
+	bracketO := flowd.BracketOpen("OUT")
+	bracketC := flowd.BracketClose("OUT")
 	var err error
 	var (
 		blobname string
