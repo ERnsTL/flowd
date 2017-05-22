@@ -1,5 +1,7 @@
 package flowd
 
+// NOTE: explanation at https://github.com/golang/go/issues/359
+
 // BracketOpen generates an opening bracket frame for the given port
 func BracketOpen(port string) Frame {
 	return Frame{
