@@ -25,9 +25,9 @@ func main() {
 
 		// display frame body
 		if frame.Body != nil {
-			fmt.Fprintln(os.Stderr, string(frame.Body))
+			fmt.Fprint(os.Stderr, string(frame.Body))
 		} else {
-			fmt.Fprintln(os.Stderr, "<nil>")
+			fmt.Fprint(os.Stderr, "<nil>")
 		}
 	}
 }
