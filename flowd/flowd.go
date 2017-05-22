@@ -80,9 +80,8 @@ func main() {
 
 		// start component as subprocess, with arguments
 		instances[proc.Name] = newComponentInstance()
-		go func(name string) { //TODO move into own function
+		go func(proc *Process) { //TODO move into own function
 			//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
-			proc := procs[name]
 
 			// start component as subprocess, with arguments
 			cmd := exec.Command(proc.Path)
@@ -101,7 +100,7 @@ func main() {
 			}
 			if err := cmd.Start(); err != nil {
 				fmt.Println("ERROR:", err)
-				exitChan <- name
+				exitChan <- proc.Name
 			}
 			defer cout.Close()
 			defer cin.Close()
@@ -128,7 +127,7 @@ func main() {
 					Body:       []byte(data),
 				}
 				if !quiet {
-					fmt.Printf("in xfer 1 IIP to %s.%s\n", name, port)
+					fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
 				}
 				if err := iip.Marshal(cin); err != nil {
 					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
@@ -146,12 +145,12 @@ func main() {
 
 			//TODO detect subprocess exit proper -> send info upstream
 			cmd.Wait()
-			exitChan <- name
+			exitChan <- proc.Name
 
 			//TODO
 			//defer lout.Close()
 			//defer lerr.Close()
-		}(proc.Name)
+		}(proc)
 	}
 
 	// start up online configuration
