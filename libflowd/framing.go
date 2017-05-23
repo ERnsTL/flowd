@@ -53,6 +53,10 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	var ipType []string
 	var found bool
 	if err != nil {
+		if err == io.EOF {
+			// just an EOF received, return it as such
+			return nil, err
+		}
 		return nil, errors.New("cannot parse into frame header: " + err.Error())
 	}
 	if ipType, found = header["Type"]; !found {

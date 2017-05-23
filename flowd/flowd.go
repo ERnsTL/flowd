@@ -242,9 +242,12 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		// check for error
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("EOF from component stdout. Exiting.")
+				// normal component shutdown
+				if debug {
+					fmt.Println("EOF from component stdout - exiting.")
+				}
 			} else {
-				fmt.Println("ERROR parsing frame from component stdout:", err, "- Exiting.")
+				fmt.Println("ERROR parsing frame from component stdout:", err, "- exiting.")
 			}
 			return
 		}
