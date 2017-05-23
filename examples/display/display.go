@@ -17,6 +17,13 @@ func main() {
 		// read frame
 		frame, err = flowd.ParseFrame(bufr)
 
+		// check for closed input port
+		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
+			// shut down operations
+			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
+			break
+		}
+
 		// extract frame body
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")
