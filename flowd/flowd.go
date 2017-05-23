@@ -164,6 +164,15 @@ func main() {
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
 		fmt.Println("WARNING: Process", procName, "has exited.")
+		// send PortClose notifications to all affected downstream components
+		proc := procs[procName]
+		for _, port := range proc.OutPorts {
+			// create notification for the remote port
+			notification := flowd.PortClose(port.RemotePort)
+			// send it to the remote process
+			instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
+		}
+		// remove from list of instances
 		delete(instances, procName)
 	}
 	fmt.Println("INFO: All processes have exited. Exiting.")
