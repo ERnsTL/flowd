@@ -186,7 +186,9 @@ func main() {
 		// remove from list of instances
 		delete(instances, procName)
 	}
-	fmt.Println("INFO: All processes have exited. Exiting.")
+	if !quiet {
+		fmt.Println("INFO: All processes have exited. Exiting.")
+	}
 
 	// detect voluntary network shutdown
 	//TODO how to decide that it should happen? should 1 component be able to trigger network shutdown?
