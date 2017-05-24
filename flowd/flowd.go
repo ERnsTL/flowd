@@ -173,7 +173,7 @@ func main() {
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
 		if debug {
-			fmt.Println("INFO: Removing process instance for", procName)
+			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
