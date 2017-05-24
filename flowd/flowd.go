@@ -143,8 +143,17 @@ func main() {
 			// NOTE: this using manual buffering
 			go handleComponentOutput(proc, instances, cout, debug, quiet)
 
-			//TODO detect subprocess exit proper -> send info upstream
-			cmd.Wait()
+			// wait for process to finish
+			_ = cmd.Wait()
+			// check exit status
+			if !cmd.ProcessState.Success() {
+				//TODO warning or error?
+				fmt.Println("ERROR: Processs", proc.Name, "exited unsuccessfully.")
+				//TODO how to react properly? shut down network?
+			} else if !quiet {
+				fmt.Println("INFO: Process", proc.Name, "exited normally.")
+			}
+			// notify main thread
 			exitChan <- proc.Name
 
 			//TODO
@@ -163,7 +172,9 @@ func main() {
 	for len(instances) > 0 {
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
-		fmt.Println("WARNING: Process", procName, "has exited.")
+		if debug {
+			fmt.Println("INFO: Removing process instance for", procName)
+		}
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
 		for _, port := range proc.OutPorts {
