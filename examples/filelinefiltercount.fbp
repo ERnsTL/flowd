@@ -1,0 +1,12 @@
+#Reader(bin/file-read) OUT -> IN LineSplitter(bin/split-lines) OUT -> IN Filter(bin/packet-filter-string) OUT -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
+Reader(bin/file-read) OUT -> IN LineSplitter(bin/split-lines) OUT -> IN Filter(bin/packet-filter-string) OUT -> IN Display(bin/display)
+#Reader(bin/file-read) OUT -> IN LineSplitter(bin/split-lines) OUT -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
+# check ^ with wc -l /var/log/syslog
+#Reader(bin/file-read) OUT -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
+# check ^ with stat /var/log/syslog
+
+# comment in/out as needed
+'/var/log/syslog' -> CONF Reader
+'-pass -or cron network sudo' -> CONF Filter
+#'-packets' -> CONF Counter
+#'-size' -> CONF Counter
