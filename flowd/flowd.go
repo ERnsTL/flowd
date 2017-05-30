@@ -180,7 +180,7 @@ func main() {
 			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
 		// wait that all frames sent by the exited component have been delivered
-		// otherwise the port close notification would be injected,
+		// NOTE: otherwise the port close notification would be injected,
 		// because cmd.Wait() and exitChan easily overtakes handleComponentOutput() goroutine
 		<-instances[procName].AllDelivered
 		// send PortClose notifications to all affected downstream components
