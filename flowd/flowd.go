@@ -7,9 +7,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 
 	flowd "github.com/ERnsTL/flowd/libflowd"
 	"github.com/miolini/datacounter"
+)
+
+var (
+	instancesLock sync.RWMutex // lock to the process instances array
 )
 
 func main() {
@@ -44,7 +49,6 @@ func main() {
 	// network definition sanity checks
 	//TODO check for multiple connections to same component's port
 	//TODO decide if this should be allowed - no not usually, because then frames might be interleaved - bad if ordering is important
-	//TODO
 
 	// output graph visualization
 	// NOTE: originally intended to output the parsed graph (fbp.Fbp type), but that does not have Inports and Outports process names nicely available and IIP special cases
@@ -98,12 +102,10 @@ func main() {
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe to launch stdin:", err)
 			}
-			if err := cmd.Start(); err != nil {
-				fmt.Println("ERROR:", err)
+			if err = cmd.Start(); err != nil {
+				fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
 				exitChan <- proc.Name
 			}
-			defer cout.Close()
-			defer cin.Close()
 
 			// display component stderr
 			go func() {
@@ -129,7 +131,7 @@ func main() {
 				if !quiet {
 					fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
 				}
-				if err := iip.Marshal(cin); err != nil {
+				if err = iip.Marshal(cin); err != nil {
 					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
 					os.Exit(3)
 				}
@@ -144,7 +146,13 @@ func main() {
 			go handleComponentOutput(proc, instances, cout, debug, quiet)
 
 			// wait for process to finish
-			_ = cmd.Wait()
+			//err = cmd.Wait()
+			// NOTE: cmd.Wait() would close the Stdout pipe (too early?), dropping unread frames
+			state, err := cmd.Process.Wait()
+			cmd.ProcessState = state
+			if err != nil {
+				fmt.Printf("ERROR waiting for exit of component %s: %v\n", proc.Name, err)
+			}
 			// check exit status
 			if !cmd.ProcessState.Success() {
 				//TODO warning or error?
@@ -155,10 +163,6 @@ func main() {
 			}
 			// notify main thread
 			exitChan <- proc.Name
-
-			//TODO
-			//defer lout.Close()
-			//defer lerr.Close()
 		}(proc)
 	}
 
@@ -175,16 +179,24 @@ func main() {
 		if debug {
 			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
+		// wait that all frames sent by the exited component have been delivered
+		// otherwise the port close notification would be injected,
+		// because cmd.Wait() and exitChan easily overtakes handleComponentOutput() goroutine
+		<-instances[procName].AllDelivered
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
 		for _, port := range proc.OutPorts {
 			// create notification for the remote port
 			notification := flowd.PortClose(port.RemotePort)
 			// send it to the remote process
+			instancesLock.RLock()
 			instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
+			instancesLock.RUnlock()
 		}
 		// remove from list of instances
+		instancesLock.Lock()
 		delete(instances, procName)
+		instancesLock.Unlock()
 	}
 	if !quiet {
 		fmt.Println("INFO: All processes have exited. Exiting.")
@@ -234,7 +246,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 
 		// status message
 		if debug {
-			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin")
+			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
 		} else if !quiet {
 			fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
 		}
@@ -260,8 +272,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 					fmt.Println("EOF from component stdout - exiting.")
 				}
 			} else {
-				fmt.Println("ERROR parsing frame from component stdout:", err, "- exiting.")
+				fmt.Printf("ERROR parsing frame from stdout of component %s: %s - exiting.\n", proc.Name, err)
 			}
+			// notify that all messages from component were delivered - main loop waits for this
+			close(instances[proc.Name].AllDelivered)
 			return
 		}
 
@@ -289,7 +303,9 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		frame.Port = outPort.RemotePort
 
 		// send to input channel of target process
+		instancesLock.RLock()
 		instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
+		instancesLock.RUnlock()
 
 		// status message
 		if debug {
@@ -331,12 +347,13 @@ type ComponentInstances map[string]*ComponentInstance
 // ComponentInstance contains state about a running network process
 type ComponentInstance struct {
 	//TODO only keep sendable chans here, return receiving channels from newComponentInstance()
-	ExitTo chan bool        // tell command handler - and therefore component - to shut down
-	Input  chan SourceFrame // handler inbox for sending a frame to it
+	ExitTo       chan bool        // tell command handler - and therefore component - to shut down	//TODO change to struct{} and close it
+	Input        chan SourceFrame // handler inbox for sending a frame to it
+	AllDelivered chan struct{}    // tells mail loop that all messages the exited component sent to STDOUT are now delivered
 }
 
 func newComponentInstance() *ComponentInstance {
-	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame)}
+	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame), AllDelivered: make(chan struct{})}
 }
 
 // SourceFrame contains an actual frame plus sender information used in handler functions
