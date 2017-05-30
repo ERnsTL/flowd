@@ -35,7 +35,7 @@ func main() {
 
 		// check for port close notification
 		if frame.Type == "control" && frame.BodyType == "PortClose" {
-			fmt.Fprintln(os.Stderr, "got all messages")
+			fmt.Fprintln(os.Stderr, "got all messages:", len(toSort))
 			// done
 			break
 		}
