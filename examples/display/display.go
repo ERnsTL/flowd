@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 
@@ -16,6 +17,10 @@ func main() {
 	for {
 		// read frame
 		frame, err = flowd.ParseFrame(bufr)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")
+			break
+		}
 
 		// check for closed input port
 		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
@@ -24,15 +29,14 @@ func main() {
 			break
 		}
 
-		// extract frame body
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")
-			break
-		}
-
 		// display frame body
 		if frame.Body != nil {
-			fmt.Fprint(os.Stderr, string(frame.Body))
+			// output newline only if needed
+			if bytes.HasSuffix(frame.Body, []byte{byte('\n')}) {
+				fmt.Fprint(os.Stderr, string(frame.Body))
+			} else {
+				fmt.Fprintln(os.Stderr, string(frame.Body))
+			}
 		} else {
 			fmt.Fprint(os.Stderr, "<nil>")
 		}
