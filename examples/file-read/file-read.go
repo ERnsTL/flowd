@@ -11,7 +11,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const blockSize = 65536
+const bufSize = 65536
 
 func main() {
 	// open connection to network
@@ -50,11 +50,12 @@ func main() {
 		Port:     "OUT",
 	}
 	var obracket, cbracket flowd.Frame
+	var n int
 	if brackets {
 		obracket = flowd.BracketOpen("OUT")
 		cbracket = flowd.BracketClose("OUT")
 	}
-	buf := make([]byte, blockSize)
+	buf := make([]byte, bufSize)
 
 	// main work loops
 	// TODO does the order really matter?
@@ -75,7 +76,7 @@ func main() {
 		// read it in chunks until end, forward chunks
 		for {
 			// read chunk
-			n, err := file.Read(buf)
+			n, err = file.Read(buf)
 			if err != nil {
 				// just EOF or did any real error occur?
 				if err != io.EOF {
@@ -91,10 +92,16 @@ func main() {
 			// save as body
 			outframe.Body = buf[:n]
 
-			// send it to given output ports
-			if err := outframe.Marshal(os.Stdout); err != nil {
+			// send it to output port
+			if err = outframe.Marshal(os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 			}
+		}
+
+		// close file
+		err = file.Close()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: closing file '%s': %v\n", filePaths[i], err)
 		}
 
 		// send close bracket
