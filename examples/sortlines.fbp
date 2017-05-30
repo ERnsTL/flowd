@@ -1,0 +1,2 @@
+Reader(bin/file-read) OUT -> IN Splitter(bin/split-lines) OUT -> IN Sorter(bin/sort) OUT -> IN Display(bin/display)
+'randomlines' -> CONF Reader
