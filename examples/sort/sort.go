@@ -18,7 +18,7 @@ func main() {
 	//TODO add configuration to do numeric sort
 	//TODO maybe add sorting of substreams = bracketed groups
 
-	var frame *flowd.Frame //TODO why is this pointer to Frame?
+	var frame *flowd.Frame
 	var err error
 	var toSort []string
 

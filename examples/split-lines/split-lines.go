@@ -35,11 +35,9 @@ func main() {
 		// scan loop
 		linecount := 0
 		for scanner.Scan() {
-			//fmt.Fprintln(os.Stderr, "scanner: got line!")
 			// collect line
 			outframe.Body = scanner.Bytes()
 			linecount++
-			///fmt.Fprintln(os.Stderr, "got line: "+scanner.Text())
 			// send it to FBP network
 			if err = outframe.Marshal(os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
@@ -51,7 +49,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: scanning for line: "+scanner.Err().Error())
 			os.Exit(1)
 		} else {
-			fmt.Fprintf(os.Stderr, "finished scanning after %d lines\n", linecount)
+			fmt.Fprintf(os.Stderr, "finished at %d lines total\n", linecount)
 		}
 
 		// send done notification
@@ -69,7 +67,7 @@ func main() {
 		// check for closed input port
 		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
 			// shut down operations
-			fmt.Fprintln(os.Stderr, "received port close notification - finishing up.")
+			fmt.Fprintln(os.Stderr, "input port closed - finishing up.")
 			pipew.Close()
 			break
 		}
@@ -91,8 +89,6 @@ func main() {
 				}
 			}
 		} else {
-			//TODO if debug
-			//fmt.Fprintf(os.Stderr, "got new data packet with %d bytes body\n", len(frame.Body))
 			// write frame body into buffer to be scanned
 			if _, err = pipew.Write(frame.Body); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: writing received frame body into pipe to scanner")
@@ -104,7 +100,4 @@ func main() {
 	// wait for scanner Goroutine to finish
 	<-scannerDone
 	fmt.Fprintln(os.Stderr, "exiting.")
-
-	///
-	//time.Sleep(1 * time.Second)
 }

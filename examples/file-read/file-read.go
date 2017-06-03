@@ -41,7 +41,9 @@ func main() {
 		}
 		filePaths = flags.Args()
 	}
-	fmt.Fprintf(os.Stderr, "starting up, got %d filepaths\n", len(filePaths))
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "starting up, got %d filepaths\n", len(filePaths))
+	}
 
 	// prepare variables
 	outframe := &flowd.Frame{ //TODO why is this pointer to Frame?
