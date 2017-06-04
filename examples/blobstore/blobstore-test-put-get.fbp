@@ -9,7 +9,7 @@
 #bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT $network
 
 # define and configure players
-'Blob-Name' -> CONF SetBlobName(bin/frame-modify)
+'Blob-Name' -> CONF SetBlobName(bin/header-modify)
 '/tmp/blob-data,/tmp/blob-tmp,careful' -> CONF Saver(bin/blobstore-put)
 '/tmp/blob-data,careful' -> CONF Retriever(bin/blobstore-get)
 
