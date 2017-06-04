@@ -13,6 +13,10 @@ import (
 	"github.com/miolini/datacounter"
 )
 
+const (
+	connCapacity = 0 // = synchronous
+)
+
 var (
 	instancesLock sync.RWMutex // lock to the process instances array
 )
@@ -353,7 +357,7 @@ type ComponentInstance struct {
 }
 
 func newComponentInstance() *ComponentInstance {
-	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame), AllDelivered: make(chan struct{})}
+	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame, connCapacity), AllDelivered: make(chan struct{})}
 }
 
 // SourceFrame contains an actual frame plus sender information used in handler functions
