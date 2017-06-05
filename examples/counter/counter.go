@@ -24,7 +24,7 @@ func main() {
 		os.Exit(1)
 	} else {
 		// parse IIP
-		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
+		flags := flag.NewFlagSet("counter", flag.ContinueOnError)
 		flags.BoolVar(&brackets, "brackets", false, "expect bracketed input streams")
 		flags.BoolVar(&control, "control", false, "count control packets as well")
 		flags.BoolVar(&size, "size", false, "count size of packet bodies")

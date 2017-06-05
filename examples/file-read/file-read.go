@@ -26,7 +26,7 @@ func main() {
 		os.Exit(1)
 	} else {
 		// parse IIP
-		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
+		flags := flag.NewFlagSet("file-read", flag.ContinueOnError)
 		flags.BoolVar(&brackets, "brackets", false, "enclose each file in brackets")
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")

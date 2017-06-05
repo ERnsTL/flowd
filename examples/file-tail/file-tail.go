@@ -24,7 +24,7 @@ func main() {
 		os.Exit(1)
 	} else {
 		// parse IIP
-		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
+		flags := flag.NewFlagSet("file-tail", flag.ContinueOnError)
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 		if err := flags.Parse(strings.Split(iip, " ")); err != nil {

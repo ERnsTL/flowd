@@ -24,7 +24,7 @@ func main() {
 		os.Exit(1)
 	} else {
 		// parse IIP
-		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
+		flags := flag.NewFlagSet("packet-filter-string", flag.ContinueOnError)
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 		flags.BoolVar(&and, "and", false, "all given substrings must be present in packet body")
