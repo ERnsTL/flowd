@@ -24,6 +24,8 @@ func main() {
 		}
 		// parse specifications
 		//TODO add ability to set BodyType non-extension field
+		//TODO add ability to set field to ""
+		//TODO add ability to delete header field
 		re := regexp.MustCompile("(.+)=(.*)")
 		args := re.FindAllStringSubmatch(iip, -1)
 		if args == nil {
@@ -33,11 +35,11 @@ func main() {
 		for _, arg := range args {
 			field := arg[1]
 			value := arg[2]
-			//fmt.Fprintf(os.Stderr, "got modification %s to %s\n", field, value)
+			//TODO if debug fmt.Fprintf(os.Stderr, "got modification %s to %s\n", field, value)
 			modifications[field] = value
 		}
 	}
-	fmt.Fprintf(os.Stderr, "got %d modification specification\n", len(modifications))
+	fmt.Fprintf(os.Stderr, "got %d modification specification(s)\n", len(modifications))
 
 	// prepare variables
 	var frame *flowd.Frame
