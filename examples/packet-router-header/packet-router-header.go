@@ -158,6 +158,7 @@ func main() {
 	var fieldValue *string
 
 	// main work loop
+	//TODO make many outputs configurable by -debug
 nextframe:
 	for {
 		// read frame
