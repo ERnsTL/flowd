@@ -77,7 +77,6 @@ func getNetworkDefinition(debug bool) []byte {
 }
 
 func parseNetworkDefinition(nwBytes []byte, debug bool) *fbp.Fbp {
-
 	nw := &fbp.Fbp{Buffer: (string)(nwBytes)}
 	if debug {
 		fmt.Println("init")

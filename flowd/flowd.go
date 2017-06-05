@@ -189,12 +189,44 @@ func main() {
 		<-instances[procName].AllDelivered
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
+		var found bool
+	nextRemoteInstance:
 		for _, port := range proc.OutPorts {
+			// check for other processes still connected to that remote port
+			found = false
+			// for all running instances...
+			//TODO optimize - dont go through whole list
+			for procNameLookup := range instances {
+				// get process = static network info
+				procLookup := procs[procNameLookup]
+				// check for outport to same process on same remote port
+				for _, outPort := range procLookup.OutPorts {
+					if outPort.RemoteProc == port.RemoteProc && outPort.RemotePort == port.RemotePort {
+						// still got a running process feeding into that remote port
+						// NOTE: one match will be same connection as one currently notifying remote
+						if !found {
+							found = true
+						} else {
+							// found second match
+							continue nextRemoteInstance
+						}
+					}
+				}
+			}
 			// create notification for the remote port
 			notification := flowd.PortClose(port.RemotePort)
 			// send it to the remote process
 			instancesLock.RLock()
 			instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
+			/*
+				TODO
+				if instance, found := instances[port.RemoteProc]; found {
+					instance.Input <- SourceFrame{Frame: &notification, Source: proc}
+				} else {
+					fmt.Printf("ERROR: main loop: Instance %s not found / deleted - exiting.\n", port.RemoteProc)
+					os.Exit(1)
+				}
+			*/
 			instancesLock.RUnlock()
 		}
 		// remove from list of instances
@@ -226,7 +258,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 
 		// received fine
 		if debug {
-			fmt.Println("received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO difference between this and string(fr.Body) ?
+			fmt.Println("received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with headers", frame.Extensions, "and body:", (string)(frame.Body)) //TODO difference between this and string(fr.Body) ?
 		}
 
 		// check frame Port header field if it matches the name of this input endpoint
@@ -284,7 +316,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		}
 
 		if debug {
-			fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with contents:", string(frame.Body))
+			fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with headers", frame.Extensions, "and body:", string(frame.Body))
 		}
 
 		// write out to network
@@ -309,6 +341,15 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		// send to input channel of target process
 		instancesLock.RLock()
 		instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
+		/*
+			TODO
+			if instance, found := instances[outPort.RemoteProc]; found {
+				instance.Input <- SourceFrame{Source: proc, Frame: frame}
+			} else {
+				fmt.Printf("ERROR: handleComponentOutput(): Instance %s not found / deleted - exiting.\n", outPort.RemoteProc)
+				os.Exit(2)
+			}
+		*/
 		instancesLock.RUnlock()
 
 		// status message
