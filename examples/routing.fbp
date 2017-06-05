@@ -1,0 +1,20 @@
+Reader1(bin/file-read) OUT -> IN SetHeader1(bin/header-modify) OUT -> IN Router(bin/packet-router-header)
+Reader2(bin/file-read) OUT -> IN SetHeader2(bin/header-modify) OUT -> IN Router
+Reader3(bin/file-read) OUT -> IN Router
+
+Router OUTA -> IN DisplayA(bin/display)
+Router OUTB -> IN DisplayB(bin/display)
+Router NOMATCH -> IN DisplayNomatch(bin/display)
+
+# configuration
+'-field Myfield -missing NOMATCH -equals A -to OUTA -equals B -to OUTB' -> CONF Router
+
+'/proc/version' -> CONF Reader1
+'Myfield=A' -> CONF SetHeader1
+
+'/proc/uptime' -> CONF Reader2
+'Myfield=B' -> CONF SetHeader2
+
+'/proc/partitions' -> CONF Reader3
+
+# result: version on DisplayA, uptime on DisplayB and partitions on DisplayNomatch
