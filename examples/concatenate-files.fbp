@@ -1,0 +1,7 @@
+Reader1(bin/file-read) OUT -> IN1 Cat(bin/concatenate) OUT -> IN Display(bin/display)
+Reader2(bin/file-read) OUT -> IN2 Cat
+
+# configuration
+'IN1,IN2' -> CONF Cat
+'/proc/version' -> CONF Reader1
+'/proc/uptime' -> CONF Reader2
