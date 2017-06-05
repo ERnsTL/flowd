@@ -88,6 +88,7 @@ forPorts:
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 				}
 			} else {
+				//TODO check for IP on unexpected input port (loop currentIndex+1 until end)
 				// store it for later, in order
 				//TODO if debug fmt.Fprintln(os.Stderr, "buffering it")
 				frameBuffer = append(frameBuffer, frame)
