@@ -195,7 +195,7 @@ func main() {
 			// check for other processes still connected to that remote port
 			found = false
 			// for all running instances...
-			//TODO optimize - dont go through whole list
+			//TODO optimize - dont go through whole list -> needs better network datastructure
 			for procNameLookup := range instances {
 				// get process = static network info
 				procLookup := procs[procNameLookup]
