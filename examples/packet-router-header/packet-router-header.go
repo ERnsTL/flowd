@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"net/textproto"
 	"os"
 	"strings"
 
@@ -11,8 +12,8 @@ import (
 )
 
 var (
-	rules     map[string]string // keeps value -> target-output-port mappings
-	rulesTemp string            // state variable for flag parsing, keeps -equals value
+	rules     = map[string]string{} // keeps value -> target-output-port mappings
+	rulesTemp string                // state variable for flag parsing, keeps -equals value
 )
 
 func main() {
@@ -22,7 +23,7 @@ func main() {
 	var debug, quiet bool
 	var field, present, missing, nomatchPort string
 	var equals equalsFlag
-	var to equalsFlag
+	var to toFlag
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
@@ -72,6 +73,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "starting up")
 	}
 
+	// convert field name to canonical MIME name
+	field = textproto.CanonicalMIMEHeaderKey(field)
+
 	// generate frame matchers
 	//TODO possible optimization regarding *string return value
 	var ruleFuncs []ruleMatcher
@@ -97,10 +101,19 @@ func main() {
 	}
 	// regular equality rules
 	if len(rules) > 0 {
+		fmt.Fprintf(os.Stderr, "routing table:\n")
 		for matchValue, targetPort := range rules {
+			// make copies so that func gets local copy, otherwise all rules would be the same
+			matchValueCopy := matchValue
+			targetPortCopy := targetPort
+			fmt.Fprintf(os.Stderr, "\ton %s equals %s, forward to %s\n", field, matchValue, targetPort)
 			ruleFuncs = append(ruleFuncs, func(value *string) *string {
-				if *value == matchValue {
-					return &targetPort
+				if value == nil {
+					// not responsible
+					return nil
+				}
+				if *value == matchValueCopy {
+					return &targetPortCopy
 				}
 				// no match
 				return nil
@@ -127,6 +140,10 @@ func main() {
 		}
 	default:
 		fieldGetter = func(frame *flowd.Frame) *string {
+			if frame.Extensions == nil {
+				// nothing there
+				return nil
+			}
 			if value, exists := frame.Extensions[field]; exists {
 				return &value
 			}
@@ -138,6 +155,7 @@ func main() {
 	// prepare variables
 	var frame *flowd.Frame
 	var err error
+	var fieldValue *string
 
 	// main work loop
 nextframe:
@@ -149,25 +167,42 @@ nextframe:
 		}
 
 		// check for closed input port
-		if frame.Type == "control" && frame.BodyType == "PortClose" {
+		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
 			// shut down operations
 			fmt.Fprintln(os.Stderr, "input port closed - exiting.")
 			break
 		}
 
 		// get field value
-		fieldValue := fieldGetter(frame)
+		/*
+			if frame.Extensions != nil {
+				if value, found := frame.Extensions["Myfield"]; found {
+					fmt.Fprintf(os.Stderr, "in frame directly: field has value %s\n", value)
+				} else {
+					fmt.Fprintf(os.Stderr, "in frame directly: field not found\n")
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "in frame directly: field not found\n")
+			}
+		*/
+		fieldValue = fieldGetter(frame)
+		if fieldValue != nil {
+			fmt.Fprintf(os.Stderr, "field %s has value %s\n", field, *fieldValue)
+		} else {
+			fmt.Fprintf(os.Stderr, "field %s has value %v\n", field, fieldValue)
+		}
 
 		// check which rule applies
 		for _, ruleFunc := range ruleFuncs {
 			if targetPort := ruleFunc(fieldValue); targetPort != nil {
 				// rule applies, forward frame to returned port
+				fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
 				frame.Port = *targetPort
 				if err := frame.Marshal(os.Stdout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 				}
 				// done with this frame
-				break nextframe
+				continue nextframe
 			}
 		}
 
