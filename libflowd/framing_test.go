@@ -98,12 +98,12 @@ var (
 		Type:     "data",
 		BodyType: "TCPPacket",
 		Extensions: map[string]string{
-			"Tcp-Id": "1",
+			"Conn-Id": "1",
 		},
 		Body: []byte("a\n"),
 	}
 	frameStrV1 = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TCPPacket", "Port: IN", "Content-Length: 2", "a\n")
-	frameStrV2 = fmt.Sprintf("2%s\n%s\n%s\n%s\n%s\n\n%s\000", "DATA", "type:TCPPacket", "port:IN", "Tcp-Id:1", "length:2", "a\n")
+	frameStrV2 = fmt.Sprintf("2%s\n%s\n%s\n%s\n%s\n\n%s\000", "DATA", "type:TCPPacket", "port:IN", "Conn-Id:1", "length:2", "a\n")
 )
 
 // save result in package-level variable so that compiler cannot optimize benchmark away

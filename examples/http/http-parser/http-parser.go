@@ -14,6 +14,7 @@ import (
 
 const timeout = 10 * time.Second
 
+// Client is .... TODO
 type Client struct {
 	// data exchange between main loop and connection handler
 	piper *io.PipeReader
@@ -28,9 +29,9 @@ var (
 	closeCommand = &flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
-		BodyType: "TCPCloseConnection",
+		BodyType: "CloseConnection",
 		Extensions: map[string]string{
-			"Tcp-Id": "",
+			"conn-id": "",
 		},
 	}
 )
@@ -40,7 +41,7 @@ func main() {
 	bufr := bufio.NewReader(os.Stdin)
 	var frame *flowd.Frame //TODO why is this pointer of Frame?
 	var err error
-	var connId string
+	var connID string
 	var found bool
 	clients := map[string]*Client{} // key = connection ID
 
@@ -53,40 +54,40 @@ func main() {
 		}
 
 		// get connection ID
-		//id = frame.Extensions["Tcp-Id"]
-		if connId, found = frame.Extensions["Tcp-Id"]; !found {
-			fmt.Fprintln(os.Stderr, "WARNING: Tcp-Id header missing on frame:", string(frame.Body), "- discarding.")
+		//id = frame.Extensions["conn-id"]
+		if connID, found = frame.Extensions["conn-id"]; !found {
+			fmt.Fprintln(os.Stderr, "WARNING: conn-id header missing on frame:", string(frame.Body), "- discarding.")
 			continue
 		}
 
 		// handle according to BodyType
 		if frame.BodyType == "OpenNotification" {
-			fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", connId)
+			fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", connID)
 			// make new entry
 			piper, pipew := io.Pipe()
 			bufr := bufio.NewReader(piper)
-			clients[connId] = &Client{
+			clients[connID] = &Client{
 				piper: piper,
 				pipew: pipew,
 				bufr:  bufr,
 				close: make(chan struct{}, 0),
 			}
 			// handle request
-			go handleConnection(connId, clients[connId])
+			go handleConnection(connID, clients[connID])
 		} else if frame.BodyType == "CloseNotification" {
-			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connId)
+			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
 			// send notification to handler goroutine
-			close(clients[connId].close)
+			close(clients[connID].close)
 			// unlink entry
-			delete(clients, connId)
+			delete(clients, connID)
 		} else {
 			// normal data/request frame; send frame body to correct ReadWriter
-			clients[connId].pipew.Write(frame.Body)
+			clients[connID].pipew.Write(frame.Body)
 		}
 	}
 }
 
-func handleConnection(connId string, client *Client) {
+func handleConnection(connID string, client *Client) {
 	// read HTTP request from series of frames
 	var req *http.Request
 	var err error
@@ -101,16 +102,9 @@ func handleConnection(connId string, client *Client) {
 	case <-reqDone: // read done, maybe with errors
 		// check for error
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.", connId, err)
+			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.", connID, err)
 			// request connection be closed
-			closeCommand := &flowd.Frame{
-				Port:     "OUT",
-				Type:     "data",
-				BodyType: "TCPCloseConnection",
-				Extensions: map[string]string{
-					"Tcp-Id": connId,
-				},
-			}
+			closeCommand.Extensions["conn-id"] = connID
 			closeCommand.Marshal(os.Stdout)
 			// done
 			return
@@ -127,7 +121,7 @@ func handleConnection(connId string, client *Client) {
 			Body: body, //TODO
 		}
 		if err := reqFrame.Marshal(os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.", connId, err)
+			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.", connID, err)
 		}
 		// TODO multiple requests
 		client.pipew.Close()

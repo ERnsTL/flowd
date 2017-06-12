@@ -93,7 +93,7 @@ func main() {
 		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
 		BodyType: "CloseNotification",
 		Extensions: map[string]string{
-			"Conn-Id": "",
+			"conn-id": "",
 			//"Remote-Address": "",
 		},
 	}

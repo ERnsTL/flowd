@@ -20,27 +20,24 @@ type Frame struct {
 }
 
 /*
-NOTE to self:
-1) lowercase header fields
-2) optional CR in CRLF
-3) no space before header value
-4) change Content-Length to length
-
-Examples:
+v1 format based on MIME:
 
 Type: data.MessageTypeRN
 Port: OUTRN
 Content-Length: 10RN
-Tcp-Id: 123RN
+Conn-Id: 123RN
 RN
-= 70 bytes
+= 71 bytes
 
-type:data.MessageTypeN
+v2 format based on STOMP v1.2:
+
+2dataN
+type:MessageTypeN
 port:OUTN
 length:10N
-tcp-id:123N
+conn-id:123N
 N
-= 53 bytes
+= 54 bytes
 */
 
 const maxBodySize = 1 * 1000 * 1000 * 1000 // 1 GByte
@@ -55,9 +52,9 @@ The frame format is that of STOMP v1.2, with the following modifications:
 * TODO no escape substitution in header values - for now at least
 * TODO no support for multiple occurrences of same header field; gets overwritten -> last value remains
 * all header field names are to be in lowercase
-* COMMAND line contains not a command, but the frame type, in uppercase, e.g. DATA, CONTROL
+* COMMAND line contains not a command, but the frame type, also in lowercase, e.g. data, control
 * the port and type header fields have special meaning; type = body type, port = input / output port name
-* before COMMAND, a single byte is read (version marker) to designate the frame version
+* before COMMAND, a single byte is read (version marker) to designate the frame format version
 * this format has designation '2' = 0x32
 */
 //TODO want re-use err -> but then have to var-define all other return values -> ugly -> benchmark
@@ -65,6 +62,10 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	// read version marker
 	version, err := stream.ReadByte()
 	if err != nil {
+		// first read is usual place to block for new frame, so EOF is no error here
+		if err == io.EOF {
+			return nil, err
+		}
 		return nil, errors.New("reading version marker: " + err.Error())
 	}
 	switch version {
