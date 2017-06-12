@@ -144,9 +144,9 @@ func main() {
 			proc.IIPs = nil
 
 			// start handler for regular packets/frames
-			instancesLock.RLock()
+			//instancesLock.RLock()
 			inputChan := instances[proc.Name].Input
-			instancesLock.RUnlock()
+			//instancesLock.RUnlock()
 			go handleComponentInput(inputChan, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
 
 			// NOTE: this using manual buffering
@@ -180,7 +180,9 @@ func main() {
 
 	// run while there are still components running
 	//TODO is this practically useful behavior?
-	for len(instances) > 0 {
+	//for len(instances) > 0 {
+	instanceCount := len(instances)
+	for instanceCount > 0 {
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
 		if debug {
@@ -199,7 +201,11 @@ func main() {
 			found = false
 			// for all running instances...
 			//TODO optimize - dont go through whole list -> needs better network datastructure
-			for procNameLookup := range instances {
+			for procNameLookup, instance := range instances {
+				// only not-deleted instances are considered alive
+				if instance.Deleted {
+					continue
+				}
 				// get process = static network info
 				procLookup := procs[procNameLookup]
 				// check for outport to same process on same remote port
@@ -219,10 +225,10 @@ func main() {
 			// create notification for the remote port
 			notification := flowd.PortClose(port.RemotePort)
 			// send it to the remote process
-			instancesLock.RLock()
+			//instancesLock.RLock()
 			//instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
 			input := instances[port.RemoteProc].Input
-			instancesLock.RUnlock()
+			//instancesLock.RUnlock()
 			input <- SourceFrame{Frame: &notification, Source: proc}
 			/*
 				TODO
@@ -236,9 +242,11 @@ func main() {
 			//instancesLock.RUnlock()
 		}
 		// remove from list of instances
-		instancesLock.Lock()
-		delete(instances, procName)
-		instancesLock.Unlock()
+		//instancesLock.Lock()
+		//delete(instances, procName)
+		//instancesLock.Unlock()
+		instances[procName].Deleted = true
+		instanceCount--
 	}
 	if !quiet {
 		fmt.Println("INFO: All processes have exited. Exiting.")
@@ -317,10 +325,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 				fmt.Printf("ERROR parsing frame from stdout of component %s: %s - exiting.\n", proc.Name, err)
 			}
 			// notify that all messages from component were delivered - main loop waits for this
-			instancesLock.RLock()
+			//instancesLock.RLock()
 			//close(instances[proc.Name].AllDelivered)
 			instance := instances[proc.Name]
-			instancesLock.RUnlock()
+			//instancesLock.RUnlock()
 			close(instance.AllDelivered)
 			return
 		}
@@ -348,10 +356,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		frame.Port = outPort.RemotePort
 
 		// send to input channel of target process
-		instancesLock.RLock()
+		//instancesLock.RLock()
 		//instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
 		input := instances[outPort.RemoteProc].Input
-		instancesLock.RUnlock()
+		//instancesLock.RUnlock()
 		input <- SourceFrame{Source: proc, Frame: frame}
 		/*
 			TODO
@@ -407,6 +415,7 @@ type ComponentInstance struct {
 	ExitTo       chan bool        // tell command handler - and therefore component - to shut down	//TODO change to struct{} and close it
 	Input        chan SourceFrame // handler inbox for sending a frame to it
 	AllDelivered chan struct{}    // tells mail loop that all messages the exited component sent to STDOUT are now delivered
+	Deleted      bool             //TODO mark entry as deleted to avoid concurrent read (many) and write (one for each instance on cleanup) panic on instance map
 }
 
 func newComponentInstance() *ComponentInstance {
