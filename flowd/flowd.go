@@ -317,7 +317,11 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 				fmt.Printf("ERROR parsing frame from stdout of component %s: %s - exiting.\n", proc.Name, err)
 			}
 			// notify that all messages from component were delivered - main loop waits for this
-			close(instances[proc.Name].AllDelivered)
+			instancesLock.RLock()
+			//close(instances[proc.Name].AllDelivered)
+			instance := instances[proc.Name]
+			instancesLock.RUnlock()
+			close(instance.AllDelivered)
 			return
 		}
 
@@ -325,7 +329,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 			fmt.Println("STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with headers", frame.Extensions, "and body:", string(frame.Body))
 		}
 
-		// write out to network
+		// check for valid outport
 		//TODO convert from array to map
 		var outPort *Port
 		for _, port := range proc.OutPorts {
@@ -334,7 +338,6 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 				break
 			}
 		}
-		// check for valid outport
 		if outPort == nil {
 			fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", outPort.LocalPort)
 			return
