@@ -144,7 +144,10 @@ func main() {
 			proc.IIPs = nil
 
 			// start handler for regular packets/frames
-			go handleComponentInput(instances[proc.Name].Input, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
+			instancesLock.RLock()
+			inputChan := instances[proc.Name].Input
+			instancesLock.RUnlock()
+			go handleComponentInput(inputChan, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
 
 			// NOTE: this using manual buffering
 			go handleComponentOutput(proc, instances, cout, debug, quiet)
@@ -217,7 +220,10 @@ func main() {
 			notification := flowd.PortClose(port.RemotePort)
 			// send it to the remote process
 			instancesLock.RLock()
-			instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
+			//instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
+			input := instances[port.RemoteProc].Input
+			instancesLock.RUnlock()
+			input <- SourceFrame{Frame: &notification, Source: proc}
 			/*
 				TODO
 				if instance, found := instances[port.RemoteProc]; found {
@@ -227,7 +233,7 @@ func main() {
 					os.Exit(1)
 				}
 			*/
-			instancesLock.RUnlock()
+			//instancesLock.RUnlock()
 		}
 		// remove from list of instances
 		instancesLock.Lock()
@@ -340,7 +346,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 
 		// send to input channel of target process
 		instancesLock.RLock()
-		instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
+		//instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
+		input := instances[outPort.RemoteProc].Input
+		instancesLock.RUnlock()
+		input <- SourceFrame{Source: proc, Frame: frame}
 		/*
 			TODO
 			if instance, found := instances[outPort.RemoteProc]; found {
@@ -350,7 +359,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 				os.Exit(2)
 			}
 		*/
-		instancesLock.RUnlock()
+		//instancesLock.RUnlock()
 
 		// status message
 		if debug {
