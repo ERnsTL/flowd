@@ -254,6 +254,12 @@ Running tests:
   GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
   ```
 
+Running benchmarks:
+
+  ```
+  GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
+  ```
+
 Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
 
   ```
