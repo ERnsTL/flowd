@@ -52,7 +52,7 @@ func main() {
 		Type:     "data",
 		BodyType: "CloseConnection",
 		Extensions: map[string]string{
-			"Conn-Id": "",
+			"conn-id": "",
 		},
 	}
 
@@ -60,12 +60,12 @@ func main() {
 		// read frame
 		frame, err = flowd.ParseFrame(bufr)
 		// get connection ID
-		id = frame.Extensions["Conn-Id"]
+		id = frame.Extensions["conn-id"]
 
 		// check connection ID - known?
 		// NOTE: not necessary, because we should receive a n
 		/*
-			if id, found = frame.Extensions["Conn-Id"]; !found {
+			if id, found = frame.Extensions["conn-id"]; !found {
 
 			}
 		*/
@@ -123,7 +123,7 @@ func main() {
 				// send close request
 				fmt.Fprintf(os.Stderr, "%s: sending close command.\n", id)
 				frame = closeCommand
-				frame.Extensions["Conn-Id"] = id
+				frame.Extensions["conn-id"] = id
 				Respond(frame, fmt.Sprintln("kthxbye!"))
 			case "help":
 				Respond(frame, fmt.Sprintf("commands: exit, quit, logout\n%s", prompt))

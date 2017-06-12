@@ -88,23 +88,23 @@ func main() {
 		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
 		BodyType: "CloseNotification",
 		Extensions: map[string]string{
-			"Conn-Id": "",
-			//"Remote-Address": "",
+			"conn-id": "",
+			//"remote-address": "",
 		},
 	}
 	/* NOTE:
 	OpenNotification is used to inform downstream component(s) of a new connection
 	and - once - send which address and port is on the other side. Downstream components
 	can check, save etc. the address information, but for sending responses, the
-	Conn-Id header is relevant.
+	conn-id header is relevant.
 	*/
 	openNotification := flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
 		BodyType: "OpenNotification",
 		Extensions: map[string]string{
-			"Conn-Id":        "",
-			"Remote-Address": "",
+			"conn-id":        "",
+			"remote-address": "",
 		},
 	}
 
@@ -146,17 +146,17 @@ func main() {
 				//TODO gracefully shut down / close all connections
 				os.Exit(1)
 			}
-			// check if frame has Conn-Id in header
-			if connIDStr, exists := frame.Extensions["Conn-Id"]; exists {
-				// check if Conn-Id header is integer number
+			// check if frame has conn-id in header
+			if connIDStr, exists := frame.Extensions["conn-id"]; exists {
+				// check if conn-id header is integer number
 				if connID, err := strconv.Atoi(connIDStr); err != nil {
-					// Conn-Id header not an integer number
+					// conn-id header not an integer number
 					//TODO notification back to FBP network of error
-					fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer Conn-Id header %s: %s - Exiting.\n", connIDStr, err)
+					fmt.Fprintf(os.Stderr, "ERROR: frame has non-integer conn-id header %s: %s - Exiting.\n", connIDStr, err)
 					//TODO gracefully shut down / close all connections
 					os.Exit(1)
 				} else {
-					// check if there is a TCP connection known for that Conn-Id
+					// check if there is a TCP connection known for that conn-id
 					if conn, exists := conns[connID]; exists { // found connection
 						// write frame body out to TCP connection
 						if bytesWritten, err := conn.Write(frame.Body); err != nil {
@@ -182,15 +182,15 @@ func main() {
 							// NOTE: will be cleaned up on next conn.Read() in handleConnection()
 						}
 					} else {
-						// TCP connection not found - could have been closed in meantime or wrong Conn-Id in frame header
+						// TCP connection not found - could have been closed in meantime or wrong conn-id in frame header
 						//TODO notification back to FBP network of undeliverable message
 						//TODO gracefully shut down / close all connections
 						os.Exit(1)
 					}
 				}
 			} else {
-				// Conn-Id extension header missing
-				fmt.Fprintln(os.Stderr, "ERROR: frame is missing Conn-Id header - Exiting.")
+				// conn-id extension header missing
+				fmt.Fprintln(os.Stderr, "ERROR: frame is missing conn-id header - Exiting.")
 				//TODO gracefully shut down / close all connections
 				os.Exit(1)
 			}
@@ -207,7 +207,7 @@ func main() {
 			delete(conns, id)
 			// send close notification downstream
 			//TODO with reason (error or closed from other side/this side)
-			closeNotification.Extensions["Conn-Id"] = strconv.Itoa(id)
+			closeNotification.Extensions["conn-id"] = strconv.Itoa(id)
 			closeNotification.Marshal(os.Stdout)
 		}
 	}()
@@ -223,8 +223,8 @@ func main() {
 		conn.SetKeepAlivePeriod(5 * time.Second)
 		conns[id] = conn
 		// send new-connection notification downstream
-		openNotification.Extensions["Conn-Id"] = strconv.Itoa(id)
-		openNotification.Extensions["Remote-Address"] = fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr)) // copied from handleConnection()
+		openNotification.Extensions["conn-id"] = strconv.Itoa(id)
+		openNotification.Extensions["remote-address"] = fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr)) // copied from handleConnection()
 		openNotification.Marshal(os.Stdout)
 		// handle connection
 		go handleConnection(conn, id, closeChan)
@@ -252,7 +252,7 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		BodyType: "TCPPacket",
 		Port:     "OUT",
 		//ContentType: "application/octet-stream",
-		Extensions: map[string]string{"Conn-Id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "Remote-Address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
+		Extensions: map[string]string{"conn-id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "remote-address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:       nil,
 	}
 
