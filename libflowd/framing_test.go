@@ -45,7 +45,7 @@ func TestFrameParsesAndMarshalsV2(t *testing.T) {
 	bufr := bufio.NewReader(r)
 	frame, err := flowd.ParseFrame(bufr)
 	assert.NoError(t, err, "framing package cannot parse v2 string into frame")
-	assert.Equal(t, "DATA", frame.Type, "parsed wrong data type")
+	assert.Equal(t, "data", frame.Type, "parsed wrong data type")
 	assert.Equal(t, "TCPPacket", frame.BodyType, "parsed wrong body type")
 	assert.Equal(t, "IN", frame.Port, "parsed wrong port")
 	//assert.Equal(t, "text/plain", frame.ContentType, "parsed wrong content type")
@@ -98,12 +98,12 @@ var (
 		Type:     "data",
 		BodyType: "TCPPacket",
 		Extensions: map[string]string{
-			"Conn-Id": "1",
+			"conn-id": "1",
 		},
 		Body: []byte("a\n"),
 	}
 	frameStrV1 = fmt.Sprintf("%s\r\n%s\r\n%s\r\n\r\n%s", "Type: data.TCPPacket", "Port: IN", "Content-Length: 2", "a\n")
-	frameStrV2 = fmt.Sprintf("2%s\n%s\n%s\n%s\n%s\n\n%s\000", "DATA", "type:TCPPacket", "port:IN", "Conn-Id:1", "length:2", "a\n")
+	frameStrV2 = fmt.Sprintf("2%s\n%s\n%s\n%s\n%s\n\n%s\000", "data", "type:TCPPacket", "port:IN", "conn-id:1", "length:2", "a\n")
 )
 
 // save result in package-level variable so that compiler cannot optimize benchmark away
