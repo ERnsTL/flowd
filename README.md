@@ -10,11 +10,12 @@ Build a *data factory* in which components transform the passed data frames arou
 
 Components naturally make use of all available processor cores.
 
-A component network can span multiple machines, lending itself for use in distributed systems. Load balancing and routing are planned features.
+A component network can span multiple machines, lending itself for use in distributed systems. Routing is available and load balancing is a planned feature.
 
 Use available off-the-shelf components where you can. Grow a collection of specialized components and *reuse* them for the next and next project of yours.
 
 Rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
+
 
 ## Installation
 
@@ -22,120 +23,18 @@ Rather than rewriting code anew for each project, you become more and more effic
 GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
 ```
 
+
 ## Examples
 
-WIP NOTE: Some places in the code and examples currently use ```unixpacket```, which is only available on Linux. If you run on OSX, you may have to change this in the code and network from ```unixpacket://``` to ```unix://```. For Windows, you may have to change to ```tcp``` or ```udp```. There is an [information page](https://groups.google.com/forum/?_escaped_fragment_=topic/golang-nuts/Rmxxba5rb8Y#!topic/golang-nuts/Rmxxba5rb8Y), which explains the differences a bit and how Go handles the different network types.
+Several example components and example processing networks are included.
 
-WIP NOTE: Some places in the code and examples currently use *abstract* Unix domain sockets starting with ```@```. These are not path-bound and available only on Linux. If you run on OSX, you may have to change this in the code and network to a path-bound name without the ```@```. For Windows, you may have to change ot ```tcp``` or ```udp```.
-
-### Example 1
-
-In this example, a simple processing pipeline is run using the network orchestrator / runtime, ```flowd```.
-
-1. Run some receiver of the pipeline output:
-
-  ```
-  bin/unix2stdout @flowd/print1/in
-  ```
-
-  This should listen for a connection.
-
-1. Run the processing network, a simple pipeline in this case. You can give the name as argument or pipe it in.
-
-  ```
-  bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT src/github.com/ERnsTL/flowd/examples/example-network.fbp
-  ```
-
-  or
-
-  ```
-  bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT < src/github.com/ERnsTL/flowd/examples/example-network.fbp
-  ```
-
-  This should start up the network and display that all ports are connected and the network *inport* listening.
-
-  You can find out more about the ```.fbp``` network description grammar here:
-
-  * [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
-  * [his .fbp parser source](https://github.com/jpaulm/parsefbp)
-  * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
-  * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
-
-1. Send in some data for processing:
-
-  ```
-  cat src/github.com/ERnsTL/flowd/examples/example-list.json | bin/stdin2frame -bodytype FilterMessage -content-type application/json | bin/stdin2unix @flowd/network1/in
-  ```
-
-  This connects to the network and sends it some *framed* JSON test data to filter.
-
-  Switching back to the data sink, you should now see the input data filtered on the Name attribute.
-
-
-### Example 2
-
-The same can also be done manually using the ```launch``` program. The orchestrator / runtime also calls this binary behind the scenes.
-
-You have to manually set up the components in reverse order (sink to source). This example is the same as example 1. It also uses *message / IP framing*. This allows the use of multiple and named *ports* on the input and output side and the creation of complex, non-linear processing networks. But it is also possible to set ```launch``` into unframed mode and work with streams instead of *messages / IPs*.
-
-The data flow for this example as follows:
+Compile the network orchestrator and runtime ```flowd```, then run examples like this:
 
 ```
-data file -> stdin -> frame -> stdout/in -> Unix/TCP/UDP -> stdin -> component -> stdout -> Unix/TCP/UDP -> stdout -> display
+bin/flowd src/github.com/ERnsTL/flowd/examples/chat-server.fbp
 ```
 
-1. Run a sink:
-
-  ```
-  bin/unix2stdout @flowd/print1/in
-  ```
-
-  This should listen for the results.
-
-1. Run an example copy component:
-
-  ```
-  bin/launch -in unixpacket://@flowd/copy/in#in -out unixpacket://@flowd/print1/in#out1 bin/copy out1
-  ```
-
-1. Run a processing component:
-
-  ```
-  bin/launch -in unixpacket://@flowd/network1/in#in -out unixpacket://@flowd/copy/in#OUT bin/filter-records-framed
-  ```
-
-  This should run a simple filtering component, waiting for connection on its *input endpoint*.
-
-
-1. Run a simple data source:
-
-  ```
-  cat src/github.com/ERnsTL/flowd/examples/example-list.json | bin/stdin2frame -bodytype FilterMessage -content-type application/json | bin/stdin2unix @flowd/network1/in
-  ```
-
-  This connects to the network and sends it some *framed* JSON test data to filter.
-
-  Switching back to the data sink, you should now see the input data filtered on the Name attribute.
-
-### Example 3
-
-You could also extend the above example 2 to copy to multiple *output endpoints*:
-
-```
-bin/launch -in unix://@flowd/copy/in#in -out unix://@flowd/print1/in#out1 -out unix://@flowd/print2/in#out2 bin/copy out1 out2
-```
-
-... and also start a second printer component accordingly. This would result in a Y-split in the network.
-
-### Example 4
-
-Start a simple TCP echo server using the following command:
-
-```
-bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/example-echo-server.fbp
-```
-
-This should parse the network definition file, start up all ```launch``` instances, all components, connect all ports between components, deliver configuration information (*IIPs*) to the components and finally, start the listen socket.
+This example should show that all components have started up and that the TCP server component is ready for connections.
 
 Then connect to it using, for example:
 
@@ -145,13 +44,15 @@ nc -v localhost 4000
 
 When you connect, you should see a message that it has accepted your connection. When you send data, you should see it sent to an intermediary copy component and further back to ```tcp-server```'s response port and back out via TCP to your client.
 
+The flag ```-quiet``` removes the frame passing information, in case you do not want to see it.
+
 The data flow is as follows:
 
 ```
 TCP in -> tcp-server OUT port -> copy IN port -> copy OUT port -> tcp-server IN port (responses) -> TCP out
 ```
 
-Also, an *initial information packet*/frame is sent to the ```CONF``` input port of the ```tcp-server``` component:
+Also, an *initial information packet* (IIP) is sent to the ```CONF``` input port of the ```tcp-server``` component, as defined in the network specification:
 
 ```
 'localhost:4000' -> CONF tcp-server
@@ -159,7 +60,17 @@ Also, an *initial information packet*/frame is sent to the ```CONF``` input port
 
 This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior.
 
-## Visualization Example
+You can find out more about the ```.fbp``` network description grammar here:
+
+* [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
+* [his .fbp parser source](https://github.com/jpaulm/parsefbp)
+* [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
+* [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
+
+A more complete, parser-exercising example is located in ```examples/example.fbp```.
+
+
+## Visualization example
 
 *flowd* can export the network graph structure into *GraphViz* format for visualization.
 
@@ -169,19 +80,20 @@ The following commands will export a network to STDOUT, convert it to a PNG rast
 bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
 ```
 
+
 ## Architecture
 
 > This describes the current pre-alpha state. Far from all of the target architecture is currently present.
 
-At this stage, all components are basically normal programs or scripts, which do not have to be specially modified or little modified to be used in a flowd network.
+All components are either normal programs or scripts, which do not have to be specially modified to be used in a ```flowd``` network (wrapped in a ```cmd``` component) or they are programs, which understand the ```flowd``` framing format.
 
-All components are each started by an instance of the ```launch``` program. It manages the message framing, if requested, message routing and handles all the network connections with other components.
+All components are each started by the ```flowd``` program. It manages the message framing, message routing and handles all the network connections with other components.
 
-A component can have multiple input and output ports. If message framing is used, then multiple ports are possible and they can be named. Without message framing, currently only one input and output port is possible, but on the other hand, the program does not have to be specially modified.
+A component can have multiple input and output ports. Ports are named. Without message framing (wrapped in a ```cmd``` component), input can be passed to an unmodified program and output can be used within the processing framework.
 
-A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by its ```launch``` parent process.
+A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by its ```flowd``` parent process.
 
-The framing format is a simple text-based format very similar to an HTTP header. It can can easily be implemented in any programming language and is easy to extend without being bound to any currently-trendy data format. It contains basic information on:
+The framing format is a simple text-based format very similar to an HTTP header or a MIME message. Currently, a subset of STOMP v1.2 is used. It can can easily be implemented in any programming language and is easy to extend without being bound to any currently-trendy data format. It contains basic information on:
 
 * Over which port did this frame come in? Over which port shall this be sent out to another component?
 * Is this a control frame or a data frame?
@@ -191,11 +103,13 @@ The framing format is a simple text-based format very similar to an HTTP header.
 * The frame body is a free-form byte array, so you can put in whatever you want.
 * Header fields are extensible to convey application-specific meta data.
 
-Using several components, a network can be built. It is like a graph of components or workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
+Using several components, a network can be built. It is like a graph of components or like workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
+
 
 ## Writing Components
 
 TODO
+
 
 ## Writing Applications
 
@@ -205,6 +119,7 @@ Three stages usually:
 1. read and packetize
 2. filter and transform
 3. assemble packets and output
+
 
 ## FBP Runtimes
 
@@ -236,15 +151,38 @@ Downsides of the approach taken by ```flowd```:
 
 If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow). Also check out the FBP runtimes and systems by J. Paul Morrison and *NoFlo* and their compatible runtimes.
 
+
 ## Features
 
-* TCP endpoints
-* Unix domain endpoints (abstract and path-based)
-* TCP output endpoints try again to dial connection, later turn into warnings, later into an error. This makes it possible to start components resp. their ```launch``` instances in any order.
-* TCP input endpoints with fixed port number will listen again for another connection so that a new component can submit input data or, if connection is lost, it can be resumed or that the source component can be re-launched.
-* Optional, but usually used framing format between component and launch and in between launch instances.
-* *Initial information packets* (IIPs) for component *parametrization*.
-* A few included example components (filter, copy, TCP server).
+* Parsing of ```.fbp``` network specifications
+* Starting a network of the specified components
+* Simple and easy to implement framing format
+* Multi-core use resp. parallel processing
+* Closing of ports
+* Gracelful shutdown once all data has been processed and all components shut down
+* Visualization of the given network in *GraphViz* format
+
+The included example components cover:
+
+* TCP client and server
+* Unix domain client and server (abstract and path-based)
+* SSH client
+* Re-use of any existing programs, to be used for transformation of input data
+* Bridges between different network parts, and thus...
+* Distribution of the network across multiple machines
+* File reading
+* Line splitting
+* Modification of frame headers
+* Routing based on frame contents or header values
+
+Planned features:
+
+* Runtime protocol for remote control and online reconfiguration of the runtime
+* Network discovery of services using Zeroconf / Bonjour
+* Load balancing
+* Tracing of data packets as they flow through the network
+* For more, see the issues list!
+
 
 ## Development
 
@@ -268,9 +206,11 @@ Running tests for the JSON FBP network protocol: Follow [the basic instructions]
 
 Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
 
+
 ## License
 
 GNU LGPLv3+
+
 
 ## Contributing
 
@@ -284,7 +224,7 @@ GNU LGPLv3+
 ## History and Reference of Rationale
 
 
-### Change of Framing format
+### Change of framing format
 
 This was done in commit 814ce0716cb7aefd817213e7840e55051e8541b5 of 2017-06-12.
 
