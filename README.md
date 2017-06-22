@@ -18,7 +18,7 @@ Thus, rather than rewriting code anew for each project, you become more and more
 
 This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Paul Morrison](http://www.jpaulmorrison.com/fbp/).
 
-The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which constitutes an *application* or processing system of some kind.
+The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which then constitutes an *application* or processing system of some kind.
 
 The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and potentially visual kind of programming, based on the combination and connection of re-usable *black boxes* working together in a *mappable* processing network resp. application.
 
