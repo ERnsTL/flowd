@@ -279,3 +279,33 @@ GNU LGPLv3+
 3. send pull request
 4. quality check
 5. merged!
+
+
+## History and Reference of Rationale
+
+Removal of ```launch``` in commit 5a50e12a687818e4551b7cd380ea6cef63560a21 of 2017-03-26:
+
+  The reason for the change in architecture is the desire to incorporate online network reconfiguration (OLC).
+
+  The ```launch``` program was really just an indirection and wrapper for communicating with the components, like a shepherd for that component. But once started, it would have been unproportionally difficult to propagate changes in connections to ```launch```. So instead of coming up with a protocol to communicate endpoint change requests to ```launch```, the decision was to incorporate its core into ```flowd```, where network reconfiguration can be achieved much more easily. This *concern* is thus concentrated inside ```flowd```.
+
+  Before the change in architecture:
+
+  * ```launch``` took care of network endpoints.
+  * IPs were sent through UNIX domain sockets, UDP or TCP. Just for a local transfer between processes.
+  * Adding more network transports would mean that these would have to be incorporated into ```launch```. Each transport behaves slightly different and has different options, which would be difficult to support through one interface - or endpoint URLs would grow to become incomprehensible.
+  * ```flowd``` would have to be involved also with the endpoint URLs and had to have some understanding of each transport to know how to associate each end of a connection which each other.
+  * Having many endpoint types inside ```launch``` is not scalable and is not really the *concern* of ```launch``` or the FBP runtime in general.
+  * Would have lead to too many endpoint types = network transports inside ```launch``` and that was not scalable.
+  * ```launch``` had unnecessary complexity in configuration and program parameters.
+  * Difficult-to-read endpoint URLs.
+  * Quite some code in ```flowd``` was needed to even generate the parameters for ```launch```.
+  * More copying than necessary across process boundaries, e.g. from component to ```launch```, over a UNIX socket endpoint to the other ```launch``` and into the component.
+
+  After the change:
+
+  * Network transports can easily be added by a set of components.
+  * Network bridges can also simply be constructed using components.
+  * Drawback: ```flowd``` does not know that this component is one end of a network bridge.
+  * The responsibility and code for building and maintaining a network will allow for easier network reconfiguration in the future.
+  * Less copying as delivery of IPs between components is now done inside ```flowd``` using Go channels.
