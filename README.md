@@ -255,7 +255,7 @@ In total, ```flowd``` stays close to the goal of not inventing new formats and p
 
 ### Removal of ```launch```
 
-This was done in commit 5a50e12a687818e4551b7cd380ea6cef63560a21 of 2017-03-26.
+The functionality of the ```launch``` program was moved into ```flowd```. This was done in commit 5a50e12a687818e4551b7cd380ea6cef63560a21 of 2017-03-26.
 
 The reason for the change in architecture was the desire to incorporate online network reconfiguration (OLC).
 
@@ -276,6 +276,7 @@ Before the change in architecture:
 
 After the change:
 
+* Components are now launched and monitored directly by ```flowd```.
 * Network transports can easily be added by a set of components.
 * Network bridges can also simply be constructed using components.
 * Drawback: ```flowd``` does not know that this component is one end of a network bridge.
