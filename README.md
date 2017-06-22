@@ -298,7 +298,7 @@ Requirements:
 * binary-capable,
 * text-based and
 * simple to parse,
-* re-usable framing format.
+* re-usable = existing framing format.
 
 The choice thus fell to the simple STOMP v1.2 framing format. It is basically an optimized, simplified MIME format. And of that, only a subset is currently used and implemented and a few minor modifications apply. So, if a component developer has to implement a parser and marshaler, then it will be very little effort to implement.
 
