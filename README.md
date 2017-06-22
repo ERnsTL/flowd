@@ -14,7 +14,15 @@ A component network can span multiple machines, lending itself for use in distri
 
 Use available off-the-shelf components where you can. Grow a collection of specialized components and *reuse* them for the next and next project of yours.
 
-Rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
+Thus, rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
+
+This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Paul Morrison](http://www.jpaulmorrison.com/fbp/).
+
+The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which constitutes an *application* or processing system of some kind.
+
+The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and potentially visual kind of programming, based on the combination and connection of re-usable *black boxes* working together in a *mappable* processing network resp. application.
+
+You can find out more about this paradigm on JPM's website linked above.
 
 
 ## Installation
