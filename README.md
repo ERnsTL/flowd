@@ -283,6 +283,32 @@ GNU LGPLv3+
 
 ## History and Reference of Rationale
 
+
+### Change of Framing format
+
+This was done in commit 814ce0716cb7aefd817213e7840e55051e8541b5 of 2017-06-12.
+
+See issue #61. In summary, most programming languages resp. their standard libraries or external libraries do not expose bare HTTP or MIME header parsing as public methods or re-usable functions. Therefore, being compatible to that saves nobody effort, because the parsing functionality is not exposed separately.
+
+A different format is thus needed.
+
+Requirements:
+
+* MIME-related or otherwise key-value based,
+* binary-capable,
+* text-based and
+* simple to parse,
+* re-usable framing format.
+
+The choice thus fell to the simple STOMP v1.2 framing format. It is basically an optimized, simplified MIME format. And of that, only a subset is currently used and implemented and a few minor modifications apply. So, if a component developer has to implement a parser and marshaler, then it will be very little effort to implement.
+
+Benchmarks made for issue #92 show 40 to 50 % lower runtime for ```Marshal()``` and 15 % lower runtime for ```ParseFrame()```. On the wire, the format saves 25 % bytes for an average case.
+
+Also, a version marker byte was introduced, in case the format has to be changed again in the future, though it is unlikely, because a format fulfilling the requirements cannot be much more simple.
+
+In total, ```flowd``` stays close to the goal of not inventing new formats and protocols and making it simple for component writers to serialize and deserialize IPs.
+
+
 ### Removal of ```launch```
 
 This was done in commit 5a50e12a687818e4551b7cd380ea6cef63560a21 of 2017-03-26.
@@ -311,3 +337,4 @@ After the change:
 * Drawback: ```flowd``` does not know that this component is one end of a network bridge.
 * The responsibility and code for building and maintaining a network will allow for easier network reconfiguration in the future.
 * Less copying as delivery of IPs between components is now done inside ```flowd``` using Go channels.
+* Much higher performance.
