@@ -188,7 +188,7 @@ Planned features:
 * For more, see the issues list!
 
 
-## Development
+## Development aka Hacking on ```flowd```
 
 Running tests:
 
