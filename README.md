@@ -108,7 +108,11 @@ Using several components, a network can be built. It is like a graph of componen
 
 ## Writing Components
 
-TODO
+Decide if your program shall implement the ```flowd``` framing format or be wrapped in a ```cmd``` component.
+
+If wrapped, you can decide for the program to be called for each incoming frame in order to process it or if your program should process a stream of frame bodies. If one-off, the program will receive data on STDIN, which will be closed after the frame body has been delivered; the program can the output a result, which will be forwarded into the FBP network for further processing. It is then expected to either close STDOUT or exit the program. In the one-instance mode, STDIN and STDOUT will remain open; your program will receive data from incoming frame bodies to be processed and any output will be framed by the ```cmd``` component and again forwarded into the network.
+
+Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open STDIN and will receive a stream of frames to be processed according to purpose. Checking out the ```port``` header field will tell on which input port it came in. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration, and the *port closed notifications* of body type *PortClose* as notification that one of your input ports got closed; this is usually the signal that all data has arrived from the preceding component and that it shut down. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact. Output frames, if any, are then to be sent to STDOUT. According to the ```port``` header field, the frames from your component will be forwarded to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
 
 
 ## Writing Applications
