@@ -83,7 +83,7 @@ bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot
 
 ## Architecture
 
-> This describes the current pre-alpha state. Far from all of the target architecture is currently present.
+> This describes the current pre-alpha state.
 
 All components are either normal programs or scripts, which do not have to be specially modified to be used in a ```flowd``` network (wrapped in a ```cmd``` component) or they are programs, which understand the ```flowd``` framing format.
 
