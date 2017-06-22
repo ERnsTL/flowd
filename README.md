@@ -1,6 +1,6 @@
 # flowd
 
-> This is pre-alpha software. Far from all features currently present.
+> This is pre-alpha software. It basically works, but far from all of the planned features currently present.
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
