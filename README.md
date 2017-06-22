@@ -22,10 +22,10 @@ The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution
 
 The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and potentially visual kind of programming, based on the combination and connection of re-usable *black boxes* working together in a *mappable* processing network resp. application.
 
-You can find out more about this paradigm on JPM's website linked above.
+You can find out more about this paradigm on J. Paul Morrison's website linked above.
 
 
-## Installation
+## Installing ```flowd```
 
 ```
 GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
@@ -42,7 +42,7 @@ Compile the network orchestrator and runtime ```flowd```, then run examples like
 bin/flowd src/github.com/ERnsTL/flowd/examples/chat-server.fbp
 ```
 
-This example should show that all components have started up and that the TCP server component is ready for connections.
+This particular example comprises a small chat or console server over TCP. Upon starting ```flowd```, it should show that all components have started up and that the TCP server component is ready for connections.
 
 Then connect to it using, for example:
 
@@ -99,9 +99,9 @@ All components are each started by the ```flowd``` program. It manages the messa
 
 A component can have multiple input and output ports. Ports are named. Without message framing (wrapped in a ```cmd``` component), input can be passed to an unmodified program and output can be used within the processing framework.
 
-A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by its ```flowd``` parent process.
+A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by ```flowd``` as the managing parent process.
 
-The framing format is a simple text-based format very similar to an HTTP header or a MIME message. Currently, a subset of STOMP v1.2 is used. It can can easily be implemented in any programming language and is easy to extend without being bound to any currently-trendy data format. It contains basic information on:
+The framing format is a simple text-based format very similar to an HTTP/1.x header or a MIME message, which is also used for e-mail. Currently, a subset of [STOMP v1.2](https://stomp.github.io/stomp-specification-1.2.html) is used. It can easily be implemented in any programming language, is easy to extend and can carry a frame body in any currently-trendy format be it textual or binary. A frame contains information on:
 
 * Over which port did this frame come in? Over which port shall this be sent out to another component?
 * Is this a control frame or a data frame?
@@ -157,7 +157,7 @@ In general, ```flowd``` puts focus on:
 
 Downsides of the approach taken by ```flowd```:
 
-1. *More copying.* This is a neccessary consequence since different programming languages are involved, which have different programming models, manage memory differently, manage objects and functions and methods totally differently. Therefore they need and require to be the masters of their own address space organization and each component runs as an own process. In order to communicate, data copying across these process and address space borders is neccessary. This is done via the reliable central entity in the operating system, the OS *kernel*. Therefore, system calls, CPU ring switches and buffer copying are the required consequence to cross these process borders.
+1. *More copying.* This is a neccessary consequence since different programming languages are involved, which have different programming models, manage memory differently, manage objects and functions and methods totally differently and thus cannot be loaded into each other's memory. Therefore they need and require to be the masters of their own address space organization and each component runs as an own process. In order to communicate, data copying across these process and address space borders is neccessary. This is done via the reliable central entity in the operating system, the OS *kernel*. Therefore, system calls, CPU ring switches and buffer copying are the required consequence to cross these process borders.
 
   Future note: It may be possible to create a production-mode version, where the inter-process communication is changed from network connections to in-process communication, which would reduce the amount of data copying.
 
