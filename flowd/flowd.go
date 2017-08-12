@@ -22,6 +22,17 @@ var (
 )
 
 func main() {
+	//TODO optimize: instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
+	// profiling block
+	/*
+		f, err := os.Create("flowd.prof")
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	*/
+
 	// read program arguments
 	var help, debug, quiet, graph bool
 	var olc string
@@ -257,7 +268,16 @@ func main() {
 }
 
 func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteCloser, debug bool, quiet bool) {
-	countw := datacounter.NewWriterCounter(cin)
+	// use write counter only if !quiet or even debug
+	var countw *datacounter.WriterCounter
+	var cinw io.Writer
+	if !quiet {
+		countw = datacounter.NewWriterCounter(cin)
+		cinw = countw
+	} else {
+		cinw = cin
+	}
+	// other initializations
 	var oldCount uint64
 	var frame SourceFrame
 	for {
@@ -267,6 +287,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 		// check for EOF = channel got closed -> exit goroutine
 		if frame.Source == nil {
 			fmt.Println("EOF from network input channel - closing.")
+			//TODO also close cin here?
 			break
 		}
 
@@ -290,17 +311,17 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 			continue
 		}
 		// forward frame to component
-		if err := frame.Marshal(countw); err != nil {
+		if err := frame.Marshal(cinw); err != nil {
 			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 		}
-
 		// status message
 		if debug {
 			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
+			oldCount = countw.Count()
 		} else if !quiet {
 			fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
+			oldCount = countw.Count()
 		}
-		oldCount = countw.Count()
 	}
 }
 
