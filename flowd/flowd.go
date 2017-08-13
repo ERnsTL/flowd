@@ -115,7 +115,7 @@ func main() {
 			//cmd.Stderr = os.Stderr
 			cerr, err := cmd.StderrPipe()
 			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe to launch stdin:", err)
+				fmt.Println("ERROR: could not allocate pipe to component stderr:", err)
 			}
 			if err = cmd.Start(); err != nil {
 				fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
@@ -124,10 +124,15 @@ func main() {
 
 			// display component stderr
 			go func() {
+				// prepare instance AllOutputted chan
+				donechan := instances[proc.Name].AllOutputted
+				// read each line and display with component name prepended
 				scanner := bufio.NewScanner(cerr)
 				for scanner.Scan() {
 					fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
 				}
+				// notify main loop
+				close(donechan)
 			}()
 
 			// first deliver initial information packets/frames
@@ -208,6 +213,8 @@ func main() {
 		// NOTE: otherwise the port close notification would be injected,
 		// because cmd.Wait() and exitChan easily overtakes handleComponentOutput() goroutine
 		<-instances[procName].AllDelivered
+		// same for exited component's stderr output
+		<-instances[procName].AllOutputted
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
 		var found bool
@@ -451,11 +458,12 @@ type ComponentInstance struct {
 	ExitTo       chan bool        // tell command handler - and therefore component - to shut down	//TODO change to struct{} and close it
 	Input        chan SourceFrame // handler inbox for sending a frame to it
 	AllDelivered chan struct{}    // tells mail loop that all messages the exited component sent to STDOUT are now delivered
+	AllOutputted chan struct{}    // tells main loop that all output the exited component sent to STDERR are now read and displayed
 	Deleted      bool             //TODO mark entry as deleted to avoid concurrent read (many) and write (one for each instance on cleanup) panic on instance map
 }
 
 func newComponentInstance() *ComponentInstance {
-	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame, connCapacity), AllDelivered: make(chan struct{})}
+	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame, connCapacity), AllDelivered: make(chan struct{}), AllOutputted: make(chan struct{})}
 }
 
 // SourceFrame contains an actual frame plus sender information used in handler functions
