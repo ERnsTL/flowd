@@ -9,7 +9,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-type Message struct {
+type message struct {
 	Name string
 	Body string
 	Time int64
@@ -27,16 +27,18 @@ func main() {
 		Body: nil,
 	}
 
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	for {
 		// read frame
-		bufr := bufio.NewReader(os.Stdin)
-		inframe, err = flowd.ParseFrame(bufr)
+		inframe, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
 		// parse JSON body
-		var records []map[string]interface{}
+		var records []map[string]interface{} //TODO is not actually using message type
 		if err := json.Unmarshal(inframe.Body, &records); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
@@ -52,16 +54,16 @@ func main() {
 		}
 
 		// encode result
-		if body, err := json.Marshal(&records); err != nil {
+		body, err := json.Marshal(&records)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return
-		} else {
-			// frame result
-			outframe.Body = body
-			outframe.Extensions = inframe.Extensions
-
-			// send it
-			outframe.Marshal(os.Stdout)
 		}
+		// frame result
+		outframe.Body = body
+		outframe.Extensions = inframe.Extensions
+
+		// send it
+		outframe.Marshal(netout)
 	}
 }

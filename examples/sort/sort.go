@@ -12,7 +12,9 @@ import (
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	fmt.Fprintln(os.Stderr, "reading packets")
 
 	//TODO add configuration to do numeric sort
@@ -24,7 +26,7 @@ func main() {
 
 	// read frames
 	for {
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(netin)
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -57,7 +59,7 @@ func main() {
 	}
 	for i := 0; i < len(toSort); i++ {
 		outframe.Body = []byte(toSort[i])
-		if err := outframe.Marshal(os.Stdout); err != nil {
+		if err := outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 	}

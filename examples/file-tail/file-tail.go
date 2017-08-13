@@ -13,13 +13,15 @@ import (
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// flag variables
 	var filePath string
 	var debug, quiet bool
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -73,7 +75,7 @@ func main() {
 		outframe.Body = []byte(line.Text)
 
 		// send it to given output ports
-		if err := outframe.Marshal(os.Stdout); err != nil {
+		if err := outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 		}
 	}

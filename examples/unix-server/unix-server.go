@@ -17,15 +17,17 @@ import (
 const bufSize = 65536
 
 var (
-	debug, quiet bool //TODO is that a good idea? concurrent variable access? performance?
+	debug, quiet bool          //TODO is that a good idea? concurrent variable access? performance?
+	netout       *bufio.Writer //TODO is that safe for concurrent use?
 )
 
 func main() {
 	// open connection to network
-	stdin := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout = bufio.NewWriter(os.Stdout)
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", stdin)
+	iip, err := flowd.GetIIP("CONF", netin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
@@ -117,7 +119,7 @@ func main() {
 	go func(stdin *bufio.Reader) {
 		// handle regular packets
 		for {
-			frame, err := flowd.ParseFrame(stdin)
+			frame, err := flowd.ParseFrame(netin)
 			if err != nil {
 				if err == io.EOF {
 					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
@@ -197,7 +199,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-	}(stdin)
+	}(netin)
 
 	// handle close notifications -> delete connection from map
 	closeChan := make(chan int)
@@ -210,7 +212,7 @@ func main() {
 			// send close notification downstream
 			//TODO with reason (error or closed from other side/this side)
 			closeNotification.Extensions["conn-id"] = strconv.Itoa(id)
-			closeNotification.Marshal(os.Stdout)
+			closeNotification.Marshal(netout)
 		}
 	}()
 
@@ -225,7 +227,7 @@ func main() {
 		// send new-connection notification downstream
 		openNotification.Extensions["conn-id"] = strconv.Itoa(id)
 		openNotification.Extensions["remote-address"] = fmt.Sprintf("%v", conn.RemoteAddr()) // copied from handleConnection()
-		openNotification.Marshal(os.Stdout)
+		openNotification.Marshal(netout)
 		// handle connection
 		go handleConnection(conn, id, closeChan)
 		//TODO overflow possibilities?
@@ -297,6 +299,6 @@ func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
 		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
-		outframe.Marshal(os.Stdout)
+		outframe.Marshal(netout)
 	}
 }

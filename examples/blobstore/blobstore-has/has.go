@@ -20,10 +20,13 @@ func main() {
 		careful bool
 	)
 
+	// open connection to network
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
-	bufr := bufio.NewReader(os.Stdin)
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -58,7 +61,12 @@ func main() {
 	fmt.Fprintln(os.Stderr, "ready")
 
 	// pre-declare to reduce GC allocations
-	var inframe *flowd.Frame
+	var (
+		inframe  *flowd.Frame
+		blobname string
+		found    bool
+		err      error
+	)
 	outframe := flowd.Frame{
 		Type:     "data",
 		BodyType: "BlobExistence",
@@ -69,16 +77,11 @@ func main() {
 	}
 	trueBytes := []byte("TRUE")
 	falseBytes := []byte("FALSE")
-	var err error
-	var (
-		blobname string
-		found    bool
-	)
 
 	// main loop
 	for {
 		// read IP
-		inframe, err = flowd.ParseFrame(bufr)
+		inframe, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -113,7 +116,7 @@ func main() {
 			}
 		}
 		// send result
-		outframe.Marshal(os.Stdout)
+		outframe.Marshal(netout)
 	}
 }
 

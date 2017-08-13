@@ -11,11 +11,13 @@ import (
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
 	var inPorts []string
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -56,7 +58,7 @@ forPorts:
 				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
 				// send it to output port
 				frame.Port = "OUT"
-				if err = frame.Marshal(os.Stdout); err != nil {
+				if err = frame.Marshal(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 				}
 				// remove it from buffer
@@ -67,7 +69,7 @@ forPorts:
 		// read new frames
 		for {
 			// read frame
-			frame, err = flowd.ParseFrame(bufr)
+			frame, err = flowd.ParseFrame(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -84,7 +86,7 @@ forPorts:
 				// send it to output port
 				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
 				frame.Port = "OUT"
-				if err := frame.Marshal(os.Stdout); err != nil {
+				if err := frame.Marshal(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 				}
 			} else {

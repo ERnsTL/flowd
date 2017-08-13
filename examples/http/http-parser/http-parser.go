@@ -38,7 +38,9 @@ var (
 
 func main() {
 	// prepare commonly-used variables
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	var frame *flowd.Frame //TODO why is this pointer of Frame?
 	var err error
 	var connID string
@@ -47,7 +49,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
 			break
@@ -73,7 +75,7 @@ func main() {
 				close: make(chan struct{}, 0),
 			}
 			// handle request
-			go handleConnection(connID, clients[connID])
+			go handleConnection(connID, clients[connID], netout)
 		} else if frame.BodyType == "CloseNotification" {
 			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
 			// send notification to handler goroutine
@@ -87,7 +89,8 @@ func main() {
 	}
 }
 
-func handleConnection(connID string, client *Client) {
+//TODO optimize: give netout as parameter here, safe for concurrent use?
+func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 	// read HTTP request from series of frames
 	var req *http.Request
 	var err error
@@ -105,7 +108,7 @@ func handleConnection(connID string, client *Client) {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.", connID, err)
 			// request connection be closed
 			closeCommand.Extensions["conn-id"] = connID
-			closeCommand.Marshal(os.Stdout)
+			closeCommand.Marshal(netout)
 			// done
 			return
 		}
@@ -120,7 +123,7 @@ func handleConnection(connID string, client *Client) {
 			},
 			Body: body, //TODO
 		}
-		if err := reqFrame.Marshal(os.Stdout); err != nil {
+		if err := reqFrame.Marshal(netout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.", connID, err)
 		}
 		// TODO multiple requests

@@ -13,13 +13,15 @@ import (
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout = bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// flag variables
 	var debug, quiet bool
 	var brackets, control bool
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -52,7 +54,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -101,6 +103,7 @@ var (
 		BodyType: "PacketCount",
 		Port:     "OUT",
 	}
+	netout *bufio.Writer //TODO is concurrent use OK in this case here?
 )
 
 func sendCount() {
@@ -111,7 +114,7 @@ func sendCount() {
 	} else {
 		countFrame.Body = []byte(strconv.Itoa(packetSize))
 	}
-	if err := countFrame.Marshal(os.Stdout); err != nil {
+	if err := countFrame.Marshal(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }

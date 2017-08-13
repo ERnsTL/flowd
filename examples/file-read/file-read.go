@@ -15,13 +15,15 @@ const bufSize = 65536
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// flag variables
 	var filePaths []string
 	var debug, quiet, brackets bool
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -72,7 +74,7 @@ func main() {
 		// send open bracket
 		//TODO send filename also?
 		if brackets {
-			obracket.Marshal(os.Stdout)
+			obracket.Marshal(netout)
 		}
 
 		// read it in chunks until end, forward chunks
@@ -95,7 +97,7 @@ func main() {
 			outframe.Body = buf[:n]
 
 			// send it to output port
-			if err = outframe.Marshal(os.Stdout); err != nil {
+			if err = outframe.Marshal(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 			}
 		}
@@ -108,7 +110,7 @@ func main() {
 
 		// send close bracket
 		if brackets {
-			cbracket.Marshal(os.Stdout)
+			cbracket.Marshal(netout)
 		}
 
 		// report

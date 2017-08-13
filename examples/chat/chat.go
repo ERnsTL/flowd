@@ -42,7 +42,9 @@ func main() {
 	var frame *flowd.Frame //TODO why is this pointer of Frame?
 	var err error
 	var id string // connection ID
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 
 	clients := map[string]*ChatClient{} // key = connection ID
 
@@ -58,7 +60,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(netin)
 		// get connection ID
 		id = frame.Extensions["conn-id"]
 
@@ -136,7 +138,7 @@ func main() {
 
 		// send it to output port
 		frame.Port = "OUT"
-		if err := frame.Marshal(os.Stdout); err != nil {
+		if err := frame.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 	}

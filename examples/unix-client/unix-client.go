@@ -17,14 +17,16 @@ const bufSize = 65536
 
 var (
 	debug, quiet bool
+	netout       *bufio.Writer //TODO is that safe for concurrent use in this case here? restructure handleConnection!
 )
 
 func main() {
 	// open connection to FBP network
-	stdin := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout = bufio.NewWriter(os.Stdout)
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", stdin)
+	iip, err := flowd.GetIIP("CONF", netin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
 		os.Exit(1)
@@ -87,13 +89,13 @@ func main() {
 		// copy STDIN to network connection
 		go func() {
 			up <- true
-			io.Copy(conn, os.Stdin)
+			io.Copy(conn, netin)
 			done <- true
 		}()
 		// copy network connection to STDOUT
 		go func() {
 			up <- true
-			io.Copy(os.Stdout, conn)
+			io.Copy(netout, conn)
 			done <- true
 		}()
 
@@ -113,7 +115,7 @@ func main() {
 		//TODO pretty much 1:1 copy of tcp-server main loop
 		go func() {
 			for {
-				frame, err := flowd.ParseFrame(stdin)
+				frame, err := flowd.ParseFrame(netin)
 				if err != nil {
 					if err == io.EOF {
 						fmt.Fprintln(os.Stderr, "unix out: EOF from FBP network on STDIN. Exiting.")
@@ -230,6 +232,6 @@ func handleConnection(conn *net.UnixConn, closeChan chan bool) {
 		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
-		outframe.Marshal(os.Stdout)
+		outframe.Marshal(netout)
 	}
 }

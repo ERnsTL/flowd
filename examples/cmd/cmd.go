@@ -14,9 +14,13 @@ import (
 
 const bufSize = 65536
 
+var netout *bufio.Writer //TODO is this concurrently useable? better give as param to handler function?
+
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout = bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// flag variables
 	var operatingMode OperatingMode
 	var framing bool
@@ -25,7 +29,7 @@ func main() {
 	var debug, quiet bool
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -92,23 +96,24 @@ func main() {
 		// handle subprocess input
 		if framing == true {
 			// setup direct copy without processing (since already framed)
-			if _, err := io.Copy(cin, bufr); err != nil {
+			if _, err := io.Copy(cin, netin); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: receiving from FBP network:", err, "Closing.")
 				os.Stdin.Close()
 				return
 			}
 		} else {
 			// loop: read frame, write body to subprocess
-			copyFrameBodies(cin, bufr)
+			copyFrameBodies(cin, netin)
 		}
 	case Each:
 		// prepare variables
 		var frame *flowd.Frame //TODO why is this pointer to Frame?
+		var bufcin *bufio.Writer
 		var err error
 
 		for {
 			// read frame
-			frame, err = flowd.ParseFrame(bufr)
+			frame, err = flowd.ParseFrame(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			} else if debug {
@@ -129,13 +134,26 @@ func main() {
 
 				// forward frame or frame body to subprocess
 				if framing {
-					// frame
-					if err := frame.Marshal(cin); err != nil {
+					// prepare buffered writer (required by Marshal TODO optimize)
+					if bufcin == nil {
+						// first use
+						bufcin = bufio.NewWriter(cin)
+					} else {
+						// re-use existing one (saves the buffer allocation)
+						bufcin.Reset(cin)
+					}
+					// write frame
+					if err := frame.Marshal(bufcin); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: marshaling frame to command STDIN:", err, "- Exiting.")
 						os.Exit(3)
 					}
+					// flush frame
+					if err := bufcin.Flush(); err != nil {
+						fmt.Fprintln(os.Stderr, "ERROR: flusing frame to command STDIN:", err, "- Exiting.")
+						os.Exit(3)
+					}
 				} else {
-					// frame body
+					// write frame body
 					if _, err := cin.Write(frame.Body); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: writing frame body to command STDIN:", err, "- Exiting.")
 						os.Exit(3)
@@ -207,7 +225,7 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 		// set correct port
 		frame.Port = "OUT"
 		// send into FBP network
-		if err := frame.Marshal(os.Stdout); err != nil {
+		if err := frame.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
 			os.Stdout.Close()
 			return
@@ -241,7 +259,7 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 
 		// frame command output and send into FBP network
 		frame.Body = buf[0:nbytes]
-		if err := frame.Marshal(os.Stdout); err != nil {
+		if err := frame.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
 			os.Stdout.Close()
 			return

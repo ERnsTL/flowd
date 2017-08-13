@@ -28,10 +28,13 @@ func main() {
 		careful bool
 	)
 
+	// open connection to network
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	bufr := bufio.NewReader(os.Stdin)
-	if iip, err := flowd.GetIIP("CONF", bufr); err != nil {
+	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
 		os.Exit(1)
 	} else {
@@ -80,7 +83,7 @@ func main() {
 	// main loop
 	for {
 		// read IP
-		inframe, err = flowd.ParseFrame(bufr)
+		inframe, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -135,7 +138,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: could not read blob file", blobpath)
 		}
 		// write to outport
-		if err := outframe.Marshal(os.Stdout); err != nil {
+		if err := outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 	}

@@ -22,10 +22,12 @@ var (
 
 func main() {
 	// open connection to network
-	stdin := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", stdin)
+	iip, err := flowd.GetIIP("CONF", netin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
 		os.Exit(1)
@@ -102,13 +104,13 @@ func main() {
 		closeChan := make(chan bool)
 
 		// handle TCP -> FBP
-		go handleConnection(conn, closeChan)
+		go handleConnection(conn, closeChan, netout)
 
 		// handle FBP -> TCP
 		//TODO pretty much 1:1 copy of tcp-server main loop
 		go func() {
 			for {
-				frame, err := flowd.ParseFrame(stdin)
+				frame, err := flowd.ParseFrame(netin)
 				if err != nil {
 					if err == io.EOF {
 						fmt.Fprintln(os.Stderr, "tcp out: EOF from FBP network on STDIN. Exiting.")
@@ -179,8 +181,9 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, "IIP format: [-debug] [-quiet] [-bridge] [-retry] [host]:[port]")
 }
 
+//TODO optimize: give netout as parameter or use global variable? safe for concurrent use?
 //TODO pretty much 1:1 copy from tcp-server handleConnection() -> reuse?
-func handleConnection(conn *net.TCPConn, closeChan chan<- bool) {
+func handleConnection(conn *net.TCPConn, closeChan chan<- bool, netout *bufio.Writer) {
 	// prepare data structures
 	buf := make([]byte, bufSize)
 	outframe := flowd.Frame{
@@ -236,6 +239,6 @@ func handleConnection(conn *net.TCPConn, closeChan chan<- bool) {
 		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
-		outframe.Marshal(os.Stdout)
+		outframe.Marshal(netout)
 	}
 }

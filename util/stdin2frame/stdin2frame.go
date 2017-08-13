@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -66,12 +67,14 @@ func main() {
 			Extensions: map[string]string{},
 		}
 		if debug {
-			frame.Marshal(os.Stderr)
+			errout := bufio.NewWriter(os.Stderr)
+			frame.Marshal(errout)
 			fmt.Fprintln(os.Stderr) // NOTE: just for nicer output
 		}
 
 		// output
-		frame.Marshal(os.Stdout)
+		netout := bufio.NewWriter(os.Stdout)
+		frame.Marshal(netout)
 		if debug {
 			fmt.Fprintln(os.Stderr, "done")
 		}

@@ -14,7 +14,9 @@ const delayDuration = 1 * time.Millisecond
 
 func main() {
 	// open connection to network
-	bufr := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(os.Stdin)
+	netout := bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 
 	// prepare variables
 	var frame *flowd.Frame //TODO why is this pointer to Frame?
@@ -39,7 +41,7 @@ func main() {
 			outframe.Body = scanner.Bytes()
 			linecount++
 			// send it to FBP network
-			if err = outframe.Marshal(os.Stdout); err != nil {
+			if err = outframe.Marshal(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 			}
 		}
@@ -59,7 +61,7 @@ func main() {
 	// read data from FBP network, hand it over to scanner buffer
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -84,7 +86,7 @@ func main() {
 			case "BracketOpen":
 				// forward bracket
 				frame.Port = "OUT"
-				if err = frame.Marshal(os.Stdout); err != nil {
+				if err = frame.Marshal(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 				}
 			}
