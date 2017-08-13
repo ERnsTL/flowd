@@ -15,6 +15,7 @@ import (
 type Network map[string]*Process
 
 // Process holds information about a network process
+//TODO optimize: small optimization; instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
 type Process struct {
 	Path     string
 	Name     string

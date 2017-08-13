@@ -2,6 +2,7 @@ package flowd
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +42,12 @@ N
 */
 
 const maxBodySize = 1 * 1000 * 1000 * 1000 // 1 GByte
+
+var (
+	portBytes   = []byte{'p', 'o', 'r', 't'}
+	lengthBytes = []byte{'l', 'e', 'n', 'g', 't', 'h'}
+	typeBytes   = []byte{'t', 'y', 'p', 'e'}
+)
 
 // ParseFrame reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
 /*
@@ -84,10 +91,8 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	}
 	*/
 
-	// initialize frame if need be
-	if f == nil {
-		f = &Frame{}
-	}
+	// initialize frame
+	f = &Frame{} // NOTE: same as new(Frame)
 
 	// read STOMP command line = frame type
 	frameType, _, err := stream.ReadLine()
@@ -97,43 +102,48 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	f.Type = string(frameType)
 
 	// read header
-	var bodyLength int
+	var bodyLength uint64
 	line, _, err := stream.ReadLine()
 	if err != nil {
 		return nil, errors.New("reading header line: " + err.Error())
 	}
-	var kv []string
 	// read until empty line = end of header
+	var sepIndex int
+	var key []byte
+	var value string
 	for len(line) > 0 {
 		// split line on :
-		kv = strings.SplitN(string(line), ":", 2)
-		if err != nil {
-			return nil, errors.New("splitting header line: " + err.Error())
+		sepIndex = bytes.IndexByte(line, ':')
+		if sepIndex == -1 {
+			return nil, errors.New("splitting header line: separator ':' missing")
+		} else if sepIndex == 0 {
+			return nil, errors.New("malformed header line: key / field name missing")
+		} else if sepIndex == len(line) {
+			return nil, errors.New("malformed header line: value missing")
 		}
-		if len(kv) != 2 {
-			return nil, errors.New("parts in header line != 2: " + strconv.Itoa(len(kv)))
-		}
+		key = line[:sepIndex]
+		value = string(line[sepIndex+1:])
 
 		// store line appropriately
-		switch kv[0] {
-		case "port":
-			f.Port = kv[1]
-		case "length":
-			bodyLength, err = strconv.Atoi(kv[1])
+		// NOTE: Go has no switch on []byte
+		if bytes.Equal(key, portBytes) {
+			f.Port = value
+		} else if bytes.Equal(key, lengthBytes) {
+			bodyLength, err = strconv.ParseUint(value, 10, 0)
 			if err != nil {
 				return nil, errors.New("parsing body length value: " + err.Error())
 			}
 			if bodyLength < 0 || bodyLength > maxBodySize {
-				return nil, errors.New("given body length out of bounds: " + strconv.Itoa(bodyLength))
+				return nil, fmt.Errorf("given body length out of bounds: %d", bodyLength)
 			}
-		case "type":
-			f.BodyType = kv[1]
-		default:
+		} else if bytes.Equal(key, typeBytes) {
+			f.BodyType = value
+		} else {
 			// all other fields ("extensions")
 			if f.Extensions == nil {
 				f.Extensions = map[string]string{}
 			}
-			f.Extensions[kv[0]] = kv[1]
+			f.Extensions[string(key)] = value
 		}
 
 		// try to read next header line
@@ -230,12 +240,18 @@ func ParseFrameV1(stream *bufio.Reader) (f *Frame, err error) {
 	return f, nil
 }
 
+var (
+	typeSepBytes   = []byte{'t', 'y', 'p', 'e', ':'}
+	portSepBytes   = []byte{'p', 'o', 'r', 't', ':'}
+	lengthSepBytes = []byte{'l', 'e', 'n', 'g', 't', 'h', ':'}
+)
+
 // Marshal serializes an IP into a data stream, like STDIN into a network process or a network connection
 //TODO optimize: does Go pre-calculate all values like []byte{'2'} ?
 //TODO optimize: is +"\n" efficient?
 func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 	// write version marker
-	_, err = stream.Write([]byte{'2'})
+	err = stream.WriteByte('2')
 	if err != nil {
 		return errors.New("writing version marker: " + err.Error())
 	}
@@ -245,24 +261,46 @@ func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 		return errors.New("type is empty")
 	}
 	// NOTE: strings.ToUpper() increases runtime by 7 %
-	_, err = stream.Write([]byte(f.Type + "\n"))
+	_, err = stream.WriteString(f.Type)
 	if err != nil {
 		return errors.New("writing frame type: " + err.Error())
 	}
+	err = stream.WriteByte('\n')
+	if err != nil {
+		return errors.New("writing frame type newline: " + err.Error())
+	}
 
 	// write body type, if present
+	// NOTE: concatenating strings is more expensive than multiple Write() calls
+	// NOTE: fmt.Sprintf is expensive
 	if f.BodyType != "" {
-		_, err = stream.Write([]byte("type:" + f.BodyType + "\n"))
+		_, err = stream.Write(typeSepBytes)
 		if err != nil {
-			return errors.New("writing body type: " + err.Error())
+			return errors.New("writing body type key: " + err.Error())
+		}
+		_, err = stream.WriteString(f.BodyType)
+		if err != nil {
+			return errors.New("writing body type value: " + err.Error())
+		}
+		err = stream.WriteByte('\n')
+		if err != nil {
+			return errors.New("writing body type newline: " + err.Error())
 		}
 	}
 
 	// write port, if present
 	if f.Port != "" {
-		_, err = stream.Write([]byte("port:" + f.Port + "\n"))
+		_, err = stream.Write(portSepBytes)
 		if err != nil {
-			return errors.New("writing port: " + err.Error())
+			return errors.New("writing port key: " + err.Error())
+		}
+		_, err = stream.WriteString(f.Port)
+		if err != nil {
+			return errors.New("writing port value: " + err.Error())
+		}
+		err = stream.WriteByte('\n')
+		if err != nil {
+			return errors.New("writing port newline: " + err.Error())
 		}
 	}
 
@@ -271,22 +309,42 @@ func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 		for key, value := range f.Extensions {
 			// write line
 			// NOTE: strings.ToLower() increases runtime by 10 %
-			_, err = stream.Write([]byte(key + ":" + value + "\n"))
+			_, err = stream.WriteString(key)
 			if err != nil {
-				return errors.New("writing extension header lines: " + err.Error())
+				return errors.New("writing extension header lines key: " + err.Error())
+			}
+			err = stream.WriteByte(':')
+			if err != nil {
+				return errors.New("writing extension header lines separator: " + err.Error())
+			}
+			_, err = stream.WriteString(value)
+			if err != nil {
+				return errors.New("writing extension header lines value: " + err.Error())
+			}
+			err = stream.WriteByte('\n')
+			if err != nil {
+				return errors.New("writing extension header lines newline: " + err.Error())
 			}
 		}
 	}
 
 	// if body present, write length
 	if f.Body != nil {
-		_, err = stream.Write([]byte("length:" + strconv.Itoa(len(f.Body)) + "\n"))
+		_, err = stream.Write(lengthSepBytes)
 		if err != nil {
-			return errors.New("writing body length: " + err.Error())
+			return errors.New("writing body length key: " + err.Error())
+		}
+		_, err = stream.WriteString(strconv.Itoa(len(f.Body)))
+		if err != nil {
+			return errors.New("writing body length value: " + err.Error())
+		}
+		err = stream.WriteByte('\n')
+		if err != nil {
+			return errors.New("writing body length newline: " + err.Error())
 		}
 
 		// write end-of-header marker = empty line
-		_, err = stream.Write([]byte{'\n'})
+		err = stream.WriteByte('\n')
 		if err != nil {
 			return errors.New("writing end-of-header marker: " + err.Error())
 		}
@@ -298,14 +356,14 @@ func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 		}
 	} else {
 		// write only end-of-header marker = empty line
-		_, err = stream.Write([]byte{'\n'})
+		err = stream.WriteByte('\n')
 		if err != nil {
 			return errors.New("writing end-of-header marker: " + err.Error())
 		}
 	}
 
 	// write frame terminator null byte
-	_, err = stream.Write([]byte{0x00})
+	err = stream.WriteByte(0x00)
 	if err != nil {
 		return errors.New("writing frame terminator: " + err.Error())
 	}
