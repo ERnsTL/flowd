@@ -233,7 +233,7 @@ func ParseFrameV1(stream *bufio.Reader) (f *Frame, err error) {
 // Marshal serializes an IP into a data stream, like STDIN into a network process or a network connection
 //TODO optimize: does Go pre-calculate all values like []byte{'2'} ?
 //TODO optimize: is +"\n" efficient?
-func (f *Frame) Marshal(stream io.Writer) (err error) {
+func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 	// write version marker
 	_, err = stream.Write([]byte{'2'})
 	if err != nil {
@@ -316,7 +316,7 @@ func (f *Frame) Marshal(stream io.Writer) (err error) {
 
 // MarshalV1 serializes an IP into a data stream in previous format (strict MIME + content-length)
 //TODO avoid allocating buffered writer on every call
-func (f *Frame) MarshalV1(stream io.Writer) error {
+func (f *Frame) MarshalV1(stream *bufio.Writer) error {
 	if f == nil {
 		return errors.New("refusing to marshal nil frame")
 	}
