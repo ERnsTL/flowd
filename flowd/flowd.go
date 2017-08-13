@@ -108,10 +108,11 @@ func main() {
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
 			}
-			cin, err := cmd.StdinPipe()
+			cinPipe, err := cmd.StdinPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
 			}
+			cin := bufio.NewWriter(cinPipe)
 			//cmd.Stderr = os.Stderr
 			cerr, err := cmd.StderrPipe()
 			if err != nil {
@@ -150,6 +151,11 @@ func main() {
 					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
 					os.Exit(3)
 				}
+			}
+			// flush buffer
+			if err = cin.Flush(); err != nil {
+				fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
+				os.Exit(3)
 			}
 			// GC it
 			proc.IIPs = nil
@@ -267,18 +273,21 @@ func main() {
 	//TODO how to decide that it should happen? should 1 component be able to trigger network shutdown?
 }
 
-func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteCloser, debug bool, quiet bool) {
+func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Writer, debug bool, quiet bool) {
 	// use write counter only if !quiet or even debug
-	var countw *datacounter.WriterCounter
-	var cinw io.Writer
-	if !quiet {
-		countw = datacounter.NewWriterCounter(cin)
-		cinw = countw
-	} else {
-		cinw = cin
-	}
+	///TODO re-enable counting functionality
+	/*
+		var countw *datacounter.WriterCounter
+		var cinw io.Writer
+		if !quiet {
+			countw = datacounter.NewWriterCounter(cin)
+			cinw = countw
+		} else {
+			cinw = cin
+		}
+	*/
 	// other initializations
-	var oldCount uint64
+	//var oldCount uint64
 	var frame SourceFrame
 	for {
 		// wait for frame
@@ -311,10 +320,14 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 			continue
 		}
 		// forward frame to component
-		if err := frame.Marshal(cinw); err != nil {
+		if err := frame.Marshal(cin); err != nil {
 			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 		}
+		if err := cin.Flush(); err != nil {
+			fmt.Println("net in: WARNING: could not flush frame into component STDIN - ignoring.")
+		}
 		// status message
+		/*///TODO re-enable that functionality
 		if debug {
 			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
 			oldCount = countw.Count()
@@ -322,6 +335,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin io.WriteC
 			fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
 			oldCount = countw.Count()
 		}
+		*/
 	}
 }
 
