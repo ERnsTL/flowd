@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"testing"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -34,7 +33,7 @@ func TestHasStructFrame(t *testing.T) {
 
 func TestFrameHasRequiredMethods(t *testing.T) {
 	type IWantThisMethod interface {
-		Marshal(io.Writer) error
+		Marshal(*bufio.Writer) error
 	}
 	var _ IWantThisMethod = &flowd.Frame{}
 }
@@ -110,32 +109,62 @@ var (
 var resultFrame *flowd.Frame
 
 func BenchmarkMarshalV2(b *testing.B) {
+	// prepare
+	buf := bytes.Buffer{}
+	bufw := bufio.NewWriter(&buf)
+	var err error
+	b.ResetTimer()
+	// marshal
 	for n := 0; n < b.N; n++ {
-		buf := bytes.Buffer{}
-		bufw := bufio.NewWriter(&buf)
-		err := benchFrame.Marshal(bufw)
+		//buf.Reset()
+		err = benchFrame.Marshal(bufw)
 		if err != nil {
 			b.Errorf("MarshalV2 returned error: %s", err)
 		}
+		/*
+			err = bufw.Flush()
+			if err != nil {
+				b.Errorf("could not flush frame into buffer: %s", err)
+			}
+		*/
 	}
 }
 
 func BenchmarkMarshalV1(b *testing.B) {
+	// prepare
+	buf := bytes.Buffer{}
+	bufw := bufio.NewWriter(&buf)
+	var err error
+	b.ResetTimer()
+	// marshal
 	for n := 0; n < b.N; n++ {
-		buf := bytes.Buffer{}
-		bufw := bufio.NewWriter(&buf)
-		err := benchFrame.MarshalV1(bufw)
+		//buf.Reset()
+		err = benchFrame.MarshalV1(bufw)
 		if err != nil {
 			b.Errorf("MarshalV1 returned error: %s", err)
 		}
+		/*
+			err = bufw.Flush()
+			if err != nil {
+				b.Errorf("could not flush frame into buffer: %s", err)
+			}
+		*/
 	}
 }
 
 func BenchmarkParseFrameV2(b *testing.B) {
+	// prepare input buffer
+	r := bytes.NewBufferString(frameStrV2)
+	for n := 0; n < b.N-1; n++ {
+		r.WriteString(frameStrV2)
+	}
+	bufr := bufio.NewReader(r)
+	var frame *flowd.Frame
+	var err error
+	b.ResetTimer()
+	// parse it all
 	for n := 0; n < b.N; n++ {
-		r := bytes.NewBufferString(frameStrV2)
-		bufr := bufio.NewReader(r)
-		frame, err := flowd.ParseFrame(bufr)
+		frame, err = flowd.ParseFrame(bufr)
 		if err != nil {
 			b.Errorf("ParseFrameV2 returned error: %s", err)
 		}
@@ -144,10 +173,18 @@ func BenchmarkParseFrameV2(b *testing.B) {
 }
 
 func BenchmarkParseFrameV1(b *testing.B) {
+	// prepare input buffer
+	r := bytes.NewBufferString(frameStrV1)
+	for n := 0; n < b.N-1; n++ {
+		r.WriteString(frameStrV1)
+	}
+	bufr := bufio.NewReader(r)
+	var frame *flowd.Frame
+	var err error
+	b.ResetTimer()
+	// parse it all
 	for n := 0; n < b.N; n++ {
-		r := bytes.NewBufferString(frameStrV1)
-		bufr := bufio.NewReader(r)
-		frame, err := flowd.ParseFrameV1(bufr)
+		frame, err = flowd.ParseFrameV1(bufr)
 		if err != nil {
 			b.Errorf("ParseFrameV1 returned error: %s", err)
 		}
