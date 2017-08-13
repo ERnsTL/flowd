@@ -59,7 +59,7 @@ func main() {
 	}
 
 	// start tailing
-	t, err := tail.TailFile(filePath, tail.Config{Follow: true, Logger: tail.DiscardingLogger})
+	t, err := tail.TailFile(filePath, tail.Config{Location: &tail.SeekInfo{Offset: 0, Whence: os.SEEK_END}, ReOpen: true, Follow: true, Logger: tail.DiscardingLogger})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ERROR: in call to TailFile(): %s", err.Error())
 		os.Exit(1)
