@@ -22,7 +22,7 @@ var (
 )
 
 func main() {
-	//TODO optimize: instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
+	//TODO optimize: small optimization; instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
 	// profiling block
 	/*
 		f, err := os.Create("flowd.prof")
@@ -323,6 +323,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 		if err := frame.Marshal(cin); err != nil {
 			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 		}
+		//TODO optimize: Flush is very expensive; but flushing only every nth frame causes hang because of undelivered frames
 		if err := cin.Flush(); err != nil {
 			fmt.Println("net in: WARNING: could not flush frame into component STDIN - ignoring.")
 		}
