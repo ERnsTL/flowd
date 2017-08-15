@@ -46,9 +46,9 @@ func main() {
 		filePath = flags.Args()[0]
 	}
 	if !debug {
-		fmt.Fprintln(os.Stderr, "starting up")
+		fmt.Fprintln(os.Stderr, "tailing")
 	} else {
-		fmt.Fprintf(os.Stderr, "starting up, filepath is %s", filePath)
+		fmt.Fprintf(os.Stderr, "now tailing, filepath is %s", filePath)
 	}
 
 	// prepare variables
