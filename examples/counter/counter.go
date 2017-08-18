@@ -80,7 +80,8 @@ func main() {
 					// send final count
 					sendCount()
 					// exit
-					os.Exit(0)
+					// NOTE: os.Exit() would prevent the deferred netout.Flush()
+					return
 				}
 			}
 		} else {
