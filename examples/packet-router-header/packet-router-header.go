@@ -103,12 +103,16 @@ func main() {
 	}
 	// regular equality rules
 	if len(rules) > 0 {
-		fmt.Fprintf(os.Stderr, "routing table:\n")
+		if debug {
+			fmt.Fprintf(os.Stderr, "routing table:\n")
+		}
 		for matchValue, targetPort := range rules {
 			// make copies so that func gets local copy, otherwise all rules would be the same
 			matchValueCopy := matchValue
 			targetPortCopy := targetPort
-			fmt.Fprintf(os.Stderr, "\ton %s equals %s, forward to %s\n", field, matchValue, targetPort)
+			if debug {
+				fmt.Fprintf(os.Stderr, "\tif %s equals %s, forward to %s\n", field, matchValue, targetPort)
+			}
 			ruleFuncs = append(ruleFuncs, func(value *string) *string {
 				if value == nil {
 					// not responsible
@@ -120,6 +124,9 @@ func main() {
 				// no match
 				return nil
 			})
+		}
+		if debug {
+			fmt.Fprintf(os.Stderr, "\tif %s missing, forward to %s\n", field, nomatchPort)
 		}
 	}
 	// default catch-all rule
@@ -189,17 +196,21 @@ nextframe:
 			}
 		*/
 		fieldValue = fieldGetter(frame)
-		if fieldValue != nil {
-			fmt.Fprintf(os.Stderr, "field %s has value %s\n", field, *fieldValue)
-		} else {
-			fmt.Fprintf(os.Stderr, "field %s has value %v\n", field, fieldValue)
+		if debug {
+			if fieldValue != nil {
+				fmt.Fprintf(os.Stderr, "field %s has value %s\n", field, *fieldValue)
+			} else {
+				fmt.Fprintf(os.Stderr, "field %s has value %v\n", field, fieldValue)
+			}
 		}
 
 		// check which rule applies
 		for _, ruleFunc := range ruleFuncs {
 			if targetPort := ruleFunc(fieldValue); targetPort != nil {
 				// rule applies, forward frame to returned port
-				fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
+				if debug {
+					fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
+				}
 				frame.Port = *targetPort
 				if err := frame.Marshal(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
