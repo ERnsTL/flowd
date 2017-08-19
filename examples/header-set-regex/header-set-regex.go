@@ -20,7 +20,7 @@ func main() {
 	// get configuration from IIP = initial information packet/frame
 	var exp *regexp.Regexp
 	var field string
-	var debug bool
+	var debug, quiet bool
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
@@ -29,9 +29,8 @@ func main() {
 		// parse IIP
 		flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 		flags.StringVar(&field, "field", "myfield", "header field to set using matched subgroup")
-		//flags.StringVar(&regexpStr, "exp", "marker ([0-9]+)", "regular expression for matching and extracting the field value")
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		//flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 		if err = flags.Parse(strings.Split(iip, " ")); err != nil {
 			os.Exit(2)
 		}
@@ -51,7 +50,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "got regular expression:", regexpStr)
 		}
 	}
-	fmt.Fprintln(os.Stderr, "reading packets")
+	if !quiet {
+		fmt.Fprintln(os.Stderr, "reading packets")
+	}
 
 	var frame *flowd.Frame
 	var err error
@@ -70,7 +71,9 @@ func main() {
 
 		// check for port close notification
 		if frame.Type == "control" && frame.BodyType == "PortClose" {
-			fmt.Fprintln(os.Stderr, "input port closed - exiting.")
+			if !quiet {
+				fmt.Fprintln(os.Stderr, "input port closed - exiting.")
+			}
 			// done
 			break
 		}
@@ -81,10 +84,14 @@ func main() {
 			// no match, forward unmodified
 			if debug {
 				fmt.Fprintln(os.Stderr, "no match, forwarding unmodified:", string(frame.Body))
+			} else if !quiet {
+				fmt.Fprintln(os.Stderr, "no match, forwarding unmodified")
 			}
 		} else {
 			if debug {
 				fmt.Fprintf(os.Stderr, "got matches, modifying: %v\n", matches)
+			} else if !quiet {
+				fmt.Fprintf(os.Stderr, "match found, setting %s to %s\n", field, string(matches[1]))
 			}
 
 			// modify frame
@@ -107,6 +114,6 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [flags] -field=[header-field] [reg-exp]")
+	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [flags] -field [header-field] [reg-exp]")
 	fmt.Fprintln(os.Stderr, "expression is free argument may contain space, do not quote")
 }
