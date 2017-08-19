@@ -10,11 +10,12 @@ import (
 )
 
 func main() {
-	// get configuration from IIP = initial information packet/frame
-	modifications := map[string]string{}
+	// connect to network
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+	// get configuration from IIP = initial information packet/frame
+	modifications := map[string]string{}
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
@@ -32,6 +33,7 @@ func main() {
 		args := re.FindAllStringSubmatch(iip, -1)
 		if args == nil {
 			fmt.Fprintln(os.Stderr, "ERROR: no modification specification(s) found")
+			fmt.Fprintln(os.Stderr, "IIP format: [field]=[value]...")
 			os.Exit(1)
 		}
 		for _, arg := range args {
