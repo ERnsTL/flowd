@@ -227,7 +227,7 @@ nextframe:
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [-field] [-missing] [-present|-equals] [-equals]...")
+	fmt.Fprintln(os.Stderr, "IIP: [-field] [-missing] [-present|-equals] [-equals]...")
 }
 
 // flag acceptors of -equals [value] -to [output-port] couples
