@@ -11,13 +11,16 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+var (
+	debug, quiet bool
+)
+
 func main() {
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
 	netout = bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
 	// flag variables
-	var debug, quiet bool
 	var brackets, control bool
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
@@ -49,7 +52,7 @@ func main() {
 		}
 	}
 
-	var frame *flowd.Frame //TODO why is this pointer to Frame?
+	var frame *flowd.Frame
 	var err error
 
 	for {
@@ -85,10 +88,31 @@ func main() {
 				}
 			}
 		} else {
+			// check for special requests
+			if frame.Port == "RESET" {
+				// reset counts
+				if !quiet {
+					fmt.Fprintln(os.Stderr, "resetting count as requested")
+				}
+				packetCount = 0
+				packetSize = 0
+				continue
+			} else if frame.Port == "REPORT" {
+				// report current count value
+				if !quiet {
+					fmt.Fprintln(os.Stderr, "reporting count as requested")
+				}
+				sendCount()
+				netout.Flush()
+				continue
+			}
+
+			// regular case and frame
 			packetCount++
 			packetSize += len(frame.Body)
-			//TODO if debug
-			//fmt.Fprintf(os.Stderr, "increased packetCount to %d\n", packetCount)
+			if debug {
+				fmt.Fprintf(os.Stderr, "increased packet count to %d, size count to %d\n", packetCount, packetSize)
+			}
 		}
 	}
 }
@@ -108,11 +132,16 @@ var (
 )
 
 func sendCount() {
-	//TODO if debug fmt.Fprintf(os.Stderr, "sending packet count of %d\n", packetCount)
 	// send count to output port
 	if packets {
+		if debug {
+			fmt.Fprintf(os.Stderr, "sending packet count of %d\n", packetCount)
+		}
 		countFrame.Body = []byte(strconv.Itoa(packetCount))
 	} else {
+		if debug {
+			fmt.Fprintf(os.Stderr, "sending size count of %d\n", packetSize)
+		}
 		countFrame.Body = []byte(strconv.Itoa(packetSize))
 	}
 	if err := countFrame.Marshal(netout); err != nil {
