@@ -5,16 +5,31 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDERR flush
+
 func main() {
-	var frame *flowd.Frame //TODO why is this pointer of Frame?
-	var err error
 	netin := bufio.NewReader(os.Stdin)
 	errout := bufio.NewWriter(os.Stderr)
 	defer errout.Flush()
+
+	// flush display output after x seconds if there is buffered data
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			if errout.Buffered() > 0 {
+				errout.Flush()
+			}
+		}
+	}()
+
+	// main loop
+	var frame *flowd.Frame
+	var err error
 
 	for {
 		// read frame
