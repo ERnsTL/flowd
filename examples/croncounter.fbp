@@ -1,0 +1,23 @@
+# Example network for the cron component to generate timed events
+# Start using: bin/flowd -quiet src/github.com/ERnsTL/flowd/examples/croncounter.fbp
+
+
+# Create packets frequently, increasing counter every 1 second, display count
+
+Schedule(bin/cron) OUT1 -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
+
+# every 1 seconds
+'-when "*/1 * * * * * *" -to OUT1' -> CONF Schedule
+# count packts, not body sizes
+'-packets' -> CONF Counter
+
+
+# Ask counter to send report every 10 seconds
+
+RequestReport(bin/cron) REQREPORT -> REPORT Counter(bin/counter)
+
+# every 10 seconds
+'-when "*/10 * * * * * *" -to REQREPORT' -> CONF RequestReport
+
+
+# exercise for the reader: achieve the same using only one instance of the cron component
