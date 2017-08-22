@@ -142,7 +142,9 @@ func main() {
 		}
 		if !foundNext {
 			// done, exit
-			fmt.Fprintln(os.Stderr, "all entries have no more future events - exiting.")
+			if !quiet {
+				fmt.Fprintln(os.Stderr, "all entries have no more future events - exiting.")
+			}
 			return
 		}
 
@@ -155,7 +157,7 @@ func main() {
 		// send notification
 		//TODO optimize: entry or index as parameter?
 		if !quiet {
-			fmt.Fprintln(os.Stderr, "woke up, notifying")
+			fmt.Fprintln(os.Stderr, "woke up, notifying", entries[minIndex].outport)
 		}
 		sendNotification(minIndex)
 
