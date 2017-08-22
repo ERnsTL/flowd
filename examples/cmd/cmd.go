@@ -181,7 +181,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: cmd [flags] [cmdpath] [args]...")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] [cmdpath] [args]...")
 }
 
 func startCommand(cmdargs []string) (cmd *exec.Cmd, cin io.WriteCloser, cout io.ReadCloser) {

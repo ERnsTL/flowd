@@ -211,7 +211,7 @@ func sendNotification(index int) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [flags] {-when [cron-expression] -to [output-port]}...")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] {-when [cron-expression] -to [output-port]}...")
 	fmt.Fprintln(os.Stderr, "multiple when+to possible; expression format at https://github.com/gorhill/cronexpr")
 }
 

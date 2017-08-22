@@ -171,7 +171,7 @@ nextframe:
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [-pass|-drop] [-and|-or] [flags] [substring]...")
+	fmt.Fprintln(os.Stderr, "IIP format: [-pass|-drop] [-and|-or] [flags] [substring]...")
 }
 
 //TODO optimize: give netout as parameter or have it as global variable?

@@ -114,6 +114,6 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [flags] -field [header-field] [reg-exp]")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] -field [header-field] [reg-exp]")
 	fmt.Fprintln(os.Stderr, "expression is free argument may contain space, do not quote")
 }

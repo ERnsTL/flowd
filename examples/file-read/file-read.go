@@ -126,5 +126,5 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: "+os.Args[0]+" [flags] [file-path]...")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] [file-path]...")
 }
