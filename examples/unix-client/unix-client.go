@@ -63,7 +63,7 @@ func main() {
 	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
 	remoteNetwork := remoteURL.Scheme
-	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
 	remotePath := remoteURL.Opaque
 	if remoteNetwork == "unixgram" {
 		fmt.Fprintln(os.Stderr, "ERROR: network 'unixgram' unimplemented, refer to unixgram-client component - Exiting.") //TODO implement that
@@ -185,7 +185,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]\n")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
 }
 
 //TODO pretty much 1:1 copy from unix-server handleConnection() -> reuse?
