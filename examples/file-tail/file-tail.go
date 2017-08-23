@@ -6,16 +6,28 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/hpcloud/tail"
 )
+
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
 
 func main() {
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+	// flush netout after x seconds if there is buffered data
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			if netout.Buffered() > 0 {
+				netout.Flush()
+			}
+		}
+	}()
 	// flag variables
 	var filePath string
 	var debug, quiet bool
@@ -48,7 +60,7 @@ func main() {
 	if !debug {
 		fmt.Fprintln(os.Stderr, "tailing")
 	} else {
-		fmt.Fprintf(os.Stderr, "now tailing, filepath is %s", filePath)
+		fmt.Fprintf(os.Stderr, "now tailing, filepath is %s\n", filePath)
 	}
 
 	// prepare variables
@@ -61,14 +73,14 @@ func main() {
 	// start tailing
 	t, err := tail.TailFile(filePath, tail.Config{Location: &tail.SeekInfo{Offset: 0, Whence: os.SEEK_END}, ReOpen: true, Follow: true, Logger: tail.DiscardingLogger})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: in call to TailFile(): %s", err.Error())
+		fmt.Fprintln(os.Stderr, "ERROR: in call to TailFile():", err.Error())
 		os.Exit(1)
 	}
 
 	// main work loop
 	for line := range t.Lines {
 		if debug {
-			fmt.Fprintf(os.Stderr, "received line (%d bytes): %s", len([]byte(line.Text)), line.Text)
+			fmt.Fprintf(os.Stderr, "received line (%d bytes): %s\n", len([]byte(line.Text)), line.Text)
 		}
 
 		// save as body
