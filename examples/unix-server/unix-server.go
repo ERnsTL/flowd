@@ -70,7 +70,7 @@ func main() {
 	listenURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
 	listenNetwork := listenURL.Scheme
-	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
 	listenPath := listenURL.Opaque
 	if listenNetwork == "unixgram" {
 		fmt.Fprintln(os.Stderr, "ERROR: network 'unixgram' unimplemented, refer to unixgram-server component - Exiting.") //TODO implement that
@@ -243,7 +243,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]\n")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
 }
 
 func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
