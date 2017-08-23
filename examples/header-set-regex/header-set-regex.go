@@ -8,15 +8,27 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
+
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDERR flush
 
 func main() {
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+	// flush netout after x seconds if there is buffered data
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			if netout.Buffered() > 0 {
+				netout.Flush()
+			}
+		}
+	}()
 	// get configuration from IIP = initial information packet/frame
 	var exp *regexp.Regexp
 	var field string
