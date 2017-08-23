@@ -5,11 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/gorhill/cronexpr"
+	shellquote "github.com/kballard/go-shellquote"
 )
 
 type entry struct {
@@ -47,19 +47,23 @@ func main() {
 		// parse IIP
 		var when whenFlag
 		var to toFlag
+		iipSplit, err := shellquote.Split(iip)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: parsing IIP:", err)
+			os.Exit(2)
+		}
 		flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 		flags.Var(&when, "when", "cron expression when to send IP")
 		flags.Var(&to, "to", "port to send IP from for preceding -when")
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		//fmt.Fprintf(os.Stderr, "Joined arguments: %s\n", strings.Join(joinQuotedArgs(strings.Split(iip, " ")), "_"))
-		if err := flags.Parse(joinQuotedArgs(strings.Split(iip, " "))); err != nil {
+		if err := flags.Parse(iipSplit); err != nil {
 			os.Exit(2)
 		}
 
 		// check flags
 		if flags.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered")
+			fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered:", flags.Args())
 			printUsage()
 			flags.PrintDefaults() // prints to STDERR
 			os.Exit(2)
@@ -83,7 +87,7 @@ func main() {
 		for index, entry := range entries {
 			// parse cron expression
 			if schedule, err := cronexpr.Parse(*entry.cronExpression); err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: parsing cron expression '%s': %s", *entry.cronExpression, err)
+				fmt.Fprintf(os.Stderr, "ERROR: parsing cron expression '%s': %s\n", *entry.cronExpression, err)
 				os.Exit(2)
 			} else {
 				// save schedule
@@ -92,7 +96,7 @@ func main() {
 				entries[index].nextEvent = schedule.Next(now)
 				if entries[index].nextEvent.IsZero() {
 					// entry has no future events
-					fmt.Fprintf(os.Stderr, "ERROR: cron expression '%s' has no future events", *entry.cronExpression)
+					fmt.Fprintf(os.Stderr, "ERROR: cron expression '%s' has no future events\n", *entry.cronExpression)
 					os.Exit(2)
 				}
 				// else activate
@@ -134,7 +138,7 @@ func main() {
 				}
 			} else {
 				if !quiet {
-					fmt.Fprintf(os.Stderr, "WARNING: entry %d has no more future events - disabling entry", index+1)
+					fmt.Fprintf(os.Stderr, "WARNING: entry %d has no more future events - disabling entry\n", index+1)
 				}
 				// mark as unactive
 				entries[index].active = false
@@ -185,7 +189,7 @@ func main() {
 
 			// handle control frames
 			if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
-				fmt.Fprintf(os.Stderr, "input port closed - exiting.")
+				fmt.Fprintln(os.Stderr, "input port closed - exiting.")
 				// exit
 				return
 			}
@@ -255,51 +259,4 @@ func (f *toFlag) Set(value string) error {
 	// reset for next -when -to duet
 	whenTemp = nil
 	return nil
-}
-
-// joinQuotedArgs joins space-split arguments and re-joins quoted arguments
-// useful for args like: -par1 -par2 "quoted quoted quoted" -par3
-func joinQuotedArgs(spaceSplitArgs []string) []string {
-	// shortcut if no quote present anywhere
-	needToJoin := false
-	for _, arg := range spaceSplitArgs {
-		if strings.ContainsRune(arg, '"') {
-			needToJoin = true
-			break
-		}
-	}
-	if !needToJoin {
-		return spaceSplitArgs
-	}
-
-	// join quoted arguments
-	joined := []string{}
-	var inQuoted bool
-	var beginIndex int
-	for index, arg := range spaceSplitArgs {
-		//fmt.Fprintf(os.Stderr, "got >%s<\n", arg)
-		if inQuoted {
-			// end found?
-			if strings.HasSuffix(arg, "\"") {
-				//fmt.Fprintln(os.Stderr, "found end")
-				// end found
-				joined = append(joined, strings.TrimPrefix(strings.TrimSuffix(strings.Join(spaceSplitArgs[beginIndex:index+1], " "), "\""), "\""))
-				inQuoted = false
-			} else {
-				// still in quoted argument
-				// NOTE: nothing to do, beginIndex should already be set
-			}
-		} else if (strings.HasPrefix(arg, "-") && strings.ContainsRune(arg, '"') || strings.HasPrefix(arg, "\"")) && !strings.HasSuffix(arg, "\"") {
-			//fmt.Fprintln(os.Stderr, "found begin")
-			// found begin
-			beginIndex = index
-			inQuoted = true
-		} else {
-			// not in quote, no quoting-begin found
-			//fmt.Fprintln(os.Stderr, "not in quote, joining")
-			joined = append(joined, arg)
-		}
-	}
-
-	return joined
 }
