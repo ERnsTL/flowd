@@ -246,14 +246,14 @@ func main() {
 
 			// check actual host key
 			if debug {
-				fmt.Fprintf(os.Stderr, "host key found, checking...\n")
+				fmt.Fprintln(os.Stderr, "host key found, checking...")
 			}
 			if !bytes.Equal(key.Marshal(), foundHostKey.Marshal()) {
 				return fmt.Errorf("known host key found for active key type, but mismatch")
 			}
 
 			if !quiet {
-				fmt.Fprintf(os.Stderr, "host key verified\n")
+				fmt.Fprintln(os.Stderr, "host key verified")
 			}
 			return nil
 		}
