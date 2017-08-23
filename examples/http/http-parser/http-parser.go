@@ -105,7 +105,7 @@ func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 	case <-reqDone: // read done, maybe with errors
 		// check for error
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.", connID, err)
+			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.\n", connID, err)
 			// request connection be closed
 			closeCommand.Extensions["conn-id"] = connID
 			closeCommand.Marshal(netout)
@@ -124,7 +124,7 @@ func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 			Body: body, //TODO
 		}
 		if err := reqFrame.Marshal(netout); err != nil {
-			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.", connID, err)
+			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.\n", connID, err)
 		}
 		// TODO multiple requests
 		client.pipew.Close()
