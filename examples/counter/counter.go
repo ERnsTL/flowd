@@ -79,7 +79,7 @@ func main() {
 				}
 			case "PortClose":
 				if frame.Port == "IN" {
-					fmt.Fprintf(os.Stderr, "got port close notification - sending final count before exiting.")
+					fmt.Fprintln(os.Stderr, "got port close notification - sending final count before exiting.")
 					// send final count
 					sendCount()
 					// exit
@@ -103,6 +103,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, "reporting count as requested")
 				}
 				sendCount()
+				// send immediately; presumably a report is not requested too often
 				netout.Flush()
 				continue
 			}
