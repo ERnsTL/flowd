@@ -25,6 +25,7 @@ func main() {
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
 	netout = bufio.NewWriter(os.Stdout)
+	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	iip, err := flowd.GetIIP("CONF", netin)
@@ -213,6 +214,10 @@ func main() {
 			//TODO with reason (error or closed from other side/this side)
 			closeNotification.Extensions["conn-id"] = strconv.Itoa(id)
 			closeNotification.Marshal(netout)
+			// flush buffers = send frames
+			if err = netout.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			}
 		}
 	}()
 
@@ -228,6 +233,10 @@ func main() {
 		openNotification.Extensions["conn-id"] = strconv.Itoa(id)
 		openNotification.Extensions["remote-address"] = fmt.Sprintf("%v", conn.RemoteAddr()) // copied from handleConnection()
 		openNotification.Marshal(netout)
+		// flush buffers = send frame
+		if err = netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+		}
 		// handle connection
 		go handleConnection(conn, id, closeChan)
 		//TODO overflow possibilities?
@@ -300,5 +309,9 @@ func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
 
 		// send it to STDOUT = FBP network
 		outframe.Marshal(netout)
+		// flush buffers = send frames
+		if err := netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+		}
 	}
 }
