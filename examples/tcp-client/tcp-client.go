@@ -63,7 +63,7 @@ func main() {
 	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
 	remoteNetwork := remoteURL.Scheme
-	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
 	remoteHost := remoteURL.Host
 
 	fmt.Fprintln(os.Stderr, "resolving addresses")
