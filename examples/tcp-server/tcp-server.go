@@ -70,7 +70,7 @@ func main() {
 	listenURL, err := url.ParseRequestURI(flags.Args()[0])
 	checkError(err)
 	listenNetwork := listenURL.Scheme
-	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
 	listenHost := listenURL.Host
 
 	// list of established TCP connections
@@ -243,7 +243,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "IIP format: [flags] [tcp|tcp4|tcp6]://[host][:port]\n")
+	fmt.Fprintln(os.Stderr, "IIP format: [flags] [tcp|tcp4|tcp6]://[host][:port]")
 }
 
 func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
