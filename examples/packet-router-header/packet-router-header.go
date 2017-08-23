@@ -7,9 +7,12 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
+
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDERR flush
 
 var (
 	rules     = map[string]string{} // keeps value -> target-output-port mappings
@@ -21,6 +24,15 @@ func main() {
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+	// flush netout after x seconds if there is buffered data
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			if netout.Buffered() > 0 {
+				netout.Flush()
+			}
+		}
+	}()
 	// flag variables
 	var debug, quiet bool
 	var field, present, missing, nomatchPort string
@@ -104,7 +116,7 @@ func main() {
 	// regular equality rules
 	if len(rules) > 0 {
 		if debug {
-			fmt.Fprintf(os.Stderr, "routing table:\n")
+			fmt.Fprintln(os.Stderr, "routing table:")
 		}
 		for matchValue, targetPort := range rules {
 			// make copies so that func gets local copy, otherwise all rules would be the same
@@ -189,10 +201,10 @@ nextframe:
 				if value, found := frame.Extensions["Myfield"]; found {
 					fmt.Fprintf(os.Stderr, "in frame directly: field has value %s\n", value)
 				} else {
-					fmt.Fprintf(os.Stderr, "in frame directly: field not found\n")
+					fmt.Fprintln(os.Stderr, "in frame directly: field not found")
 				}
 			} else {
-				fmt.Fprintf(os.Stderr, "in frame directly: field not found\n")
+				fmt.Fprintln(os.Stderr, "in frame directly: field not found")
 			}
 		*/
 		fieldValue = fieldGetter(frame)
