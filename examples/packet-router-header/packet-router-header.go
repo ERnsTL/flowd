@@ -12,7 +12,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const maxFlushWait = 5 * time.Second // duration to wait until forcing STDERR flush
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
 
 var (
 	rules     = map[string]string{} // keeps value -> target-output-port mappings

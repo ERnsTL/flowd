@@ -13,7 +13,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const maxFlushWait = 5 * time.Second // duration to wait until forcing STDERR flush
+const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
 
 func main() {
 	// open connection to network
