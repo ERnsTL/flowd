@@ -34,8 +34,6 @@ func main() {
 
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
@@ -112,7 +110,7 @@ func main() {
 			break
 		}
 
-		// check for header blob-name and get blobname
+		// check for header blob-name and get blobname = part of file path
 		if blobname, found = inframe.Extensions["blob-name"]; !found {
 			fmt.Fprintln(os.Stderr, "ERROR: input frame is missing blob-name header field. Discarding.")
 			continue
@@ -137,13 +135,17 @@ func main() {
 		err = ioutil.WriteFile(tmpfilepath, inframe.Body, 0640)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not write to temporary blob file", tmpfilepath)
+			continue
 		}
 		// move temporary file to destination directory, possibly overwriting it
 		//TODO what is difference between moving and overwrite with hardlink first?
 		err = os.Rename(tmpfilepath, blobpath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not rename/move blob file from", tmpfilepath, "to", blobpath)
+			continue
 		}
+		// TODO -debug
+		fmt.Fprintf(os.Stderr, "wrote to file '%s': %s\n", blobpath, string(inframe.Body))
 	}
 }
 
