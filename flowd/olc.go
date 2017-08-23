@@ -90,7 +90,7 @@ func startOLC(address string) {
 	})
 	/*
 		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintf(w, "flowd")
+			fmt.Fprint(w, "flowd")
 		})
 	*/
 	/*
