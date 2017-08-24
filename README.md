@@ -57,7 +57,7 @@ The flag ```-quiet``` removes the frame passing information, in case you do not 
 The data flow is as follows:
 
 ```
-TCP in -> tcp-server OUT port -> copy IN port -> copy OUT port -> tcp-server IN port (responses) -> TCP out
+TCP in -> tcp-server OUT port -> chat IN port -> chat server logic -> chat OUT port -> tcp-server IN port (responses) -> TCP out
 ```
 
 Also, an *initial information packet* (IIP) is sent to the ```CONF``` input port of the ```tcp-server``` component, as defined in the network specification:

@@ -1,6 +1,6 @@
 # TCP chat/console server
 # start using:
-# bin/flowd -debug -launch bin/launch src/github.com/ERnsTL/flowd/examples/chat-server.fbp
+# bin/flowd -debug src/github.com/ERnsTL/flowd/examples/chat-server.fbp
 
 tcp(bin/tcp-server) OUT -> IN chat(bin/chat) OUT -> IN tcp
 'tcp4://localhost:4000' -> CONF tcp
