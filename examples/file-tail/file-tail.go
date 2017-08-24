@@ -79,7 +79,9 @@ func main() {
 
 	// main work loop
 	for line := range t.Lines {
-		if debug {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "received line (%d bytes)\n", len([]byte(line.Text)))
+		} else if debug {
 			fmt.Fprintf(os.Stderr, "received line (%d bytes): %s\n", len([]byte(line.Text)), line.Text)
 		}
 
@@ -87,7 +89,7 @@ func main() {
 		outframe.Body = []byte(line.Text)
 
 		// send it to given output ports
-		if err := outframe.Marshal(netout); err != nil {
+		if err = outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 		}
 	}
