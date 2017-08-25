@@ -81,6 +81,13 @@ func main() {
 		dependencies := map[string]bool{} // use map to ignore duplicates (uniq)
 		for _, proc := range nw.Processes {
 			dependencies[proc.Component] = true
+			for key, value := range proc.Metadata {
+				//TODO not full solution: cannot give multiple dep= keys (last one counts); need to put that into single deps= key using separator
+				//TODO not full solution: parser does not allow common characters in file names: .
+				if key == "dep" {
+					dependencies[value] = true
+				}
+			}
 		}
 		for component := range dependencies {
 			fmt.Println(component)
