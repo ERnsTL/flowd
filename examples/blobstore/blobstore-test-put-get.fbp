@@ -1,31 +1,28 @@
 # example network testing storage and retrieval of blob values
 # run using:
 ##!/bin/bash
-#echo -n directories...
-#mkdir -p /tmp/blob-data/
-#mkdir -p /tmp/blob-tmp/
-#echo OK
-#network="src/github.com/ERnsTL/flowd/examples/blobstore/blobstore-test-put-get.fbp"
-#bin/flowd -debug -launch bin/launch -in unixpacket://@flowd/network1/in#NETIN -out unixpacket://@flowd/print1/in#NETOUT $network
+#echo -n "Create storage directories..."
+#mkdir -p /tmp/blob-data/ && mkdir -p /tmp/blob-tmp/ && echo OK || echo FAIL
+#bin/flowd src/github.com/ERnsTL/flowd/examples/blobstore/blobstore-test-put-get.fbp
 
 # define and configure players
-'Blob-Name' -> CONF SetBlobName(bin/header-modify)
+'blob-name=sensor1.temperature.value' -> CONF SetBlobName(bin/header-modify)
 '/tmp/blob-data,/tmp/blob-tmp,careful' -> CONF Saver(bin/blobstore-put)
 '/tmp/blob-data,careful' -> CONF Retriever(bin/blobstore-get)
 
 # send some blob downstream to be saved
 'MYBLOB' -> IN SetBlobName OUT -> IN Saver
-#SetBlobName OUT -> IN Saver
+SetBlobName OUT -> IN Saver
 
 # ...and be retrieved some short time later
-'5s' -> CONF Sleeper(bin/sleep)
-'sensor1.temperature.value' -> IN Sleeper OUT -> IN Retriever
+'10s' -> CONF RetrieveSleeper(bin/sleep)
+'sensor1.temperature.value' -> IN RetrieveSleeper OUT -> IN Retriever
 
-# ...and export what was retrieved as NETOUT
-# attach for example unix2stdout tool to that port
-OUTPORT=Retriever.OUT:NETOUT
+# ...and display what was retrieved as NETOUT
+Retriever OUT -> IN Display(bin/display)
 
-# for configurable input instead of from IIP:
-#INPORT=SetBlobName.IN:NETIN
-# send input for example using:
-# echo "MYBLOB" | bin/stdin2frame -bodytype FilterMessage -content-type text/plain | bin/stdin2unix @flowd/network1/in
+# for configurable input instead of from IIP, it is possible to attach any other component,
+# for example file-read or some other data generator, or also unix-server or tcp-server
+# and send data in manually using for example:
+# echo "MYBLOB" | bin/stdin2frame -bodytype DataMessage -content-type text/plain | bin/stdin2unix @flowd/network1/in
+# where @flowd/network1/in could be the listening address of a unix-server component

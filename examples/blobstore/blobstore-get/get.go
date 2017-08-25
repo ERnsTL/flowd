@@ -7,9 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
+
+const maxFlushWait = 1 * time.Second // duration to wait until forcing STDOUT flush
 
 func main() {
 	// options
@@ -22,6 +25,15 @@ func main() {
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+	// flush netout after x seconds if there is buffered data
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			if netout.Buffered() > 0 {
+				netout.Flush()
+			}
+		}
+	}()
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
 	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
