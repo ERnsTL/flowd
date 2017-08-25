@@ -33,13 +33,14 @@ func main() {
 	*/
 
 	// read program arguments
-	var help, debug, quiet, graph bool
+	var help, debug, quiet, graph, dependencies bool
 	var olc string
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
 	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 	flag.StringVar(&olc, "olc", "", "host:port for online configuration using JSON FBP protocol")
 	flag.BoolVar(&graph, "graph", false, "output visualization of given network in GraphViz format and exit")
+	flag.BoolVar(&dependencies, "deps", false, "output required components for given network and exit")
 	flag.Parse()
 	if help {
 		printUsage()
@@ -73,6 +74,18 @@ func main() {
 		} else {
 			return
 		}
+	}
+
+	// output required components for this network
+	if dependencies {
+		dependencies := map[string]bool{} // use map to ignore duplicates (uniq)
+		for _, proc := range nw.Processes {
+			dependencies[proc.Component] = true
+		}
+		for component := range dependencies {
+			fmt.Println(component)
+		}
+		return
 	}
 
 	// generate network data structures
