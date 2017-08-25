@@ -79,12 +79,12 @@ func main() {
 		//CurvePreferences: []tls.CurveID{...}
 		PreferServerCipherSuites: false, // server selects from client preferences
 		MinVersion:               tls.VersionTLS12,
-		MaxVersion:               tls.VersionTLS12,
 		InsecureSkipVerify:       false,
 	}
 
 	//TODO add flag to give client certificate
 	//TODO add flag to give private CA certificate (instead of system CA certificates)
+	//TODO add mutual auth: http://www.bite-code.com/2015/06/25/tls-mutual-auth-in-golang/
 	// if -ca
 	/*
 		cacerts := x509.NewCertPool()
@@ -102,7 +102,9 @@ func main() {
 	conn, err := tls.Dial(remoteNetwork, remoteHost, tlsConfig)
 	checkError(err)
 	defer conn.Close()
-	fmt.Fprintln(os.Stderr, "connected\nversion:", strings.ToLower(tlstext.Version(conn.ConnectionState().Version)), "\nciphers:", strings.TrimPrefix(strings.Replace(strings.ToLower(tlstext.CipherSuite(conn.ConnectionState().CipherSuite)), "_", " ", -1), "tls "))
+	fmt.Fprintln(os.Stderr, "connected")
+	//TODO probably better to write own short function for the few cases above, which outputs directly in the desired format
+	fmt.Fprintln(os.Stderr, strings.ToLower(tlstext.Version(conn.ConnectionState().Version)), "using", strings.TrimPrefix(strings.Replace(strings.ToLower(tlstext.CipherSuite(conn.ConnectionState().CipherSuite)), "_", " ", -1), "tls "))
 	//TODO notify downstream components using OpenNotification, see tcp-server
 
 	remoteAddress := strings.SplitN(remoteHost, ":", 2)[0]
@@ -112,6 +114,8 @@ func main() {
 		os.Exit(2)
 	}
 	fmt.Fprintln(os.Stderr, "certificate chain valid")
+
+	//TODO check that the server name in the cert matches, not just that the certificate chain is OK.
 
 	if bridge {
 		fmt.Fprintln(os.Stderr, "forwarding frames")
