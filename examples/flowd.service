@@ -1,0 +1,28 @@
+[Unit]
+Description=flowd: Your application/network
+Documentation=https://yourwebsite.com/
+Documentation=https://github.com/ERnsTL/flowd
+# change as required
+#Wants=someother.service network-online.target
+#After=network-online.target
+#After=sshd.target
+
+[Service]
+#EnvironmentFile=/home/user/flowd/myapp.env
+#User=user
+#Group=group
+WorkingDirectory=/home/user/flowd
+#PermissionsStartOnly=true
+#ExecStartPre=/home/user/flowd/setup-setpermissions.sh
+ExecStart=/home/user/flowd/bin/flowd -quiet myapplication.fbp
+ExecStop=/usr/bin/killall flowd
+# ^ obviously only works for one flowd running - TODO make PID-based version
+# Shutdown delay in seconds, before process is tried to be killed with KILL
+TimeoutStopSec=120
+Restart=on-failure
+# also possible: journal+console, journal, syslog
+StandardOutput=syslog+console
+StandardError=syslog+console
+
+[Install]
+WantedBy=multi-user.target
