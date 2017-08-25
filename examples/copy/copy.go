@@ -49,9 +49,13 @@ func main() {
 		// send it to given output ports
 		for _, outPort := range outPorts {
 			frame.Port = outPort
-			if err := frame.Marshal(netout); err != nil {
+			if err = frame.Marshal(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 			}
+		}
+		// send it now (flush)
+		if err = netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
 		}
 	}
 }

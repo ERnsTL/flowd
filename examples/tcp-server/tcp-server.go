@@ -188,6 +188,11 @@ func main() {
 						// TCP connection not found - could have been closed in meantime or wrong conn-id in frame header
 						//TODO notification back to FBP network of undeliverable message
 						//TODO gracefully shut down / close all connections
+						if frame.BodyType == "CloseNotification" {
+							fmt.Fprintf(os.Stderr, "%d: received back own close notification - discarding.\n", connID)
+							continue
+						}
+						fmt.Fprintf(os.Stderr, "ERROR: got frame for unknown connection: %d - Exiting.\n", connID)
 						os.Exit(1)
 					}
 				}
