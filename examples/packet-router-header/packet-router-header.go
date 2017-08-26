@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"net/textproto"
 	"os"
 	"strings"
 	"time"
@@ -14,9 +13,16 @@ import (
 
 const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
 
+// rule keeps a rule entry; used during flag parsing
+type rule struct {
+	isEquals    bool //TODO this does not scale; refactor to const type if more condition types are added
+	isHasPrefix bool
+	value       string
+	targetport  string
+}
+
 var (
-	rules     = map[string]string{} // keeps value -> target-output-port mappings
-	rulesTemp string                // state variable for flag parsing, keeps -equals value
+	rules = []rule{}
 )
 
 func main() {
@@ -37,6 +43,7 @@ func main() {
 	var debug, quiet bool
 	var field, present, missing, nomatchPort string
 	var equals equalsFlag
+	var hasprefix prefixFlag
 	var to toFlag
 	// get configuration from IIP = initial information packet/frame
 	fmt.Fprintln(os.Stderr, "wait for IIP")
@@ -49,23 +56,25 @@ func main() {
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 		flags.StringVar(&field, "field", "", "header field to inspect")
-		flags.StringVar(&present, "present", "", "output port for packets with header field present")
-		flags.StringVar(&missing, "missing", "NOMATCH", "output port for packets with header field missing")
-		flags.StringVar(&nomatchPort, "nomatch", "NOMATCH", "port for unmatched packets")
-		flags.Var(&equals, "equals", "matching value in header field")
-		flags.Var(&to, "to", "destination for matching value in header field")
+		flags.StringVar(&present, "present", "", "outport for packets with header field present")
+		flags.StringVar(&missing, "missing", "NOMATCH", "outport for packets with header field missing")
+		flags.StringVar(&nomatchPort, "nomatch", "NOMATCH", "outport for unmatched packets")
+		flags.Var(&hasprefix, "hasprefix", "matching on prefix in header field value")
+		flags.Var(&equals, "equals", "matching equal value of header field")
+		flags.Var(&to, "to", "outport for matching packets")
 		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
 			os.Exit(2)
 		}
 		// check flags
-		if rulesTemp != "" {
-			fmt.Fprintln(os.Stderr, "ERROR: -equals without following -to, but both required")
+		if len(rules) > 0 && rules[len(rules)-1].value == "" {
+			fmt.Fprintln(os.Stderr, "ERROR:", getLastRuleType(), "without following -to, but both required")
 			printUsage()
 			flags.PrintDefaults() // prints to STDERR
 			os.Exit(2)
 		}
+		//TODO allow both -present and detailed conditions -> if len(rules) > 0 then append present-ruleFunc as last when no details condition matched
 		if (present != "" && len(rules) != 0) || (present == "" && len(rules) == 0) {
-			fmt.Fprintln(os.Stderr, "ERROR: either -present or -equals expected")
+			fmt.Fprintln(os.Stderr, "ERROR: either -present or specific condition expected")
 			printUsage()
 			flags.PrintDefaults() // prints to STDERR
 			os.Exit(2)
@@ -86,9 +95,6 @@ func main() {
 	if !quiet {
 		fmt.Fprintln(os.Stderr, "starting up")
 	}
-
-	// convert field name to canonical MIME name
-	field = textproto.CanonicalMIMEHeaderKey(field)
 
 	// generate frame matchers
 	//TODO possible optimization regarding *string return value
@@ -118,24 +124,46 @@ func main() {
 		if debug {
 			fmt.Fprintln(os.Stderr, "routing table:")
 		}
-		for matchValue, targetPort := range rules {
+		for _, rule := range rules {
 			// make copies so that func gets local copy, otherwise all rules would be the same
-			matchValueCopy := matchValue
-			targetPortCopy := targetPort
-			if debug {
-				fmt.Fprintf(os.Stderr, "\tif %s equals %s, forward to %s\n", field, matchValue, targetPort)
-			}
-			ruleFuncs = append(ruleFuncs, func(value *string) *string {
-				if value == nil {
-					// not responsible
+			//TODO check if this is actually so...
+			matchValueCopy := rule.value
+			targetPortCopy := rule.targetport
+			// append rule function depending on rule type
+			if rule.isEquals {
+				if debug {
+					fmt.Fprintf(os.Stderr, "\tif %s equals %s, forward to %s\n", field, matchValueCopy, targetPortCopy)
+				}
+				ruleFuncs = append(ruleFuncs, func(value *string) *string {
+					if value == nil {
+						// not responsible
+						return nil
+					}
+					if *value == matchValueCopy {
+						return &targetPortCopy
+					}
+					// no match
 					return nil
+				})
+			} else if rule.isHasPrefix {
+				if debug {
+					fmt.Fprintf(os.Stderr, "\tif %s has prefix %s, forward to %s\n", field, matchValueCopy, targetPortCopy)
 				}
-				if *value == matchValueCopy {
-					return &targetPortCopy
-				}
-				// no match
-				return nil
-			})
+				ruleFuncs = append(ruleFuncs, func(value *string) *string {
+					if value == nil {
+						// not responsible
+						return nil
+					}
+					if strings.HasPrefix(*value, matchValueCopy) {
+						return &targetPortCopy
+					}
+					// no match
+					return nil
+				})
+			} else {
+				fmt.Fprintln(os.Stderr, "ERROR: unknown rule type - exiting.")
+				os.Exit(2)
+			}
 		}
 		if debug {
 			fmt.Fprintf(os.Stderr, "\tif %s missing, forward to %s\n", field, nomatchPort)
@@ -145,7 +173,7 @@ func main() {
 	ruleFuncs = append(ruleFuncs, func(value *string) *string {
 		return &nomatchPort
 	})
-	// empty rules map
+	// empty rules list
 	rules = nil
 
 	// header field getter
@@ -239,11 +267,11 @@ nextframe:
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [-field] [-missing] [-present|-equals] [-equals]...")
+	fmt.Fprintln(os.Stderr, "IIP format: [-field] [-missing] [-present] {[-equals|-hasprefix] [-to]}...")
 }
 
-// flag acceptors of -equals [value] -to [output-port] couples
-// NOTE: need two separate in order to know that value came from which flag
+// flag acceptors of ( -equals [value] or -hasprefix [prefix] ) and -to [output-port] couples
+// NOTE: need separate types in order to know from which flag the value came from
 type equalsFlag struct{}
 
 func (f *equalsFlag) String() string {
@@ -252,13 +280,38 @@ func (f *equalsFlag) String() string {
 }
 
 func (f *equalsFlag) Set(value string) error {
-	if rulesTemp == "" {
-		// -equals flag given, fill it
-		rulesTemp = value
-		return nil
+	if lastRuleHasTarget() {
+		// another detailed condition was previously given, but -to expected, not another conditition
+		return fmt.Errorf("-equals follows another condition, expecting -to")
 	}
-	// -equals flag was previously given, but -to expected, not another -equals
-	return fmt.Errorf("-equals followed by -equals, expected -to")
+
+	// make new rule; target port will be filled by following -to flag
+	rules = append(rules, rule{
+		isEquals: true,
+		value:    value,
+	})
+	return nil
+}
+
+type prefixFlag struct{}
+
+func (f *prefixFlag) String() string {
+	// return default value
+	return ""
+}
+
+func (f *prefixFlag) Set(value string) error {
+	if lastRuleHasTarget() {
+		// another detailed condition was previously given, but -to expected, not another conditition
+		return fmt.Errorf("-hasprefix follows another condition, expecting -to")
+	}
+
+	// make new rule; target port will be filled by following -to flag
+	rules = append(rules, rule{
+		isHasPrefix: true,
+		value:       value,
+	})
+	return nil
 }
 
 type toFlag struct{}
@@ -269,17 +322,40 @@ func (f *toFlag) String() string {
 }
 
 func (f *toFlag) Set(value string) error {
-	if rulesTemp == "" {
+	if len(rules) == 0 || lastRuleHasTarget() {
 		// no value from previous -equals flag
-		return fmt.Errorf("-to without preceding -equals")
+		return fmt.Errorf("-to without preceding -equals or -hasprefix condition")
 	}
-	// all data given for a rule, save it
-	rules[rulesTemp] = value
-	// reset for next -equals -to duet
-	rulesTemp = ""
+
+	// save target port
+	rules[len(rules)-1].targetport = value
 	return nil
 }
 
 // frame field retrieval and rule matcher function definitions
 type ruleMatcher func(*string) *string
 type fieldGetter func(*flowd.Frame) *string
+
+// getLastRuleType is a shorthand for a string representation of the last rule's type
+func getLastRuleType() string {
+	if rules[len(rules)-1].isEquals {
+		return "-equals"
+	} else if rules[len(rules)-1].isHasPrefix {
+		return "-hasprefix"
+	}
+	return "ERROR: unknown last rule type"
+}
+
+// lasteRuleHasTarget is used during flag parsing of detailed-condition and -to flag pairs;
+// returns if -to flag, thus a target port, is already given = complete rule or -to expected
+func lastRuleHasTarget() bool {
+	// do not have last rule, thus does not have target
+	if len(rules) == 0 {
+		return false
+	}
+
+	if rules[len(rules)-1].targetport != "" {
+		return true
+	}
+	return false
+}
