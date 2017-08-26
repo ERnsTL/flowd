@@ -409,7 +409,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 			}
 		}
 		if outPort == nil {
-			fmt.Printf("net out: ERROR: component tried sending to undeclared port %s. Exiting.\n", outPort.LocalPort)
+			fmt.Printf("net out: ERROR: component %s tried sending to undeclared port %s. Exiting.\n", proc.Name, frame.Port)
 			return
 		}
 

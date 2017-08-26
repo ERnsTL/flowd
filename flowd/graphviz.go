@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/oleksandr/fbp"
 )
@@ -46,7 +47,8 @@ func exportNetworkGraph(nw *fbp.Fbp) error {
 		if conn.Source == nil {
 			// is an IIP, use index as name
 			//TODO maybe start own IIP index number
-			out.WriteString(fmt.Sprintf("\t\tIIP%d [label=\"'%s'\",shape=note];\n", index, conn.Data))
+			// NOTE: Replace() is a simple one-level escape of " with literial \"
+			out.WriteString(fmt.Sprintf("\t\tIIP%d [label=\"'%s'\",shape=note];\n", index, strings.Replace(conn.Data, "\"", "\\\"", -1)))
 		}
 	}
 	for _, process := range nw.Processes {
