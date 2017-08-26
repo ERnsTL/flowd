@@ -47,6 +47,7 @@ func main() {
 		// parse IIP
 		var when whenFlag
 		var to toFlag
+		// split into arguments, respecting quoted multi-word arguments
 		iipSplit, err := shellquote.Split(iip)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: parsing IIP:", err)
@@ -170,8 +171,16 @@ func main() {
 		for index, entry := range entries {
 			if index != minIndex && entry.active && entry.nextEvent.Before(now) {
 				// send notification for that also
+				if !quiet {
+					fmt.Fprintln(os.Stderr, "also notifying", entries[index].outport)
+				}
 				sendNotification(index)
 			}
+		}
+
+		// flush so that they get delivered now
+		if err := netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing net out:", err.Error())
 		}
 	}
 
@@ -207,10 +216,6 @@ func sendNotification(index int) {
 	wakeupFrame.Port = entries[index].outport
 	if err := wakeupFrame.Marshal(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
-	}
-	// flush so that it gets delivered now
-	if err := netout.Flush(); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: flushing net out:", err.Error())
 	}
 }
 
