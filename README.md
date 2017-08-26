@@ -173,19 +173,26 @@ If you rather want to do FBP in Go, but prefer an in-process-communicating runti
 * Closing of ports
 * Gracelful shutdown once all data has been processed and all components shut down
 * Visualization of the given network in *GraphViz* format
+* Display of required components and file dependencies of the given network
+* Framing format that is simple to parse in every programming language
 
 The included example components cover:
 
 * TCP client and server
 * Unix domain client and server (abstract and path-based)
+* TLS client and server
 * SSH client
-* Re-use of any existing programs, to be used for transformation of input data
+* Re-use of any existing programs and their output or for transformation of data
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
-* File reading
+* File reading and writing
 * Line splitting
+* File tailing resp. following
 * Modification of frame headers
+* Extraction of data from frame body
 * Routing based on frame contents or header values
+* Time-based events with cron expressions
+* Counter for packets and packet sizes
 
 Planned features:
 
