@@ -276,5 +276,9 @@ func handleConnection(conn *tls.Conn, closeChan chan<- bool, netout *bufio.Write
 
 		// send it to STDOUT = FBP network
 		outframe.Marshal(netout)
+		// send it now (flush buffer)
+		if err = netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+		}
 	}
 }
