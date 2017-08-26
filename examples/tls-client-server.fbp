@@ -1,0 +1,24 @@
+# example network of TLS client and server components
+
+# connect out to a TLS server
+# NOTE: TLS server can also be another part of the FBP network (bridge mode)
+
+'-bridge=false tcp4://www.example.com:443' -> CONF Client(bin/tls-client) OUT -> IN ClientResponse(bin/display)
+
+Client OUT -> IN Display(bin/display)
+
+# send an HTTP request via the TLS client
+
+'GET / HTTP/1.1
+Host: www.example.com
+
+' -> IN Client
+
+
+# also start a chat server using TLS
+# requires certificate and key
+# NOTE: easily generate files for testing using https://github.com/deckarep/EasyCert
+
+'-cert cert.pem -key key.pem tcp4://localhost:8443' -> CONF Server(bin/tls-server)
+
+Server OUT -> IN Chat(bin/chat) OUT -> IN Server
