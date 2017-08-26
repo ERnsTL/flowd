@@ -174,7 +174,6 @@ If you rather want to do FBP in Go, but prefer an in-process-communicating runti
 * Gracelful shutdown once all data has been processed and all components shut down
 * Visualization of the given network in *GraphViz* format
 * Display of required components and file dependencies of the given network
-* Framing format that is simple to parse in every programming language
 
 The included example components cover:
 
@@ -193,6 +192,7 @@ The included example components cover:
 * Routing based on frame contents or header values
 * Time-based events with cron expressions
 * Counter for packets and packet sizes
+* Example login prompt and command-line interaction component
 
 Planned features:
 
