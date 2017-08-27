@@ -280,7 +280,7 @@ func (f *equalsFlag) String() string {
 }
 
 func (f *equalsFlag) Set(value string) error {
-	if lastRuleHasTarget() {
+	if !lastRuleIsComplete() {
 		// another detailed condition was previously given, but -to expected, not another conditition
 		return fmt.Errorf("-equals follows another condition, expecting -to")
 	}
@@ -301,7 +301,7 @@ func (f *prefixFlag) String() string {
 }
 
 func (f *prefixFlag) Set(value string) error {
-	if lastRuleHasTarget() {
+	if !lastRuleIsComplete() {
 		// another detailed condition was previously given, but -to expected, not another conditition
 		return fmt.Errorf("-hasprefix follows another condition, expecting -to")
 	}
@@ -322,7 +322,7 @@ func (f *toFlag) String() string {
 }
 
 func (f *toFlag) Set(value string) error {
-	if len(rules) == 0 || lastRuleHasTarget() {
+	if lastRuleIsComplete() {
 		// no value from previous -equals flag
 		return fmt.Errorf("-to without preceding -equals or -hasprefix condition")
 	}
@@ -346,12 +346,12 @@ func getLastRuleType() string {
 	return "ERROR: unknown last rule type"
 }
 
-// lasteRuleHasTarget is used during flag parsing of detailed-condition and -to flag pairs;
+// lastRuleIsComplete is used during flag parsing of detailed-condition and -to flag pairs;
 // returns if -to flag, thus a target port, is already given = complete rule or -to expected
-func lastRuleHasTarget() bool {
-	// do not have last rule, thus does not have target
+func lastRuleIsComplete() bool {
+	// do not have last rule, but is complete = we are starting a new rule
 	if len(rules) == 0 {
-		return false
+		return true
 	}
 
 	if rules[len(rules)-1].targetport != "" {
