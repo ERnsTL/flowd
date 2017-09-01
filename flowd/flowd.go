@@ -423,7 +423,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		input := instances[outPort.RemoteProc].Input
 		//instancesLock.RUnlock()
 		if debug {
-			fmt.Printf("net out: send frame %s to %s: channel has %d free\n", proc.Name, outPort.RemoteProc, cap(input)-len(input))
+			fmt.Printf("net out: send from %s to %s: channel has %d free\n", proc.Name, outPort.RemoteProc, cap(input)-len(input))
 		}
 		input <- SourceFrame{Source: proc, Frame: frame}
 		/*
