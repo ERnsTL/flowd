@@ -9,12 +9,12 @@ import (
 	"os/exec"
 	"sync"
 
-	flowd "github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/miolini/datacounter"
 )
 
 const (
-	connCapacity = 0 // = synchronous
+	connCapacity = 100 // 0 = synchronous
 )
 
 var (
@@ -422,6 +422,9 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		//instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
 		input := instances[outPort.RemoteProc].Input
 		//instancesLock.RUnlock()
+		if debug {
+			fmt.Printf("net out: send frame %s to %s: chan fill level %d of %d\n", proc.Name, outPort.RemoteProc, len(input), cap(input))
+		}
 		input <- SourceFrame{Source: proc, Frame: frame}
 		/*
 			TODO

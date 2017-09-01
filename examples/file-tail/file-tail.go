@@ -12,7 +12,7 @@ import (
 	"github.com/hpcloud/tail"
 )
 
-const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
+const maxFlushWait = 2 * time.Second // flush any buffered outgoing frames after at most this duration
 
 func main() {
 	// open connection to network
@@ -20,12 +20,12 @@ func main() {
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
 	// flush netout after x seconds if there is buffered data
+	// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
 	go func() {
 		for {
 			time.Sleep(maxFlushWait)
-			if netout.Buffered() > 0 {
-				netout.Flush()
-			}
+			// NOTE: Flush() checks on its own if data buffered
+			netout.Flush()
 		}
 	}()
 	// flag variables

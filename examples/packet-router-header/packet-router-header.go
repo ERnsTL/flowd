@@ -11,7 +11,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const maxFlushWait = 5 * time.Second // duration to wait until forcing STDOUT flush
+const maxFlushWait = 2 * time.Second // flush any buffered outgoing frames after at most this duration
 
 // rule keeps a rule entry; used during flag parsing
 type rule struct {
@@ -31,12 +31,12 @@ func main() {
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
 	// flush netout after x seconds if there is buffered data
+	// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
 	go func() {
 		for {
 			time.Sleep(maxFlushWait)
-			if netout.Buffered() > 0 {
-				netout.Flush()
-			}
+			// NOTE: Flush() checks on its own if data buffered
+			netout.Flush()
 		}
 	}()
 	// flag variables
