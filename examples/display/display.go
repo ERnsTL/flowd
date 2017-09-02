@@ -10,7 +10,7 @@ import (
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const maxFlushWait = 2 * time.Second // flush any buffered display output after at most this duration
+const maxFlushWait = 1 * time.Second // flush any buffered display output after at most this duration
 
 func main() {
 	netin := bufio.NewReader(os.Stdin)

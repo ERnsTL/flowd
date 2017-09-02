@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const maxFlushWait = 2 * time.Second // flush any buffered outgoing frames after at most this duration
+//const maxFlushWait = 100 * time.Millisecond // flush any buffered outgoing frames after at most this duration
 
 // rule keeps a rule entry; used during flag parsing
 type rule struct {
@@ -32,13 +31,15 @@ func main() {
 	defer netout.Flush()
 	// flush netout after x seconds if there is buffered data
 	// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
-	go func() {
-		for {
-			time.Sleep(maxFlushWait)
-			// NOTE: Flush() checks on its own if data buffered
-			netout.Flush()
-		}
-	}()
+	/*
+		go func() {
+			for {
+				time.Sleep(maxFlushWait)
+				// NOTE: Flush() checks on its own if data buffered
+				netout.Flush()
+			}
+		}()
+	*/
 	// flag variables
 	var debug, quiet bool
 	var field, present, missing, nomatchPort string
@@ -252,8 +253,11 @@ nextframe:
 					fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
 				}
 				frame.Port = *targetPort
-				if err := frame.Marshal(netout); err != nil {
+				if err = frame.Marshal(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+				}
+				if err = netout.Flush(); err != nil {
+					fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
 				}
 				// done with this frame
 				continue nextframe

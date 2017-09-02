@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/hpcloud/tail"
 )
 
-const maxFlushWait = 2 * time.Second // flush any buffered outgoing frames after at most this duration
+//const maxFlushWait = 100 * time.Millisecond // flush any buffered outgoing frames after at most this duration
 
 func main() {
 	// open connection to network
@@ -21,13 +20,15 @@ func main() {
 	defer netout.Flush()
 	// flush netout after x seconds if there is buffered data
 	// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
-	go func() {
-		for {
-			time.Sleep(maxFlushWait)
-			// NOTE: Flush() checks on its own if data buffered
-			netout.Flush()
-		}
-	}()
+	/*
+		go func() {
+			for {
+				time.Sleep(maxFlushWait)
+				// NOTE: Flush() checks on its own if data buffered
+				netout.Flush()
+			}
+		}()
+	*/
 	// flag variables
 	var filePath string
 	var debug, quiet bool
@@ -91,6 +92,9 @@ func main() {
 		// send it to given output ports
 		if err = outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+		}
+		if err = netout.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
 		}
 	}
 

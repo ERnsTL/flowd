@@ -123,20 +123,28 @@ func main() {
 
 			// start component as subprocess, with arguments
 			cmd := exec.Command(proc.Path)
+			// connect to STDOUT
 			cout, err := cmd.StdoutPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
 			}
+			/* TODO use something more direct than Stdoutpipe kernel object with buffer -> bufio.Reader in handleComponentOutput()
+			TODO maybe useful: buffered pipe @ https://github.com/kr/spdy/blob/master/spdyframing/pipe.go
+			cout := new(bytes.Buffer)
+			cmd.Stdout = cout
+			*/
+			// connect to STDIN
 			cinPipe, err := cmd.StdinPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
 			}
 			cin := bufio.NewWriter(cinPipe)
-			//cmd.Stderr = os.Stderr
+			// connect to STDERR
 			cerr, err := cmd.StderrPipe()
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe to component stderr:", err)
 			}
+			// start subprocess
 			if err = cmd.Start(); err != nil {
 				fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
 				exitChan <- proc.Name
