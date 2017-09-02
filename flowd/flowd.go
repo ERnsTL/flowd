@@ -131,13 +131,16 @@ func main() {
 			/*TODO use something more direct than Stdoutpipe kernel object with buffer -> bufio.Reader in handleComponentOutput()
 			-> do not have to flush after every frame
 			TODO maybe useful: buffered pipe @ https://github.com/kr/spdy/blob/master/spdyframing/pipe.go
-			tried:
+			tried Go-level pipe (short writes after a while):
+			cout, coutw := io.Pipe()
+			cmd.Stdout = coutw
+			tried using buffer (does not wake up, nothing gets sent):
 			cout := new(bytes.Buffer)
 			cmd.Stdout = cout
-			tried:
+			tried custom pipe (short writes after a while):
 			cout := &pipe{condition: sync.NewCond(new(sync.Mutex))}
 			cmd.Stdout = cout
-			-> short writes still come up.
+			-> short writes still come up using syscall OS-level pipe.
 			*/
 			// connect to STDIN
 			cinPipe, err := cmd.StdinPipe()
