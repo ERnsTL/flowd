@@ -128,10 +128,16 @@ func main() {
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
 			}
-			/* TODO use something more direct than Stdoutpipe kernel object with buffer -> bufio.Reader in handleComponentOutput()
+			/*TODO use something more direct than Stdoutpipe kernel object with buffer -> bufio.Reader in handleComponentOutput()
+			-> do not have to flush after every frame
 			TODO maybe useful: buffered pipe @ https://github.com/kr/spdy/blob/master/spdyframing/pipe.go
+			tried:
 			cout := new(bytes.Buffer)
 			cmd.Stdout = cout
+			tried:
+			cout := &pipe{condition: sync.NewCond(new(sync.Mutex))}
+			cmd.Stdout = cout
+			-> short writes still come up.
 			*/
 			// connect to STDIN
 			cinPipe, err := cmd.StdinPipe()
