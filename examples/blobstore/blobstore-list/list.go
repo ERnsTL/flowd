@@ -85,9 +85,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 		}
 
-		// check for header Blob-Name and get blobname
-		if blobname, found = inframe.Extensions["Blob-Name"]; !found {
-			fmt.Fprintln(os.Stderr, "ERROR: input frame is missing Blob-Name header field. Discarding.")
+		// check for header blob-name and get blobname
+		if blobname, found = inframe.Extensions["blob-name"]; !found {
+			fmt.Fprintln(os.Stderr, "ERROR: input frame is missing blob-name header field. Discarding.")
 			continue
 		}
 		// calculate blob path for storage
