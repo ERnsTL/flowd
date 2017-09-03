@@ -128,19 +128,11 @@ func main() {
 			if err != nil {
 				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
 			}
-			/*TODO use something more direct than Stdoutpipe kernel object with buffer -> bufio.Reader in handleComponentOutput()
-			-> do not have to flush after every frame
-			TODO maybe useful: buffered pipe @ https://github.com/kr/spdy/blob/master/spdyframing/pipe.go
-			tried Go-level pipe (short writes after a while):
-			cout, coutw := io.Pipe()
-			cmd.Stdout = coutw
-			tried using buffer (does not wake up, nothing gets sent):
-			cout := new(bytes.Buffer)
-			cmd.Stdout = cout
-			tried custom pipe (short writes after a while):
-			cout := &pipe{condition: sync.NewCond(new(sync.Mutex))}
-			cmd.Stdout = cout
-			-> short writes still come up using syscall OS-level pipe.
+			//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
+			/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
+			  -> maybe AllDelivered and AllRead unnecessary with own pipe.
+				cout, coutw := io.Pipe()
+				cmd.Stdout = coutw
 			*/
 			// connect to STDIN
 			cinPipe, err := cmd.StdinPipe()
@@ -329,20 +321,12 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 			cinw = cin
 		}
 	*/
+	//defer cin.Close()
 	// other initializations
 	//var oldCount uint64
+	// wait for frame
 	var frame SourceFrame
-	for {
-		// wait for frame
-		frame = <-input
-
-		// check for EOF = channel got closed -> exit goroutine
-		if frame.Source == nil {
-			fmt.Println("EOF from network input channel - closing.")
-			//TODO also close cin here?
-			break
-		}
-
+	for frame = range input {
 		// received fine
 		if debug {
 			fmt.Println("received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with headers", frame.Extensions, "and body:", (string)(frame.Body)) //TODO difference between this and string(fr.Body) ?
@@ -381,6 +365,9 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 		}
 		*/
 	}
+
+	// channel got closed -> exit goroutine
+	fmt.Println("EOF from network input channel - closing.")
 }
 
 func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser, debug bool, quiet bool) {
@@ -467,18 +454,13 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 
 func handleNetOut(instance *ComponentInstance) {
 	var frame SourceFrame
-	for {
-		frame = <-instance.Input
-
-		// check for EOF
-		if frame.Source == nil {
-			fmt.Println("NETOUT received EOF on channel, exiting.")
-			break
-		}
-
+	for frame = range instance.Input {
 		//TODO implement FBP websocket protocol and send to that
 		fmt.Printf("NETOUT received frame from %s for port %s: %s - Discarding.\n", frame.Source.Name, frame.Port, string(frame.Body))
 	}
+
+	// channel got closed = EOF
+	fmt.Println("NETOUT received EOF on channel, exiting.")
 }
 
 func printUsage() {
