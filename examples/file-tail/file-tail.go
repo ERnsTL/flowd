@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/hpcloud/tail"
 )
 
-//const maxFlushWait = 100 * time.Millisecond // flush any buffered outgoing frames after at most this duration
+const maxFlushWait = 2000 * time.Millisecond // flush any buffered outgoing frames after at most this duration
 
 func main() {
 	// open connection to network
@@ -19,16 +21,18 @@ func main() {
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
 	// flush netout after x seconds if there is buffered data
-	// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
-	/*
-		go func() {
-			for {
-				time.Sleep(maxFlushWait)
-				// NOTE: Flush() checks on its own if data buffered
-				netout.Flush()
-			}
-		}()
-	*/
+	var netoutLock sync.Mutex // bufio.Writer is not concurrency-safe, thus needs a lock
+	go func() {
+		for {
+			time.Sleep(maxFlushWait)
+			// NOTE: Flush() checks on its own if data buffered
+			// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
+			netoutLock.Lock()
+			netout.Flush()
+			netoutLock.Unlock()
+		}
+	}()
+
 	// flag variables
 	var filePath string
 	var debug, quiet bool
@@ -90,12 +94,11 @@ func main() {
 		outframe.Body = []byte(line.Text)
 
 		// send it to given output ports
+		netoutLock.Lock()
 		if err = outframe.Marshal(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 		}
-		if err = netout.Flush(); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
-		}
+		netoutLock.Unlock()
 	}
 
 	//TODO add error handling on line.Err
