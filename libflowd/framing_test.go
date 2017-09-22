@@ -113,6 +113,7 @@ func BenchmarkMarshalV2(b *testing.B) {
 	buf := bytes.Buffer{}
 	bufw := bufio.NewWriter(&buf)
 	var err error
+	b.ReportAllocs()
 	b.ResetTimer()
 	// marshal
 	for n := 0; n < b.N; n++ {
@@ -135,6 +136,7 @@ func BenchmarkMarshalV1(b *testing.B) {
 	buf := bytes.Buffer{}
 	bufw := bufio.NewWriter(&buf)
 	var err error
+	b.ReportAllocs()
 	b.ResetTimer()
 	// marshal
 	for n := 0; n < b.N; n++ {
@@ -161,6 +163,7 @@ func BenchmarkParseFrameV2(b *testing.B) {
 	bufr := bufio.NewReader(r)
 	var frame *flowd.Frame
 	var err error
+	b.ReportAllocs()
 	b.ResetTimer()
 	// parse it all
 	for n := 0; n < b.N; n++ {
@@ -181,6 +184,7 @@ func BenchmarkParseFrameV1(b *testing.B) {
 	bufr := bufio.NewReader(r)
 	var frame *flowd.Frame
 	var err error
+	b.ReportAllocs()
 	b.ResetTimer()
 	// parse it all
 	for n := 0; n < b.N; n++ {
