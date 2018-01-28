@@ -38,7 +38,7 @@ type Port struct {
 	RemoteProc string
 }
 
-func getNetworkDefinition(debug bool) []byte {
+func getNetworkDefinition() []byte {
 	var nwSource io.ReadCloser
 	if termutil.Isatty(os.Stdin.Fd()) {
 		// get from file
@@ -77,7 +77,7 @@ func getNetworkDefinition(debug bool) []byte {
 	return nwBytes
 }
 
-func parseNetworkDefinition(nwBytes []byte, debug bool) *fbp.Fbp {
+func parseNetworkDefinition(nwBytes []byte) *fbp.Fbp {
 	nw := &fbp.Fbp{Buffer: (string)(nwBytes)}
 	if debug {
 		fmt.Println("init")
@@ -128,7 +128,7 @@ func displayNetworkDefinition(nw *fbp.Fbp) {
 	fmt.Println("end of parsed network info")
 }
 
-func networkDefinition2Processes(nw *fbp.Fbp, debug bool) Network {
+func networkDefinition2Processes(nw *fbp.Fbp) Network {
 	// prepare list of processes
 	procs := make(Network)
 	for _, fbpProc := range nw.Processes {
@@ -181,7 +181,7 @@ func networkDefinition2Processes(nw *fbp.Fbp, debug bool) Network {
 		//TODO decide if internal or external port name should be used
 		/*
 			inEndpoints[fromPort].Url.Fragment = ""
-			listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unneccessary - actually, only launch needs to really parse it
+			listenAddress := inEndpoints[fromPort].Url.String() //TODO arg->URL->string is unnecessary - actually, only launch needs to really parse it
 			//TODO hack
 			listenAddress = strings.Replace(listenAddress, "%40", "", 1)
 			procs[toProc].InPorts = append(procs[toProc].InPorts, Port{

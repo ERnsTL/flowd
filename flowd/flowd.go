@@ -19,6 +19,8 @@ const (
 
 var (
 	instancesLock sync.RWMutex // lock to the process instances array
+	debug         bool
+	quiet         bool
 )
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 	*/
 
 	// read program arguments
-	var help, debug, quiet, graph, dependencies bool
+	var help, graph, dependencies bool
 	var olc string
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
@@ -47,10 +49,10 @@ func main() {
 	}
 
 	// get network definition
-	nwBytes := getNetworkDefinition(debug)
+	nwBytes := getNetworkDefinition()
 
 	// parse and validate network
-	nw := parseNetworkDefinition(nwBytes, debug)
+	nw := parseNetworkDefinition(nwBytes)
 	if olc != "" && (len(nw.Inports) > 0 || len(nw.Outports) > 0) {
 		fmt.Println("ERROR: NETIN and NETOUT require -olc, otherwise use TCP/UDP/SSH/UNIX/etc. components")
 		os.Exit(1)
@@ -96,12 +98,13 @@ func main() {
 	}
 
 	// generate network data structures
-	procs := networkDefinition2Processes(nw, debug)
+	procs := networkDefinition2Processes(nw)
 
 	// subscribe to ctrl+c to do graceful shutdown
 	//TODO
 
 	// launch network
+	//TODO make it unnecessary to have separate Process and ComponentInstance
 	instances := make(ComponentInstances)
 	exitChan := make(chan string)
 	// launch handler for NETOUT, if required
@@ -118,109 +121,7 @@ func main() {
 
 		// start component as subprocess, with arguments
 		instances[proc.Name] = newComponentInstance()
-		go func(proc *Process) { //TODO move into own function
-			//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
-
-			// start component as subprocess, with arguments
-			cmd := exec.Command(proc.Path)
-			// connect to STDOUT
-			cout, err := cmd.StdoutPipe()
-			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
-			}
-			//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
-			/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
-			  -> maybe AllDelivered and AllRead unnecessary with own pipe.
-				cout, coutw := io.Pipe()
-				cmd.Stdout = coutw
-			*/
-			// connect to STDIN
-			cinPipe, err := cmd.StdinPipe()
-			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
-			}
-			cin := bufio.NewWriter(cinPipe)
-			// connect to STDERR
-			cerr, err := cmd.StderrPipe()
-			if err != nil {
-				fmt.Println("ERROR: could not allocate pipe to component stderr:", err)
-			}
-			// start subprocess
-			if err = cmd.Start(); err != nil {
-				fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
-				exitChan <- proc.Name
-			}
-
-			// display component stderr
-			go func() {
-				// prepare instance AllOutputted chan
-				donechan := instances[proc.Name].AllOutputted
-				// read each line and display with component name prepended
-				scanner := bufio.NewScanner(cerr)
-				for scanner.Scan() {
-					fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
-				}
-				// notify main loop
-				close(donechan)
-			}()
-
-			// first deliver initial information packets/frames
-			for i := 0; i < len(proc.IIPs); i++ {
-				iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
-				port := iipInfo.Port
-				data := iipInfo.Data
-				iip := &flowd.Frame{
-					Type:     "data",
-					BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
-					Port:     port,
-					//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
-					Extensions: nil,
-					Body:       []byte(data),
-				}
-				if !quiet {
-					fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
-				}
-				if err = iip.Marshal(cin); err != nil {
-					fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
-					os.Exit(3)
-				}
-			}
-			// flush buffer
-			if err = cin.Flush(); err != nil {
-				fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
-				os.Exit(3)
-			}
-			// GC it
-			proc.IIPs = nil
-
-			// start handler for regular packets/frames
-			//instancesLock.RLock()
-			inputChan := instances[proc.Name].Input
-			//instancesLock.RUnlock()
-			go handleComponentInput(inputChan, proc, cin, debug, quiet) // TODO maybe make debug and quiet global
-
-			// NOTE: this using manual buffering
-			go handleComponentOutput(proc, instances, cout, debug, quiet)
-
-			// wait for process to finish
-			//err = cmd.Wait()
-			// NOTE: cmd.Wait() would close the Stdout pipe (too early?), dropping unread frames
-			state, err := cmd.Process.Wait()
-			cmd.ProcessState = state
-			if err != nil {
-				fmt.Printf("ERROR waiting for exit of component %s: %v\n", proc.Name, err)
-			}
-			// check exit status
-			if !cmd.ProcessState.Success() {
-				//TODO warning or error?
-				fmt.Println("ERROR: Processs", proc.Name, "exited unsuccessfully.")
-				//TODO how to react properly? shut down network?
-			} else if !quiet {
-				fmt.Println("INFO: Process", proc.Name, "exited normally.")
-			}
-			// notify main thread
-			exitChan <- proc.Name
-		}(proc)
+		go startInstance(proc, instances, exitChan) //TODO maybe make instances and exitChan global
 	}
 
 	// start up online configuration
@@ -308,7 +209,112 @@ func main() {
 	//TODO how to decide that it should happen? should 1 component be able to trigger network shutdown?
 }
 
-func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Writer, debug bool, quiet bool) {
+// startProcess starts a process instance
+func startInstance(proc *Process, instances ComponentInstances, exitChan chan string) {
+	//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
+
+	// start component as subprocess, with arguments
+	cmd := exec.Command(proc.Path)
+	// connect to STDOUT
+	cout, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
+	}
+	//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
+	/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
+	-> maybe AllDelivered and AllRead unnecessary with own pipe.
+	cout, coutw := io.Pipe()
+	cmd.Stdout = coutw
+	*/
+	// connect to STDIN
+	cinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
+	}
+	cin := bufio.NewWriter(cinPipe)
+	// connect to STDERR
+	cerr, err := cmd.StderrPipe()
+	if err != nil {
+		fmt.Println("ERROR: could not allocate pipe to component stderr:", err)
+	}
+	// start subprocess
+	if err = cmd.Start(); err != nil {
+		fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
+		exitChan <- proc.Name
+	}
+
+	// display component stderr
+	go func() {
+		// prepare instance AllOutputted chan
+		donechan := instances[proc.Name].AllOutputted
+		// read each line and display with component name prepended
+		scanner := bufio.NewScanner(cerr)
+		for scanner.Scan() {
+			fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
+		}
+		// notify main loop
+		close(donechan)
+	}()
+
+	// first deliver initial information packets/frames
+	for i := 0; i < len(proc.IIPs); i++ {
+		iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
+		port := iipInfo.Port
+		data := iipInfo.Data
+		iip := &flowd.Frame{
+			Type:     "data",
+			BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
+			Port:     port,
+			//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
+			Extensions: nil,
+			Body:       []byte(data),
+		}
+		if !quiet {
+			fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
+		}
+		if err = iip.Marshal(cin); err != nil {
+			fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+			os.Exit(3)
+		}
+	}
+	// flush buffer
+	if err = cin.Flush(); err != nil {
+		fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
+		os.Exit(3)
+	}
+	// GC it
+	proc.IIPs = nil
+
+	// start handler for regular packets/frames
+	//instancesLock.RLock()
+	inputChan := instances[proc.Name].Input
+	//instancesLock.RUnlock()
+	go handleComponentInput(inputChan, proc, cin) // TODO maybe make debug and quiet global
+
+	// NOTE: this using manual buffering
+	go handleComponentOutput(proc, instances, cout)
+
+	// wait for process to finish
+	//err = cmd.Wait()
+	// NOTE: cmd.Wait() would close the Stdout pipe (too early?), dropping unread frames
+	state, err := cmd.Process.Wait()
+	cmd.ProcessState = state
+	if err != nil {
+		fmt.Printf("ERROR waiting for exit of component %s: %v\n", proc.Name, err)
+	}
+	// check exit status
+	if !cmd.ProcessState.Success() {
+		//TODO warning or error?
+		fmt.Println("ERROR: Processs", proc.Name, "exited unsuccessfully.")
+		//TODO how to react properly? shut down network?
+	} else if !quiet {
+		fmt.Println("INFO: Process", proc.Name, "exited normally.")
+	}
+	// notify main thread
+	exitChan <- proc.Name
+}
+
+func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Writer) {
 	// use write counter only if !quiet or even debug
 	///TODO re-enable counting functionality
 	/*
@@ -370,7 +376,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 	fmt.Println("EOF from network input channel - closing.")
 }
 
-func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser, debug bool, quiet bool) {
+func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser) {
 	defer cout.Close()
 	countr := datacounter.NewReaderCounter(cout)
 	bufr := bufio.NewReader(countr)
