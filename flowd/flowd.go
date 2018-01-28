@@ -289,7 +289,7 @@ func startInstance(proc *Process, instances ComponentInstances, exitChan chan st
 	//instancesLock.RLock()
 	inputChan := instances[proc.Name].Input
 	//instancesLock.RUnlock()
-	go handleComponentInput(inputChan, proc, cin) // TODO maybe make debug and quiet global
+	go handleComponentInput(inputChan, proc, cin)
 
 	// NOTE: this using manual buffering
 	go handleComponentOutput(proc, instances, cout)
