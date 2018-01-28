@@ -174,6 +174,7 @@ If you rather want to do FBP in Go, but prefer an in-process-communicating runti
 * Gracelful shutdown once all data has been processed and all components shut down
 * Visualization of the given network in *GraphViz* format
 * Display of required components and file dependencies of the given network
+* Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice - kpc, WebSocket,  GRPC, CapnProto, Protobuf, Flatbuffers, JSON, MsgPack, gob, RON, ...
 
 The included example components cover:
 
