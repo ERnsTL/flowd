@@ -15,6 +15,8 @@ import (
 
 const maxFlushWait = 2000 * time.Millisecond // flush any buffered outgoing frames after at most this duration
 
+var debug, quiet bool
+
 func main() {
 	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
@@ -47,7 +49,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: parsing IIP:", err)
 			os.Exit(2)
 		}
-		var debug, quiet bool
 		flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 		flags.BoolVar(&debug, "debug", false, "give detailed event output")
 		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
@@ -109,7 +110,9 @@ func main() {
 					}
 					frame.Extensions[field] = value
 					*/
-					fmt.Fprintf(os.Stderr, "\tsetting %s to %s\n", field, value)
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "\tsetting %s to %s\n", field, value)
+					}
 				})
 			case "+=":
 				// append value, if field exists
@@ -119,12 +122,16 @@ func main() {
 				modifications = append(modifications, func(frame *flowd.Frame) {
 					if frame.Extensions != nil {
 						if _, found := frame.Extensions[field]; found {
-							fmt.Fprintf(os.Stderr, "\tappending %s to %s\n", value, field)
+							if !quiet {
+								fmt.Fprintf(os.Stderr, "\tappending %s to %s\n", value, field)
+							}
 							frame.Extensions[field] += value
 							return
 						}
 					}
-					fmt.Fprintf(os.Stderr, "\t%s missing, leaving unmodified\n", field)
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "\t%s missing, leaving unmodified\n", field)
+					}
 				})
 			case "=+":
 				// prepend, if field exists
@@ -134,12 +141,16 @@ func main() {
 				modifications = append(modifications, func(frame *flowd.Frame) {
 					if frame.Extensions != nil {
 						if currentValue, found := frame.Extensions[field]; found {
-							fmt.Fprintf(os.Stderr, "\tprepending %s to %s\n", value, field)
+							if !quiet {
+								fmt.Fprintf(os.Stderr, "\tprepending %s to %s\n", value, field)
+							}
 							frame.Extensions[field] = value + currentValue
 							return
 						}
 					}
-					fmt.Fprintf(os.Stderr, "\t%s missing, leaving unmodified\n", field)
+					if !quiet {
+						fmt.Fprintf(os.Stderr, "\t%s missing, leaving unmodified\n", field)
+					}
 				})
 			default:
 				fmt.Fprintln(os.Stderr, "ERROR: unexpected operation:", op, "- Exiting.")
@@ -168,11 +179,15 @@ func main() {
 
 		// apply modification(s)
 		//TODO make this configurable using "debug" parameter in IIP
-		fmt.Fprintln(os.Stderr, "got frame, modifying...")
+		if !quiet {
+			fmt.Fprintln(os.Stderr, "got frame, modifying...")
+		}
 		for _, ruleFunc := range modifications {
 			ruleFunc(frame)
 		}
-		fmt.Fprintln(os.Stderr, "modified. forwarding now.")
+		if !quiet {
+			fmt.Fprintln(os.Stderr, "modified. forwarding now.")
+		}
 
 		// send it to given output ports
 		frame.Port = "OUT"
