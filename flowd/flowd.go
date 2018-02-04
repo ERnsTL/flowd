@@ -28,7 +28,7 @@ func main() {
 	/*
 		f, err := os.Create("flowd.prof")
 		if err != nil {
-			log.Fatal(err)
+			panic(err)
 		}
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
