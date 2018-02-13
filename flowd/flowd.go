@@ -356,9 +356,13 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 		if err := frame.Marshal(cin); err != nil {
 			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 		}
-		//TODO optimize: Flush is very expensive; but flushing only every nth frame causes hang because of undelivered frames
-		if err := cin.Flush(); err != nil {
-			fmt.Println("net in: WARNING: could not flush frame into component STDIN - ignoring.")
+		// save flush if there are already more IPs waiting on the channel, rely on bufio.Writer's autoflush on buffer fill
+		// NOTE: Flush is very expensive, because it results in a syscall
+		// NOTE: beware of added latency for alternative solutions and hangs because of undelivered frames (eg. when flushing on every nth frame)
+		if len(input) == 0 {
+			if err := cin.Flush(); err != nil {
+				fmt.Println("net in: WARNING: could not flush frame into component STDIN - ignoring.")
+			}
 		}
 		// status message
 		/*///TODO re-enable that functionality
