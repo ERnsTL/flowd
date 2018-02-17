@@ -25,6 +25,72 @@ The act of programming is thus shifted from entering strings and lines of tailor
 You can find out more about this paradigm on J. Paul Morrison's website linked above.
 
 
+## Features
+
+* Parsing of ```.fbp``` network specifications
+* Starting a network of the specified components
+* Simple and easy to implement framing format
+* Multi-core use resp. parallel processing
+* Closing of ports
+* Gracelful shutdown once all data has been processed and all components shut down
+* Visualization of the given network in *GraphViz* format
+* Display of required components and file dependencies of the given network
+* Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice - kpc, WebSocket,  GRPC, CapnProto, Protobuf, Flatbuffers, JSON, MsgPack, gob, RON, ...
+
+The included example components cover:
+
+* TCP client and server
+* Unix domain client and server (abstract and path-based)
+* TLS client and server
+* SSH client
+* HTTP parser in order to create an HTTP server
+* Re-use of any existing programs and their output or for transformation of data
+* Bridges between different network parts, and thus...
+* Distribution of the network across multiple machines
+* File reading and writing
+* Line splitting
+* File tailing resp. following
+* Modification of frame headers
+* Extraction of data from frame body
+* Routing based on frame contents or header values
+* Time-based events with cron expressions
+* Counter for packets and packet sizes
+* Example login prompt and command-line interaction component
+
+Planned features:
+
+* Runtime protocol for remote control and online reconfiguration of the runtime
+* Network discovery of services using Zeroconf / Bonjour
+* Load balancing
+* Tracing of data packets as they flow through the network
+* For more, see the issues list!
+
+
+## Architecture
+
+> This describes the current pre-alpha state.
+
+All components are either normal programs or scripts, which do not have to be specially modified to be used in a ```flowd``` network (wrapped in a ```cmd``` component) or they are programs, which understand the ```flowd``` framing format.
+
+All components are each started by the ```flowd``` program. It manages the message framing, message routing and handles all the network connections with other components.
+
+A component can have multiple input and output ports. Ports are named. Without message framing (wrapped in a ```cmd``` component), input can be passed to an unmodified program and output can be used within the processing framework.
+
+A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by ```flowd``` as the managing parent process.
+
+The framing format is a simple text-based format very similar to an HTTP/1.x header or a MIME message, which is also used for e-mail. Currently, a subset of [STOMP v1.2](https://stomp.github.io/stomp-specification-1.2.html) is used. It can easily be implemented in any programming language, is easy to extend and can carry a frame body in any currently-trendy format be it textual or binary. A frame contains information on:
+
+* Over which port did this frame come in? Over which port shall this be sent out to another component?
+* Is this a control frame or a data frame?
+* If data frame, what is the data type resp. class name resp. message type in the frame body? This is user-defined.
+* What is the MIME type resp. content type of the frame body? For example JSON, plain text, XML, Protobuf, Msgpack, any other binary formats or whatever.
+* What is the content length resp. frame body length?
+* The frame body is a free-form byte array, so you can put in whatever you want.
+* Header fields are extensible to convey application-specific meta data.
+
+Using several components, a network can be built. It is like a graph of components or like workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
+
+
 ## Installation
 
 Download:
@@ -86,7 +152,7 @@ You can find out more about the ```.fbp``` network description grammar here:
 A more complete, parser-exercising example is located in ```examples/example.fbp```.
 
 
-## Visualization example
+## Visualization Example
 
 *flowd* can export the network graph structure into *GraphViz* format for visualization.
 
@@ -95,31 +161,6 @@ The following commands will export a network to STDOUT, convert it to a PNG rast
 ```
 bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
 ```
-
-
-## Architecture
-
-> This describes the current pre-alpha state.
-
-All components are either normal programs or scripts, which do not have to be specially modified to be used in a ```flowd``` network (wrapped in a ```cmd``` component) or they are programs, which understand the ```flowd``` framing format.
-
-All components are each started by the ```flowd``` program. It manages the message framing, message routing and handles all the network connections with other components.
-
-A component can have multiple input and output ports. Ports are named. Without message framing (wrapped in a ```cmd``` component), input can be passed to an unmodified program and output can be used within the processing framework.
-
-A component communicates with the outside world simply using standard input and output. Over these, it receives multiplexed input frames and can send frames to its named ports and thus to other components; the demultiplexing resp. routing is done by ```flowd``` as the managing parent process.
-
-The framing format is a simple text-based format very similar to an HTTP/1.x header or a MIME message, which is also used for e-mail. Currently, a subset of [STOMP v1.2](https://stomp.github.io/stomp-specification-1.2.html) is used. It can easily be implemented in any programming language, is easy to extend and can carry a frame body in any currently-trendy format be it textual or binary. A frame contains information on:
-
-* Over which port did this frame come in? Over which port shall this be sent out to another component?
-* Is this a control frame or a data frame?
-* If data frame, what is the data type resp. class name resp. message type in the frame body? This is user-defined.
-* What is the MIME type resp. content type of the frame body? For example JSON, plain text, XML, Protobuf, Msgpack, any other binary formats or whatever.
-* What is the content length resp. frame body length?
-* The frame body is a free-form byte array, so you can put in whatever you want.
-* Header fields are extensible to convey application-specific meta data.
-
-Using several components, a network can be built. It is like a graph of components or like workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
 
 
 ## Writing Components
@@ -139,6 +180,8 @@ Three stages usually:
 1. read and packetize
 2. filter and transform
 3. assemble packets and output
+
+TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which resuts should be produced (see JPM book).
 
 
 ## FBP Runtimes
@@ -170,47 +213,6 @@ Downsides of the approach taken by ```flowd```:
   Future note: It may be possible to create a production-mode version, where the inter-process communication is changed from network connections to in-process communication, which would reduce the amount of data copying.
 
 If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow). Also check out the FBP runtimes and systems by J. Paul Morrison and *NoFlo* and their compatible runtimes.
-
-
-## Features
-
-* Parsing of ```.fbp``` network specifications
-* Starting a network of the specified components
-* Simple and easy to implement framing format
-* Multi-core use resp. parallel processing
-* Closing of ports
-* Gracelful shutdown once all data has been processed and all components shut down
-* Visualization of the given network in *GraphViz* format
-* Display of required components and file dependencies of the given network
-* Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice - kpc, WebSocket,  GRPC, CapnProto, Protobuf, Flatbuffers, JSON, MsgPack, gob, RON, ...
-
-The included example components cover:
-
-* TCP client and server
-* Unix domain client and server (abstract and path-based)
-* TLS client and server
-* SSH client
-* HTTP parser in order to create an HTTP server
-* Re-use of any existing programs and their output or for transformation of data
-* Bridges between different network parts, and thus...
-* Distribution of the network across multiple machines
-* File reading and writing
-* Line splitting
-* File tailing resp. following
-* Modification of frame headers
-* Extraction of data from frame body
-* Routing based on frame contents or header values
-* Time-based events with cron expressions
-* Counter for packets and packet sizes
-* Example login prompt and command-line interaction component
-
-Planned features:
-
-* Runtime protocol for remote control and online reconfiguration of the runtime
-* Network discovery of services using Zeroconf / Bonjour
-* Load balancing
-* Tracing of data packets as they flow through the network
-* For more, see the issues list!
 
 
 ## Development aka Hacking on ```flowd```
