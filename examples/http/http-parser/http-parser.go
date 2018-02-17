@@ -58,9 +58,7 @@ nextframe:
 
 		// NOTE: demux could also be done over just IN port depending on BodyType
 		switch frame.Port {
-		case "IN":
-			// IP from network to be sent to HTTP router and/or handlers
-
+		case "IN": // IP from network to be sent to HTTP router and/or handlers
 			// get connection ID
 			//id = frame.Extensions["conn-id"]
 			if connID, found = frame.Extensions["conn-id"]; !found {
@@ -81,7 +79,7 @@ nextframe:
 					close: make(chan struct{}, 0),
 				}
 				// handle request
-				go handleConnection(connID, clients[connID], netout)
+				go handleConnection(connID, clients[connID], netin, netout)
 			} else if frame.BodyType == "CloseNotification" {
 				fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
 				// send notification to handler goroutine
@@ -93,9 +91,7 @@ nextframe:
 				fmt.Fprintf(os.Stderr, "%s: got request chunk, feeding to HTTP request parser.\n", connID)
 				clients[connID].pipew.Write(frame.Body)
 			}
-		case "RESP":
-			// IP from handlers to be sent back to network
-
+		case "RESP": // IP from a handler to be sent back to network
 			// get connection ID
 			//TODO change to use req-id and translate req-id -> conn-id
 			if connID, found = frame.Extensions["conn-id"]; !found {
@@ -158,7 +154,11 @@ nextframe:
 			if err := respFrame.Marshal(netout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP response frame downstream: %v - dropping.\n", connID, err)
 			}
-			netout.Flush()
+			if netin.Buffered() == 0 {
+				if err := netout.Flush(); err != nil {
+					fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+				}
+			}
 			fmt.Fprintf(os.Stderr, "%s: response forwarded\n", connID)
 		default:
 			fmt.Fprintln(os.Stderr, "WARNING: packet received on unexpected port:", frame.Port, "- discarding.")
@@ -168,7 +168,7 @@ nextframe:
 	}
 }
 
-func handleConnection(connID string, client *Client, netout *bufio.Writer) {
+func handleConnection(connID string, client *Client, netin *bufio.Reader, netout *bufio.Writer) {
 	// read HTTP request from series of frames
 	var req *http.Request
 	var err error
@@ -207,7 +207,11 @@ func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 		if err := reqFrame.Marshal(netout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.\n", connID, err)
 		}
-		netout.Flush()
+		if netin.Buffered() == 0 {
+			if err := netout.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			}
+		}
 		fmt.Fprintf(os.Stderr, "%s: request forwarded\n", connID)
 	case <-time.After(timeout): // timeout
 		fmt.Fprintf(os.Stderr, "%s: WARNING: timeout receiving HTTP request - closing connection.\n", connID)
