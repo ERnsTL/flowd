@@ -25,10 +25,18 @@ The act of programming is thus shifted from entering strings and lines of tailor
 You can find out more about this paradigm on J. Paul Morrison's website linked above.
 
 
-## Installing ```flowd```
+## Installation
+
+Download:
 
 ```
 GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
+```
+
+Compile and install ```flowd``` and all example components:
+
+```
+GOPATH=`pwd` go install github.com/ERnsTL/flowd/...
 ```
 
 
