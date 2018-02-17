@@ -190,6 +190,7 @@ The included example components cover:
 * Unix domain client and server (abstract and path-based)
 * TLS client and server
 * SSH client
+* HTTP parser in order to create an HTTP server
 * Re-use of any existing programs and their output or for transformation of data
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
