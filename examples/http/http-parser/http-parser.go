@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -14,19 +16,17 @@ import (
 
 const timeout = 10 * time.Second
 
-// Client is .... TODO
+// Client is used for data exchange between main loop and connection handler
 type Client struct {
-	// data exchange between main loop and connection handler
-	piper *io.PipeReader
-	pipew *io.PipeWriter
-	bufr  *bufio.Reader // reads from piper
-	close chan struct{}
+	pipew *io.PipeWriter // write HTTP request chunks into
+	piper *io.PipeReader // read HTTP request chunks from
+	bufr  *bufio.Reader  // reads from piper
+	close chan struct{}  // closing tells connection handler to exit
 }
 
-// global variables
-//TODO useful?
 var (
-	closeCommand = &flowd.Frame{
+	// prepared frame
+	closeConnectionCommand = &flowd.Frame{
 		Port:     "OUT",
 		Type:     "data",
 		BodyType: "CloseConnection",
@@ -41,12 +41,13 @@ func main() {
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
-	var frame *flowd.Frame //TODO why is this pointer of Frame?
+	var frame *flowd.Frame
 	var err error
 	var connID string
 	var found bool
 	clients := map[string]*Client{} // key = connection ID
 
+nextframe:
 	for {
 		// read frame
 		frame, err = flowd.ParseFrame(netin)
@@ -55,41 +56,118 @@ func main() {
 			break
 		}
 
-		// get connection ID
-		//id = frame.Extensions["conn-id"]
-		if connID, found = frame.Extensions["conn-id"]; !found {
-			fmt.Fprintln(os.Stderr, "WARNING: conn-id header missing on frame:", string(frame.Body), "- discarding.")
+		// NOTE: demux could also be done over just IN port depending on BodyType
+		switch frame.Port {
+		case "IN":
+			// IP from network to be sent to HTTP router and/or handlers
+
+			// get connection ID
+			//id = frame.Extensions["conn-id"]
+			if connID, found = frame.Extensions["conn-id"]; !found {
+				fmt.Fprintln(os.Stderr, "WARNING: conn-id header missing on frame:", string(frame.Body), "- discarding.")
+				continue
+			}
+
+			// handle according to BodyType
+			if frame.BodyType == "OpenNotification" {
+				fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", connID)
+				// make new entry
+				piper, pipew := io.Pipe()
+				bufr := bufio.NewReader(piper)
+				clients[connID] = &Client{
+					piper: piper,
+					pipew: pipew,
+					bufr:  bufr,
+					close: make(chan struct{}, 0),
+				}
+				// handle request
+				go handleConnection(connID, clients[connID], netout)
+			} else if frame.BodyType == "CloseNotification" {
+				fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
+				// send notification to handler goroutine
+				close(clients[connID].close)
+				// unlink entry
+				delete(clients, connID)
+			} else {
+				// normal data/request frame; send frame body to correct ReadWriter
+				fmt.Fprintf(os.Stderr, "%s: got request chunk, feeding to HTTP request parser.\n", connID)
+				clients[connID].pipew.Write(frame.Body)
+			}
+		case "RESP":
+			// IP from handlers to be sent back to network
+
+			// get connection ID
+			//TODO change to use req-id and translate req-id -> conn-id
+			if connID, found = frame.Extensions["conn-id"]; !found {
+				fmt.Fprintln(os.Stderr, "WARNING: conn-id header missing on frame:", string(frame.Body), "- discarding.")
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "%s: got HTTP response\n", connID)
+
+			// create HTTP response
+			resp := &http.Response{
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Header:     http.Header{},
+			}
+			//TODO add support for cookies
+			for key, value := range frame.Extensions {
+				// special fields
+				switch key {
+				case "conn-id", "req-id":
+					// do not put those into the HTTP response header
+					continue
+				case "http-status":
+					if statusCode, err := strconv.Atoi(value); err != nil {
+						fmt.Fprintf(os.Stderr, "%s: WARNING: HTTP status code could not be parsed: %v - discarding.\n", connID, err)
+						continue nextframe
+					} else {
+						resp.StatusCode = statusCode
+					}
+				default:
+					// copy all others to HTTP response header
+					resp.Header.Add(key, value)
+				}
+			}
+			resp.Body = ioutil.NopCloser(bytes.NewBuffer(frame.Body))
+			resp.ContentLength = int64(len(frame.Body))
+			if resp.StatusCode == 0 {
+				fmt.Fprintf(os.Stderr, "%s: WARNING: response IP contained no HTTP status code - assuming 200.\n", connID)
+				resp.StatusCode = 200
+			}
+
+			// convert to []byte
+			respBytes := &bytes.Buffer{}
+			if err := resp.Write(respBytes); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: WARNING: error serializing HTTP response: %v - discarding.\n", connID, err)
+				continue
+			}
+
+			// package up into frame
+			respFrame := &flowd.Frame{
+				Port:     "RESP",
+				Type:     "data",
+				BodyType: "HTTPResponse",
+				Extensions: map[string]string{
+					"conn-id": connID,
+				},
+				Body: respBytes.Bytes(),
+			}
+
+			// send to network
+			if err := respFrame.Marshal(netout); err != nil {
+				fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP response frame downstream: %v - dropping.\n", connID, err)
+			}
+			netout.Flush()
+			fmt.Fprintf(os.Stderr, "%s: response forwarded\n", connID)
+		default:
+			fmt.Fprintln(os.Stderr, "WARNING: packet received on unexpected port:", frame.Port, "- discarding.")
 			continue
 		}
 
-		// handle according to BodyType
-		if frame.BodyType == "OpenNotification" {
-			fmt.Fprintf(os.Stderr, "%s: got open notification, making new entry.\n", connID)
-			// make new entry
-			piper, pipew := io.Pipe()
-			bufr := bufio.NewReader(piper)
-			clients[connID] = &Client{
-				piper: piper,
-				pipew: pipew,
-				bufr:  bufr,
-				close: make(chan struct{}, 0),
-			}
-			// handle request
-			go handleConnection(connID, clients[connID], netout)
-		} else if frame.BodyType == "CloseNotification" {
-			fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
-			// send notification to handler goroutine
-			close(clients[connID].close)
-			// unlink entry
-			delete(clients, connID)
-		} else {
-			// normal data/request frame; send frame body to correct ReadWriter
-			clients[connID].pipew.Write(frame.Body)
-		}
 	}
 }
 
-//TODO optimize: give netout as parameter here, safe for concurrent use?
 func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 	// read HTTP request from series of frames
 	var req *http.Request
@@ -107,28 +185,32 @@ func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.\n", connID, err)
 			// request connection be closed
-			closeCommand.Extensions["conn-id"] = connID
-			closeCommand.Marshal(netout)
+			closeConnectionCommand.Extensions["conn-id"] = connID
+			closeConnectionCommand.Marshal(netout)
 			// done
 			return
 		}
+		fmt.Fprintf(os.Stderr, "%s: HTTP request complete\n", connID)
 		// send parsed HTTP request downstream
 		body, _ := ioutil.ReadAll(req.Body)
+		fmt.Fprintf(os.Stderr, "%s: request body complete\n", connID)
 		reqFrame := &flowd.Frame{
 			Port:     "OUT",
 			Type:     "data",
 			BodyType: "HTTPRequest",
 			Extensions: map[string]string{
-				"Http-Id": "666", //TODO
+				"req-id":  "666", //TODO translation between conn-id and req-id -> multiple requests over one connection
+				"conn-id": connID,
 			},
-			Body: body, //TODO
+			Body: body,
 		}
 		if err := reqFrame.Marshal(netout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.\n", connID, err)
 		}
-		// TODO multiple requests
-		client.pipew.Close()
+		netout.Flush()
+		fmt.Fprintf(os.Stderr, "%s: request forwarded\n", connID)
 	case <-time.After(timeout): // timeout
+		fmt.Fprintf(os.Stderr, "%s: WARNING: timeout receiving HTTP request - closing connection.\n", connID)
 		client.pipew.Close()
 		return
 	case <-client.close: // close command from main loop

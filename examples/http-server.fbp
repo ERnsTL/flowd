@@ -1,9 +1,24 @@
-# TCP chat/console server
+# HTTP echo server
 # start using:
 # bin/flowd -debug src/github.com/ERnsTL/flowd/examples/http-server.fbp
 # send test request:
-# wget --debug --post-data="my POST data" http://localhost:4000/
+# wget --post-data="test=my-POST-data" http://localhost:8080/ --server-response -O /dev/shm/out && cat /dev/shm/out
 
-tcp(bin/tcp-server) OUT -> IN http(bin/http-parser) OUT -> IN Display(bin/display)
-# NOTE: currently only displays each incoming HTTP request
-'tcp4://localhost:4000' -> CONF tcp
+# only display each received HTTP request body
+#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN Display(bin/display)
+
+# echo HTTP server
+TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN EchoHandler(bin/copy)
+
+# with added routing based on URL path
+#TODO
+#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN Router(bin/packet-router-header) OUT1 -> IN EchoHandler(bin/copy)
+
+# send HTTP request body back into HTTP server as response body
+EchoHandler OUT -> RESP HTTP
+# send serialized HTTP responses back over TCP
+HTTP RESP -> IN TCP
+
+# configuration
+'tcp://localhost:8080' -> CONF TCP
+'OUT' -> CONF EchoHandler
