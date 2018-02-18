@@ -6,14 +6,10 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sync"
-	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	shellquote "github.com/kballard/go-shellquote"
 )
-
-const maxFlushWait = 2000 * time.Millisecond // flush any buffered outgoing frames after at most this duration
 
 var debug, quiet bool
 
@@ -22,18 +18,6 @@ func main() {
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
-	// flush netout after x seconds if there is buffered data
-	var netoutLock sync.Mutex // bufio.Writer is not concurrency-safe, thus needs a lock
-	go func() {
-		for {
-			time.Sleep(maxFlushWait)
-			netoutLock.Lock()
-			// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
-			// NOTE: Flush() checks on its own if data buffered
-			netout.Flush()
-			netoutLock.Unlock()
-		}
-	}()
 
 	// get configuration from IIP = initial information packet/frame
 	type modFunc func(*flowd.Frame)
@@ -191,11 +175,11 @@ func main() {
 
 		// send it to given output ports
 		frame.Port = "OUT"
-		netoutLock.Lock()
-		if err = frame.Marshal(netout); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+		if netin.Buffered() == 0 {
+			if err = frame.Marshal(netout); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+			}
 		}
-		netoutLock.Unlock()
 	}
 }
 

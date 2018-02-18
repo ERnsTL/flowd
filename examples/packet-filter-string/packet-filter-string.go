@@ -16,6 +16,7 @@ func main() {
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+
 	// flag variables
 	var filterStrings []string
 	var debug, quiet, pass, drop, and, or bool

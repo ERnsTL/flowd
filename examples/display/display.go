@@ -5,27 +5,15 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
-
-const maxFlushWait = 2 * time.Second // flush any buffered display output after at most this duration
 
 func main() {
 	// open connection to network and display output
 	netin := bufio.NewReader(os.Stdin)
 	errout := bufio.NewWriter(os.Stderr)
 	defer errout.Flush()
-	// flush display output after x seconds if there is buffered data
-	go func() {
-		for {
-			time.Sleep(maxFlushWait)
-			// NOTE: bufio.Writer.Write() flushes on its own if buffer is full
-			// NOTE: Flush() checks on its own if data buffered
-			errout.Flush()
-		}
-	}()
 
 	// main loop
 	var frame *flowd.Frame
@@ -55,7 +43,12 @@ func main() {
 				fmt.Fprintln(errout, string(frame.Body))
 			}
 		} else {
-			fmt.Fprint(errout, "<nil>")
+			fmt.Fprintln(errout, "<nil>")
+		}
+		if netin.Buffered() == 0 {
+			if err = errout.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing errout:", err)
+			}
 		}
 	}
 }
