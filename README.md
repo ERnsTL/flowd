@@ -183,6 +183,12 @@ Three stages usually:
 
 TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which resuts should be produced (see JPM book).
 
+TODO no conceptual dissonance between design and implementation stages.
+
+TODO straight implementation, almost waterfall-like, less refactorings.
+
+TODO Linear maintenance cost in relation to program size.
+
 
 ## FBP Runtimes
 
