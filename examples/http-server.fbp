@@ -5,14 +5,14 @@
 # wget --post-data="test=my-POST-data" http://localhost:8080/ --server-response -O /dev/shm/out && cat /dev/shm/out
 
 # only display each received HTTP request body
-#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN Display(bin/display)
+#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-server) OUT -> IN Display(bin/display)
 
 # echo HTTP server
-TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN EchoHandler(bin/copy)
+TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-server) OUT -> IN EchoHandler(bin/copy)
 
 # with added routing based on URL path
 #TODO
-#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-parser) OUT -> IN Router(bin/packet-router-header) OUT1 -> IN EchoHandler(bin/copy)
+#TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-server) OUT -> IN Router(bin/packet-router-header) OUT1 -> IN EchoHandler(bin/copy)
 
 # send HTTP request body back into HTTP server as response body
 EchoHandler OUT -> RESP HTTP
