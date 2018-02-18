@@ -115,7 +115,7 @@ func main() {
 		//TODO pretty much 1:1 copy of tcp-server main loop
 		go func() {
 			for {
-				frame, err := flowd.ParseFrame(netin)
+				frame, err := flowd.Deserialize(netin)
 				if err != nil {
 					if err == io.EOF {
 						fmt.Fprintln(os.Stderr, "unix out: EOF from FBP network on STDIN. Exiting.")
@@ -232,6 +232,6 @@ func handleConnection(conn *net.UnixConn, closeChan chan bool) {
 		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
-		outframe.Marshal(netout)
+		outframe.Serialize(netout)
 	}
 }

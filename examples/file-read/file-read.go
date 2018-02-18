@@ -74,7 +74,7 @@ func main() {
 		// send open bracket
 		//TODO send filename also?
 		if brackets {
-			obracket.Marshal(netout)
+			obracket.Serialize(netout)
 		}
 
 		// read it in chunks until end, forward chunks
@@ -97,7 +97,7 @@ func main() {
 			outframe.Body = buf[:n]
 
 			// send it to output port
-			if err = outframe.Marshal(netout); err != nil {
+			if err = outframe.Serialize(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 			}
 		}
@@ -110,7 +110,7 @@ func main() {
 
 		// send close bracket
 		if brackets {
-			cbracket.Marshal(netout)
+			cbracket.Serialize(netout)
 		}
 
 		// report

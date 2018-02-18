@@ -94,7 +94,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -173,7 +173,7 @@ func (c *packetCounter) Report() {
 	}
 	countFrame.Body = []byte(strconv.Itoa(c.packetCount))
 	// send report to FBP network
-	if err := countFrame.Marshal(netout); err != nil {
+	if err := countFrame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }
@@ -200,7 +200,7 @@ func (c *sizeCounter) Report() {
 	}
 	countFrame.Body = []byte(strconv.Itoa(c.totalSize))
 	// send report to FBP network
-	if err := countFrame.Marshal(netout); err != nil {
+	if err := countFrame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }
@@ -256,7 +256,7 @@ func (c *packetsPerFieldValueCounter) Report() {
 		///TODO if above works, remove - countFrame.Extensions[c.Field] = fieldValue
 		countFrame.Body = []byte(strconv.Itoa(count))
 		// send report to FBP network
-		if err := countFrame.Marshal(netout); err != nil {
+		if err := countFrame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 	}

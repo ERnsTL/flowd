@@ -83,7 +83,7 @@ func main() {
 	// main loop
 	for {
 		// read IP
-		inframe, err = flowd.ParseFrame(netin)
+		inframe, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -138,7 +138,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: could not read blob file", blobpath)
 		}
 		// write to outport
-		if err := outframe.Marshal(netout); err != nil {
+		if err := outframe.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 	}

@@ -120,7 +120,7 @@ func main() {
 	go func(stdin *bufio.Reader) {
 		// handle regular packets
 		for {
-			frame, err := flowd.ParseFrame(netin)
+			frame, err := flowd.Deserialize(netin)
 			if err != nil {
 				if err == io.EOF {
 					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
@@ -213,7 +213,7 @@ func main() {
 			// send close notification downstream
 			//TODO with reason (error or closed from other side/this side)
 			closeNotification.Extensions["conn-id"] = strconv.Itoa(id)
-			closeNotification.Marshal(netout)
+			closeNotification.Serialize(netout)
 			// flush buffers = send frames
 			if err = netout.Flush(); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
@@ -232,7 +232,7 @@ func main() {
 		// send new-connection notification downstream
 		openNotification.Extensions["conn-id"] = strconv.Itoa(id)
 		openNotification.Extensions["remote-address"] = fmt.Sprintf("%v", conn.RemoteAddr()) // copied from handleConnection()
-		openNotification.Marshal(netout)
+		openNotification.Serialize(netout)
 		// flush buffers = send frame
 		if err = netout.Flush(); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
@@ -308,7 +308,7 @@ func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
 		outframe.Body = buf[:bytesRead]
 
 		// send it to STDOUT = FBP network
-		outframe.Marshal(netout)
+		outframe.Serialize(netout)
 		// flush buffers = send frames
 		if err := netout.Flush(); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)

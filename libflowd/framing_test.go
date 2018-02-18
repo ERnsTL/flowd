@@ -33,7 +33,7 @@ func TestHasStructFrame(t *testing.T) {
 
 func TestFrameHasRequiredMethods(t *testing.T) {
 	type IWantThisMethod interface {
-		Marshal(*bufio.Writer) error
+		Serialize(*bufio.Writer) error
 	}
 	var _ IWantThisMethod = &flowd.Frame{}
 }
@@ -42,7 +42,7 @@ func TestFrameParsesAndMarshalsV2(t *testing.T) {
 	// parse
 	r := bytes.NewBufferString(frameStrV2)
 	bufr := bufio.NewReader(r)
-	frame, err := flowd.ParseFrame(bufr)
+	frame, err := flowd.Deserialize(bufr)
 	assert.NoError(t, err, "framing package cannot parse v2 string into frame")
 	assert.Equal(t, "data", frame.Type, "parsed wrong data type")
 	assert.Equal(t, "TCPPacket", frame.BodyType, "parsed wrong body type")
@@ -53,7 +53,7 @@ func TestFrameParsesAndMarshalsV2(t *testing.T) {
 	// marshal
 	var buf2 bytes.Buffer
 	bufw := bufio.NewWriter(&buf2)
-	err = frame.Marshal(bufw)
+	err = frame.Serialize(bufw)
 	assert.NoError(t, err, "frame unmarshal returned error")
 	err = bufw.Flush()
 	assert.NoError(t, err, "bufio.Writer cannot flush")
@@ -70,7 +70,7 @@ func TestFrameParsesAndMarshalsV1(t *testing.T) {
 	var err error
 	r := bytes.NewBufferString(frameStr)
 	bufr := bufio.NewReader(r)
-	frame, err = flowd.ParseFrameV1(bufr)
+	frame, err = flowd.DeserializeV1(bufr)
 	assert.NoError(t, err, "framing package cannot parse v1 string into frame")
 	assert.Equal(t, "data", frame.Type, "parsed wrong data type")
 	assert.Equal(t, "TextMessage", frame.BodyType, "parsed wrong body type")
@@ -81,7 +81,7 @@ func TestFrameParsesAndMarshalsV1(t *testing.T) {
 	// marshal
 	var buf2 bytes.Buffer
 	bufw := bufio.NewWriter(&buf2)
-	err = frame.MarshalV1(bufw)
+	err = frame.SerializeV1(bufw)
 	assert.NoError(t, err, "frame unmarshal returned error")
 	err = bufw.Flush()
 	assert.NoError(t, err, "bufio.Writer cannot flush")
@@ -118,7 +118,7 @@ func BenchmarkMarshalV2(b *testing.B) {
 	// marshal
 	for n := 0; n < b.N; n++ {
 		//buf.Reset()
-		err = benchFrame.Marshal(bufw)
+		err = benchFrame.Serialize(bufw)
 		if err != nil {
 			b.Errorf("MarshalV2 returned error: %s", err)
 		}
@@ -141,7 +141,7 @@ func BenchmarkMarshalV1(b *testing.B) {
 	// marshal
 	for n := 0; n < b.N; n++ {
 		//buf.Reset()
-		err = benchFrame.MarshalV1(bufw)
+		err = benchFrame.SerializeV1(bufw)
 		if err != nil {
 			b.Errorf("MarshalV1 returned error: %s", err)
 		}
@@ -167,7 +167,7 @@ func BenchmarkParseFrameV2(b *testing.B) {
 	b.ResetTimer()
 	// parse it all
 	for n := 0; n < b.N; n++ {
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.Deserialize(bufr)
 		if err != nil {
 			b.Errorf("ParseFrameV2 returned error: %s", err)
 		}
@@ -188,7 +188,7 @@ func BenchmarkParseFrameV1(b *testing.B) {
 	b.ResetTimer()
 	// parse it all
 	for n := 0; n < b.N; n++ {
-		frame, err = flowd.ParseFrameV1(bufr)
+		frame, err = flowd.DeserializeV1(bufr)
 		if err != nil {
 			b.Errorf("ParseFrameV1 returned error: %s", err)
 		}

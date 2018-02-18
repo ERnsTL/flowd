@@ -25,7 +25,7 @@ func main() {
 	frame := flowd.PortClose("OUT")
 
 	// send it to output port
-	if err := frame.Marshal(netout); err != nil {
+	if err := frame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }

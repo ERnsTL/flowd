@@ -105,7 +105,7 @@ func main() {
 nextframe:
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -178,7 +178,7 @@ func printUsage() {
 //TODO optimize: give netout as parameter or have it as global variable?
 func forwardFrame(frame *flowd.Frame, netout *bufio.Writer) {
 	frame.Port = "OUT"
-	if err := frame.Marshal(netout); err != nil {
+	if err := frame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 	}
 }

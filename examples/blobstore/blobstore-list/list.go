@@ -80,7 +80,7 @@ func main() {
 	// main loop
 	for {
 		// read IP
-		inframe, err = flowd.ParseFrame(netin)
+		inframe, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -109,14 +109,14 @@ func main() {
 			continue
 		} else {
 			// send opening bracket = list begin
-			bracketO.Marshal(netout)
+			bracketO.Serialize(netout)
 			// send list of files downstream
 			for _, file := range filelist {
 				outframe.Body = []byte(file.Name())
-				outframe.Marshal(netout)
+				outframe.Serialize(netout)
 			}
 			// send closing bracket = list end
-			bracketC.Marshal(netout)
+			bracketC.Serialize(netout)
 		}
 	}
 }

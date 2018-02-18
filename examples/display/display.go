@@ -21,7 +21,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")
 			break

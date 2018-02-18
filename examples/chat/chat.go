@@ -60,7 +60,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		// get connection ID
 		id = frame.Extensions["conn-id"]
 
@@ -138,7 +138,7 @@ func main() {
 
 		// send it to output port
 		frame.Port = "OUT"
-		if err = frame.Marshal(netout); err != nil {
+		if err = frame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}
 		// send it now (flush)

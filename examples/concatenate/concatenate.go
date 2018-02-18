@@ -58,7 +58,7 @@ forPorts:
 				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
 				// send it to output port
 				frame.Port = "OUT"
-				if err = frame.Marshal(netout); err != nil {
+				if err = frame.Serialize(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 				}
 				// remove it from buffer
@@ -69,7 +69,7 @@ forPorts:
 		// read new frames
 		for {
 			// read frame
-			frame, err = flowd.ParseFrame(netin)
+			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -86,7 +86,7 @@ forPorts:
 				// send it to output port
 				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
 				frame.Port = "OUT"
-				if err := frame.Marshal(netout); err != nil {
+				if err := frame.Serialize(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 				}
 			} else {

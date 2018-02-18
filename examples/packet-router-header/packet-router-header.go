@@ -200,7 +200,7 @@ func main() {
 nextframe:
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -241,7 +241,7 @@ nextframe:
 					fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
 				}
 				frame.Port = *targetPort
-				if err = frame.Marshal(netout); err != nil {
+				if err = frame.Serialize(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 				}
 				if netin.Buffered() == 0 {

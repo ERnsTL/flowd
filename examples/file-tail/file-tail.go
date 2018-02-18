@@ -78,7 +78,7 @@ func main() {
 		outframe.Body = []byte(line.Text)
 
 		// send it to given output ports
-		if err = outframe.Marshal(netout); err != nil {
+		if err = outframe.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 		}
 		if netin.Buffered() == 0 {

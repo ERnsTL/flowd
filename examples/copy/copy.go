@@ -41,7 +41,7 @@ func main() {
 
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -49,7 +49,7 @@ func main() {
 		// send it to given output ports
 		for _, outPort := range outPorts {
 			frame.Port = outPort
-			if err = frame.Marshal(netout); err != nil {
+			if err = frame.Serialize(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 			}
 		}

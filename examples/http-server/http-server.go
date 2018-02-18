@@ -50,7 +50,7 @@ func main() {
 nextframe:
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(netin)
+		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
 			break
@@ -151,7 +151,7 @@ nextframe:
 			}
 
 			// send to network
-			if err := respFrame.Marshal(netout); err != nil {
+			if err := respFrame.Serialize(netout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP response frame downstream: %v - dropping.\n", connID, err)
 			}
 			if netin.Buffered() == 0 {
@@ -186,7 +186,7 @@ func handleConnection(connID string, client *Client, netin *bufio.Reader, netout
 			fmt.Fprintf(os.Stderr, "%s: ERROR: could not parse HTTP request: %v - closing.\n", connID, err)
 			// request connection be closed
 			closeConnectionCommand.Extensions["conn-id"] = connID
-			closeConnectionCommand.Marshal(netout)
+			closeConnectionCommand.Serialize(netout)
 			// done
 			return
 		}
@@ -204,7 +204,7 @@ func handleConnection(connID string, client *Client, netin *bufio.Reader, netout
 			},
 			Body: body,
 		}
-		if err := reqFrame.Marshal(netout); err != nil {
+		if err := reqFrame.Serialize(netout); err != nil {
 			fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP request frame downstream: %v - dropping.\n", connID, err)
 		}
 		if netin.Buffered() == 0 {

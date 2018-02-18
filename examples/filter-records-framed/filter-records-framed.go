@@ -32,7 +32,7 @@ func main() {
 	defer netout.Flush()
 	for {
 		// read frame
-		inframe, err = flowd.ParseFrame(netin)
+		inframe, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}
@@ -64,6 +64,6 @@ func main() {
 		outframe.Extensions = inframe.Extensions
 
 		// send it
-		outframe.Marshal(netout)
+		outframe.Serialize(netout)
 	}
 }

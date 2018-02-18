@@ -191,7 +191,7 @@ func main() {
 
 		for {
 			// read frame
-			frame, err = flowd.ParseFrame(netin)
+			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			}
@@ -214,7 +214,7 @@ func main() {
 func sendNotification(index int) {
 	// send wake-up frame
 	wakeupFrame.Port = entries[index].outport
-	if err := wakeupFrame.Marshal(netout); err != nil {
+	if err := wakeupFrame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }

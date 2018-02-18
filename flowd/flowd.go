@@ -278,7 +278,7 @@ func startInstance(proc *Process, instances ComponentInstances, exitChan chan st
 		if !quiet {
 			fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
 		}
-		if err = iip.Marshal(cin); err != nil {
+		if err = iip.Serialize(cin); err != nil {
 			fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
 			os.Exit(3)
 		}
@@ -351,7 +351,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 			continue
 		}
 		// forward frame to component
-		if err := frame.Marshal(cin); err != nil {
+		if err := frame.Serialize(cin); err != nil {
 			fmt.Println("net in: WARNING: could not marshal received frame into component STDIN - discarding.")
 		}
 		// save flush if there are already more IPs waiting on the channel, rely on bufio.Writer's autoflush on buffer fill
@@ -365,7 +365,7 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 		// status message
 		if !quiet {
 			// marshal
-			frame.Marshal(countW)
+			frame.Serialize(countW)
 			countW.Flush()
 			// print status
 			if debug {
@@ -402,7 +402,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 	var frame *flowd.Frame
 	var err error
 	for {
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.Deserialize(bufr)
 
 		// check for error
 		if err != nil {
@@ -468,7 +468,7 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		// status message
 		if !quiet {
 			// marshal
-			frame.Marshal(countW)
+			frame.Serialize(countW)
 			countW.Flush()
 			// print status
 			if debug {

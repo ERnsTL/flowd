@@ -113,7 +113,7 @@ func main() {
 
 		for {
 			// read frame
-			frame, err = flowd.ParseFrame(netin)
+			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 			} else if debug {
@@ -143,7 +143,7 @@ func main() {
 						bufcin.Reset(cin)
 					}
 					// write frame
-					if err := frame.Marshal(bufcin); err != nil {
+					if err := frame.Serialize(bufcin); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: marshaling frame to command STDIN:", err, "- Exiting.")
 						os.Exit(3)
 					}
@@ -207,7 +207,7 @@ func startCommand(cmdargs []string) (cmd *exec.Cmd, cin io.WriteCloser, cout io.
 func handleCommandOutput(debug bool, cout io.ReadCloser) {
 	bufr := bufio.NewReader(cout)
 	for {
-		frame, err := flowd.ParseFrame(bufr)
+		frame, err := flowd.Deserialize(bufr)
 		if err != nil {
 			if err == io.EOF {
 				fmt.Fprintln(os.Stderr, "EOF from command stdout. Exiting.")
@@ -225,7 +225,7 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 		// set correct port
 		frame.Port = "OUT"
 		// send into FBP network
-		if err := frame.Marshal(netout); err != nil {
+		if err := frame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
 			os.Stdout.Close()
 			return
@@ -259,7 +259,7 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 
 		// frame command output and send into FBP network
 		frame.Body = buf[0:nbytes]
-		if err := frame.Marshal(netout); err != nil {
+		if err := frame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
 			os.Stdout.Close()
 			return
@@ -272,7 +272,7 @@ func copyFrameBodies(cin io.WriteCloser, bufr *bufio.Reader) {
 	var err error
 	for {
 		// read frame
-		frame, err = flowd.ParseFrame(bufr)
+		frame, err = flowd.Deserialize(bufr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}

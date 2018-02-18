@@ -70,7 +70,7 @@ func main() {
 	// main loop
 	for {
 		// read IP
-		inframe, err = flowd.ParseFrame(netin)
+		inframe, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 		}

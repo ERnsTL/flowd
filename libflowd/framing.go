@@ -52,7 +52,7 @@ var (
 	typeBytes   = []byte{'t', 'y', 'p', 'e'}
 )
 
-// ParseFrame reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
+// Deserialize reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
 /*
 The frame format is that of STOMP v1.2, with the following modifications:
 * content-length header field is renamed length
@@ -68,7 +68,7 @@ The frame format is that of STOMP v1.2, with the following modifications:
 * this format has designation '2' = 0x32
 */
 //TODO want re-use err -> but then have to var-define all other return values -> ugly -> benchmark
-func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
+func Deserialize(stream *bufio.Reader) (f *Frame, err error) {
 	// read version marker
 	version, err := stream.ReadByte()
 	if err != nil {
@@ -83,7 +83,7 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 		// OK, will do it here
 	case '1':
 		// old format
-		return ParseFrameV1(stream)
+		return DeserializeV1(stream)
 	default:
 		// unknown version
 		return nil, errors.New("unknown version marker: " + string(version))
@@ -180,9 +180,9 @@ func ParseFrame(stream *bufio.Reader) (f *Frame, err error) {
 	return f, nil
 }
 
-// ParseFrameV1 parses a frame in v1 format = strict MIME header
+// DeserializeV1 deserializes a frame in v1 format = strict MIME header
 // NOTE: require bufio.Reader not io.Reader, because textproto.Reader requires one. Making a local one would swallow any following frames into it.
-func ParseFrameV1(stream *bufio.Reader) (f *Frame, err error) {
+func DeserializeV1(stream *bufio.Reader) (f *Frame, err error) {
 	// read headers
 	textReader := textproto.NewReader(stream) //TODO To avoid denial of service attacks, the provided bufio.Reader should be reading from an io.LimitReader or similar Reader to bound the size of responses.
 	header, err := textReader.ReadMIMEHeader()
@@ -249,10 +249,10 @@ var (
 	lengthSepBytes = []byte{'l', 'e', 'n', 'g', 't', 'h', ':'}
 )
 
-// Marshal serializes an IP into a data stream, like STDIN into a network process or a network connection
+// Serialize serializes an IP into a data stream, like STDIN into a network process or a network connection
 //TODO optimize: does Go pre-calculate all values like []byte{'2'} ?
 //TODO optimize: is +"\n" efficient?
-func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
+func (f *Frame) Serialize(stream *bufio.Writer) (err error) {
 	// write version marker
 	err = stream.WriteByte('2')
 	if err != nil {
@@ -375,9 +375,9 @@ func (f *Frame) Marshal(stream *bufio.Writer) (err error) {
 	return nil
 }
 
-// MarshalV1 serializes an IP into a data stream in previous format (strict MIME + content-length)
+// SerializeV1 serializes an IP into a data stream in previous format (strict MIME + content-length)
 //TODO avoid allocating buffered writer on every call
-func (f *Frame) MarshalV1(stream *bufio.Writer) error {
+func (f *Frame) SerializeV1(stream *bufio.Writer) error {
 	if f == nil {
 		return errors.New("refusing to marshal nil frame")
 	}

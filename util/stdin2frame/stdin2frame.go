@@ -68,13 +68,13 @@ func main() {
 		}
 		if debug {
 			errout := bufio.NewWriter(os.Stderr)
-			frame.Marshal(errout)
+			frame.Serialize(errout)
 			fmt.Fprintln(os.Stderr) // NOTE: just for nicer output
 		}
 
 		// output
 		netout := bufio.NewWriter(os.Stdout)
-		frame.Marshal(netout)
+		frame.Serialize(netout)
 		if debug {
 			fmt.Fprintln(os.Stderr, "done")
 		}
