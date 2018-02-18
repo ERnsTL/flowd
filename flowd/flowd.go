@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/ERnsTL/flowd/libflowd"
-	"github.com/miolini/datacounter"
 )
 
 const (
@@ -46,6 +46,12 @@ func main() {
 	flag.Parse()
 	if help {
 		printUsage()
+	}
+
+	// consistency of flags
+	if debug && quiet {
+		fmt.Println("ERROR: cannot have both -debug and -quiet")
+		os.Exit(1)
 	}
 
 	// get network definition
@@ -315,21 +321,13 @@ func startInstance(proc *Process, instances ComponentInstances, exitChan chan st
 }
 
 func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Writer) {
-	// use write counter only if !quiet or even debug
-	///TODO re-enable counting functionality
-	/*
-		var countw *datacounter.WriterCounter
-		var cinw io.Writer
-		if !quiet {
-			countw = datacounter.NewWriterCounter(cin)
-			cinw = countw
-		} else {
-			cinw = cin
-		}
-	*/
-	//defer cin.Close()
-	// other initializations
-	//var oldCount uint64
+	// for transferred bytes counting
+	var countBuf *bytes.Buffer
+	var countW *bufio.Writer
+	if !quiet {
+		countBuf = &bytes.Buffer{}
+		countW = bufio.NewWriter(countBuf)
+	}
 	// wait for frame
 	var frame SourceFrame
 	for frame = range input {
@@ -365,15 +363,24 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 			}
 		}
 		// status message
-		/*///TODO re-enable that functionality
-		if debug {
-			fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
-			oldCount = countw.Count()
-		} else if !quiet {
-			fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
-			oldCount = countw.Count()
+		if !quiet {
+			// marshal
+			frame.Marshal(countW)
+			countW.Flush()
+			// print status
+			if debug {
+				//fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
+				//oldCount = countw.Count()
+				fmt.Println("STDIN wrote", countBuf.Len(), "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
+			} else if !quiet {
+				//fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
+				//oldCount = countw.Count()
+				fmt.Println("in xfer", countBuf.Len(), "bytes on", frame.Port, "from", frame.Source.Name)
+			}
+			// clean up
+			countBuf.Reset()
+			countW.Reset(countBuf)
 		}
-		*/
 	}
 
 	// channel got closed -> exit goroutine
@@ -381,10 +388,17 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 }
 
 func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser) {
+	// for transferred bytes counting
+	var countBuf *bytes.Buffer
+	var countW *bufio.Writer
+	if !quiet {
+		countBuf = &bytes.Buffer{}
+		countW = bufio.NewWriter(countBuf)
+	}
+	// make buffered reader
 	defer cout.Close()
-	countr := datacounter.NewReaderCounter(cout)
-	bufr := bufio.NewReader(countr)
-	var oldCount uint64
+	bufr := bufio.NewReader(cout)
+	// wait for frame
 	var frame *flowd.Frame
 	var err error
 	for {
@@ -452,13 +466,22 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		//instancesLock.RUnlock()
 
 		// status message
-		if debug {
-			// NOTE: if accurate byte count was desired, then add -uint64(len(outPort.LocalPort))+uint64(len(outPort.RemotePort))
-			fmt.Println("net out wrote", countr.Count()-oldCount, "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
-		} else if !quiet {
-			fmt.Println("out xfer", countr.Count()-oldCount, "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
+		if !quiet {
+			// marshal
+			frame.Marshal(countW)
+			countW.Flush()
+			// print status
+			if debug {
+				//fmt.Println("net out wrote", countr.Count()-oldCount, "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
+				fmt.Println("net out wrote", countBuf.Len(), "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
+			} else if !quiet {
+				//fmt.Println("out xfer", countr.Count()-oldCount, "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
+				fmt.Println("out xfer", countBuf.Len(), "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
+			}
+			// clean up
+			countBuf.Reset()
+			countW.Reset(countBuf)
 		}
-		oldCount = countr.Count()
 	}
 }
 
