@@ -15,7 +15,7 @@ func exportNetworkGraph(nw *fbp.Fbp) error {
 	out.WriteString("digraph {\n" +
 		"\tnodesep=1.2;\n" +
 		//"\tranksep=1;\n" +
-		"\tconcentrate=true;\n" +
+		"\t//concentrate=true;\n" +
 		"\tedge [labelfontname=\"DejaVu Sans Condensed\",labelfontsize=10,labeldistance=1.5];\n" +
 		"\tnode [fontname=\"DejaVu Sans Condensed\",fontsize=14];\n" +
 		"\tgraph [fontname=\"DejaVu Sans Condensed-Bold\",fontsize=18];\n" +
