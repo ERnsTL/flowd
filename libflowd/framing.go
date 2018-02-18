@@ -11,7 +11,10 @@ import (
 	"strings"
 )
 
-// Frame is a central structure used for carrying information through the processing network
+// IP is one of the central concepts in FBP; realized here as a type alias
+type IP *Frame
+
+// Frame is the serializable structure for carrying information through the processing network
 type Frame struct {
 	Type       string
 	BodyType   string
