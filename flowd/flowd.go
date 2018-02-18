@@ -371,11 +371,11 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 			if debug {
 				//fmt.Println("STDIN wrote", countw.Count()-oldCount, "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
 				//oldCount = countw.Count()
-				fmt.Println("STDIN wrote", countBuf.Len(), "bytes from", frame.Source.Name, "to component stdin of", proc.Name)
+				fmt.Println("in xfer", countBuf.Len(), "bytes from", frame.Source.Name, "into", proc.Name+"."+frame.Port, "with headers", frame.Extensions, "and body:", string(frame.Body))
 			} else if !quiet {
 				//fmt.Println("in xfer", countw.Count()-oldCount, "bytes on", frame.Port, "from", frame.Source.Name)
 				//oldCount = countw.Count()
-				fmt.Println("in xfer", countBuf.Len(), "bytes on", frame.Port, "from", frame.Source.Name)
+				fmt.Println("in xfer", countBuf.Len(), "bytes from", frame.Source.Name, "into", proc.Name+"."+frame.Port)
 			}
 			// clean up
 			countBuf.Reset()
@@ -473,10 +473,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 			// print status
 			if debug {
 				//fmt.Println("net out wrote", countr.Count()-oldCount, "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
-				fmt.Println("net out wrote", countBuf.Len(), "bytes to port", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
+				fmt.Println("out xfer", countBuf.Len(), "bytes from", proc.Name+"."+outPort.LocalPort, "to", outPort.RemoteProc+"."+outPort.RemotePort, "with body:", string(frame.Body))
 			} else if !quiet {
 				//fmt.Println("out xfer", countr.Count()-oldCount, "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
-				fmt.Println("out xfer", countBuf.Len(), "bytes to", outPort.LocalPort, "=", outPort.RemoteProc+"."+outPort.RemotePort)
+				fmt.Println("out xfer", countBuf.Len(), "bytes from", proc.Name+"."+outPort.LocalPort, "to", outPort.RemoteProc+"."+outPort.RemotePort)
 			}
 			// clean up
 			countBuf.Reset()
