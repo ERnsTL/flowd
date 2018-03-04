@@ -37,16 +37,19 @@ var (
 )
 
 func main() {
-	// prepare commonly-used variables
+	// open connection to network
 	netin := bufio.NewReader(os.Stdin)
 	netout := bufio.NewWriter(os.Stdout)
 	defer netout.Flush()
+
+	// prepare commonly-used variables
 	var frame *flowd.Frame
 	var err error
 	var connID string
 	var found bool
 	clients := map[string]*Client{} // key = connection ID
 
+	// main loop
 nextframe:
 	for {
 		// read frame
