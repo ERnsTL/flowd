@@ -45,6 +45,13 @@ func main() {
 		// sleep
 		fmt.Fprintln(os.Stderr, "got frame, delaying...")
 		time.Sleep(delay)
+		// check for closed input port
+		//TODO delayed response to port close is useful when there is a closer on input port, but does this otherwise make sense?
+		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
+			// shut down operations
+			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
+			break
+		}
 		fmt.Fprintln(os.Stderr, "now forwarding.")
 
 		// send it to given output ports
