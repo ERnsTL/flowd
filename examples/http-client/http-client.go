@@ -92,19 +92,19 @@ func main() {
 
 		// package response up into frame
 		respFrame := &flowd.Frame{
-			Port:     "OUT",
-			Type:     "data",
-			BodyType: "HTTPResponse",
-			Extensions: map[string]string{
-				"http-status": strconv.Itoa(resp.StatusCode),
-			},
-			Body: nil,
+			Port:       "OUT",
+			Type:       "data",
+			BodyType:   "HTTPResponse",
+			Extensions: map[string]string{},
+			Body:       nil,
 		}
 		if err != nil {
-			delete(respFrame.Extensions, "http-status")
 			respFrame.Extensions["http-error"] = err.Error()
-		} else if resp.StatusCode != 200 {
-			respFrame.Extensions["http-error"] = resp.Status
+		} else {
+			respFrame.Extensions["http-status"] = strconv.Itoa(resp.StatusCode)
+			if resp.StatusCode != 200 {
+				respFrame.Extensions["http-error"] = resp.Status
+			}
 		}
 		// read response body into frame body
 		if err == nil {
