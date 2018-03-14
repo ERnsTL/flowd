@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
@@ -35,7 +36,7 @@ func main() {
 	*/
 
 	// read program arguments
-	var help, graph, dependencies bool
+	var help, graph, dependencies, printruntime bool
 	var olc string
 	flag.BoolVar(&help, "h", false, "print usage information")
 	flag.BoolVar(&debug, "debug", false, "give detailed event output")
@@ -43,6 +44,7 @@ func main() {
 	flag.StringVar(&olc, "olc", "", "host:port for online configuration using JSON FBP protocol")
 	flag.BoolVar(&graph, "graph", false, "output visualization of given network in GraphViz format and exit")
 	flag.BoolVar(&dependencies, "deps", false, "output required components for given network and exit")
+	flag.BoolVar(&printruntime, "time", false, "output net runtime of network on shutdown")
 	flag.Parse()
 	if help {
 		printUsage()
@@ -138,6 +140,10 @@ func main() {
 	// run while there are still components running
 	//TODO is this practically useful behavior?
 	//for len(instances) > 0 {
+	var begin time.Time
+	if printruntime {
+		begin = time.Now()
+	}
 	instanceCount := len(instances)
 	for instanceCount > 0 {
 		procName := <-exitChan
@@ -209,6 +215,9 @@ func main() {
 	}
 	if !quiet {
 		fmt.Println("INFO: All processes have exited. Exiting.")
+	}
+	if printruntime {
+		fmt.Println(time.Since(begin).String())
 	}
 
 	// detect voluntary network shutdown
