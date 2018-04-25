@@ -397,6 +397,11 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 }
 
 func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser) {
+	// initialize direct pointers to processes on other side of output ports
+	for index, outPort := range proc.OutPorts {
+		// NOTE: changes to outPort here are not visible outside this loop
+		proc.OutPorts[index].RemoteInput = instances[outPort.RemoteProc].Input
+	}
 	// for transferred bytes counting
 	var countBuf *bytes.Buffer
 	var countW *bufio.Writer
@@ -455,24 +460,10 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 		frame.Port = outPort.RemotePort
 
 		// send to input channel of target process
-		//instancesLock.RLock()
-		//instances[outPort.RemoteProc].Input <- SourceFrame{Source: proc, Frame: frame}
-		input := instances[outPort.RemoteProc].Input
-		//instancesLock.RUnlock()
 		if debug {
-			fmt.Printf("net out: send from %s to %s: channel has %d free\n", proc.Name, outPort.RemoteProc, cap(input)-len(input))
+			fmt.Printf("net out: send from %s to %s: channel has %d free\n", proc.Name, outPort.RemoteProc, cap(outPort.RemoteInput)-len(outPort.RemoteInput))
 		}
-		input <- SourceFrame{Source: proc, Frame: frame}
-		/*
-			TODO
-			if instance, found := instances[outPort.RemoteProc]; found {
-				instance.Input <- SourceFrame{Source: proc, Frame: frame}
-			} else {
-				fmt.Printf("ERROR: handleComponentOutput(): Instance %s not found / deleted - exiting.\n", outPort.RemoteProc)
-				os.Exit(2)
-			}
-		*/
-		//instancesLock.RUnlock()
+		outPort.RemoteInput <- SourceFrame{Source: proc, Frame: frame}
 
 		// status message
 		if !quiet {
