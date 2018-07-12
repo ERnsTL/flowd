@@ -78,6 +78,10 @@ func main() {
 		if debug {
 			fmt.Fprintln(os.Stderr, "done")
 		}
+		err := netout.Flush()
+		if debug {
+			checkError(err)
+		}
 	}
 }
 
