@@ -264,6 +264,13 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 			os.Stdout.Close()
 			return
 		}
+
+		// flush
+		if bufr.Buffered() == 0 {
+			if err := netout.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			}
+		}
 	}
 }
 
