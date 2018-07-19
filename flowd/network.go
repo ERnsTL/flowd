@@ -22,6 +22,7 @@ type Process struct {
 	InPorts  []Port
 	OutPorts []Port
 	IIPs     []IIP
+	Instance *ComponentInstance
 }
 
 // IIP holds information about an IIP to be delivered
