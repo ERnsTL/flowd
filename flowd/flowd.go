@@ -503,7 +503,8 @@ func printUsage() {
 
 // ComponentInstances is the collection type for holding the ComponentInstance list
 //TODO optimize: small optimization; instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
-type ComponentInstances map[string]*ComponentInstance
+//TODO use ^ for procs map (type Network)
+//type ComponentInstances map[string]*ComponentInstance
 
 // ComponentInstance contains state about a running network process
 type ComponentInstance struct {
