@@ -1,57 +1,49 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
 	// flag variables
 	var filePaths []string
-	var debug, quiet, brackets bool
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("file-read", flag.ContinueOnError)
-		flags.BoolVar(&brackets, "brackets", false, "enclose each file in brackets")
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		if flags.NArg() == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: missing filepath(s) to read")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		filePaths = flags.Args()
+	var brackets bool
+	// get configuration from flags = Unix IIP (which can be generated out of another FIFO or similar)
+	unixfbp.DefFlags()
+	flag.BoolVar(&brackets, "brackets", false, "enclose each file in brackets")
+	flag.Parse()
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing filepath(s) to read")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
 	}
-	if !quiet {
+	filePaths = flag.Args()
+	if !unixfbp.Quiet {
 		fmt.Fprintf(os.Stderr, "starting up, got %d filepaths\n", len(filePaths))
 	}
+	// open network connections
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+	//defer netoutFile.Close()
 
 	// prepare variables
-	outframe := &flowd.Frame{ //TODO why is this pointer to Frame?
+	outframe := &flowd.Frame{
 		Type:     "data",
 		BodyType: "FileChunk",
-		Port:     "OUT",
+		//Port:     "OUT",
 	}
 	var obracket, cbracket flowd.Frame
 	var n int
@@ -89,7 +81,7 @@ func main() {
 				// done with this file
 				break
 			}
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintf(os.Stderr, "file %d: read %d bytes\n", i+1, n)
 			}
 
@@ -99,6 +91,7 @@ func main() {
 			// send it to output port
 			if err = outframe.Serialize(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+				break
 			}
 		}
 
@@ -114,13 +107,13 @@ func main() {
 		}
 
 		// report
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "completed file %d of %d\n", i+1, len(filePaths))
 		}
 	}
 
 	// report
-	if debug {
+	if unixfbp.Debug {
 		fmt.Fprintln(os.Stderr, "completed all")
 	}
 }

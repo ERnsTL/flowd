@@ -9,51 +9,31 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
 
 var (
-	debug, quiet bool          //TODO is that a good idea? concurrent variable access? performance?
-	netout       *bufio.Writer //TODO is that safe for concurrent use?
+	netout *bufio.Writer //TODO is that safe for concurrent use?
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", netin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	}
-	// parse IIP
-	flags := flag.NewFlagSet("unix-server", flag.ContinueOnError)
+	// get configuration from arguments = Unix IIP
 	var bridge bool
 	var maxconn int
-	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
-	flags.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
-	flags.BoolVar(&debug, "debug", false, "give detailed event output")
-	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
-		printUsage()
-		flags.PrintDefaults() // prints to STDERR
-		os.Exit(2)
-	}
-	if flags.NArg() != 1 {
+	unixfbp.DefFlags()
+	flag.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
+	flag.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
+	flag.Parse()
+	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
-
 	//TODO implement
 	if bridge {
 		fmt.Fprintln(os.Stderr, "ERROR: flag -bridge currently unimplemented - exiting.")
@@ -65,17 +45,48 @@ func main() {
 		os.Exit(2)
 	}
 
+	// connect to FBP network
+	var err error
+	netout, _, err = unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+
 	// parse listen address as URL
 	// NOTE: no double slashes after semicolon, otherwise what is given after that
 	// gets put into .Host and .Path and @ (for abstract sockets) cannot be recognized
-	listenURL, err := url.ParseRequestURI(flags.Args()[0])
+	listenURL, err := url.ParseRequestURI(flag.Args()[0])
 	checkError(err)
 	listenNetwork := listenURL.Scheme
-	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
-	listenPath := listenURL.Opaque
+	if unixfbp.Debug {
+		fmt.Fprintf(os.Stderr, "Parsed URL: Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+	}
+	var listenPath string
+	if listenURL.Opaque != "" {
+		// for abstract socket address, starting with @
+		listenPath = listenURL.Opaque
+	} else if listenURL.Path != "" {
+		// for regular filesystem-based address
+		listenPath = listenURL.Path
+		// clean up any leftover socket file
+		os.Remove(listenPath)
+	} else {
+		fmt.Fprintf(os.Stderr, "ERROR: no server address found: given URL contains: Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
+		os.Exit(2)
+	}
 	if listenNetwork == "unixgram" {
-		fmt.Fprintln(os.Stderr, "ERROR: network 'unixgram' unimplemented, refer to unixgram-server component - Exiting.") //TODO implement that
+		fmt.Fprintln(os.Stderr, "ERROR: network 'unixgram' currently unimplemented - exiting.") //TODO implement that
 		os.Exit(1)
+	}
+	if !unixfbp.Quiet {
+		fmt.Fprintln(os.Stderr, "server address is", listenPath, "in network", listenNetwork)
 	}
 
 	// list of established connections
@@ -92,7 +103,7 @@ func main() {
 
 	// pre-declare often-used IPs/frames
 	closeNotification := flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
 		BodyType: "CloseNotification",
 		Extensions: map[string]string{
@@ -107,7 +118,7 @@ func main() {
 	conn-id header is relevant.
 	*/
 	openNotification := flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "OpenNotification",
 		Extensions: map[string]string{
@@ -116,27 +127,27 @@ func main() {
 		},
 	}
 
-	// handle responses from STDIN = from FBP network to UNIX sockets
+	// handle responses from FBP network to UNIX sockets
 	go func(stdin *bufio.Reader) {
 		// handle regular packets
 		for {
 			frame, err := flowd.Deserialize(netin)
 			if err != nil {
 				if err == io.EOF {
-					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
+					fmt.Fprintln(os.Stderr, "EOF from FBP network. Exiting.")
 				} else {
-					fmt.Fprintln(os.Stderr, "ERROR parsing frame from FBP network on STDIN:", err, "- Exiting.")
+					fmt.Fprintln(os.Stderr, "ERROR parsing frame from FBP network:", err, "- Exiting.")
 					//TODO notification feedback into FBP network
 				}
-				os.Stdin.Close()
+				os.Stdin.Close() //FIXME close FIFO
 				//TODO gracefully shut down / close all connections
 				os.Exit(0) // TODO exit with non-zero code if error parsing frame
 				return
 			}
 
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
-			} else if !quiet {
+			} else if !unixfbp.Quiet {
 				fmt.Fprintln(os.Stderr, "frame in with", len(frame.Body), "bytes body")
 			}
 
@@ -252,7 +263,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
+	fmt.Fprintln(os.Stderr, "Argument: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
 }
 
 func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
@@ -261,7 +272,7 @@ func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
 	outframe := flowd.Frame{
 		Type:     "data",
 		BodyType: "UNIXPacket",
-		Port:     "OUT",
+		//Port:     "OUT",
 		//ContentType: "application/octet-stream",
 		Extensions: map[string]string{"conn-id": strconv.Itoa(id)}, // NOTE: only on OpenNotification is the "remote-address" header field set
 		Body:       nil,
@@ -299,15 +310,16 @@ func handleConnection(conn *net.UnixConn, id int, closeChan chan int) {
 			// exit
 			return
 		}
-		//TODO if debug - add flag
-		//fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s: %s\n", id, bytesRead, conn.RemoteAddr(), buf[:bytesRead])
-		//TODO if !quiet - add flag
-		fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s\n", id, bytesRead, conn.RemoteAddr())
+		if unixfbp.Debug {
+			fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s: %s\n", id, bytesRead, conn.RemoteAddr(), buf[:bytesRead])
+		} else if !unixfbp.Quiet {
+			fmt.Fprintf(os.Stderr, "%d: read %d bytes from %s\n", id, bytesRead, conn.RemoteAddr())
+		}
 
 		// frame UNIX packet into flowd frame
 		outframe.Body = buf[:bytesRead]
 
-		// send it to STDOUT = FBP network
+		// send it to FBP network
 		outframe.Serialize(netout)
 		// flush buffers = send frames
 		if err := netout.Flush(); err != nil {

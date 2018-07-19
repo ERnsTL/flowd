@@ -2,43 +2,65 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
+type PortHandle struct {
+	//Name string
+	Writer *bufio.Writer
+	Pipe   *os.File
+}
+
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// read list of output ports from program arguments
-	outPorts := os.Args[1:]
-	if len(outPorts) == 0 {
-		/*
-			fmt.Println("ERROR: no output port names given")
-			os.Exit(1)
-		*/
-		// get configuration from IIP = initial information packet/frame
-		fmt.Fprintln(os.Stderr, "wait for IIP")
-		if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-			os.Exit(1)
-		} else {
-			outPorts = strings.Split(iip, ",")
-			if len(outPorts) == 0 {
-				fmt.Fprintln(os.Stderr, "ERROR: no output ports names given in IIP, format is [port],[port],[port]...")
-				os.Exit(1)
-			}
-		}
+	// flag variables
+	var brackets, control bool
+	var packets, size bool
+	var packetsPerFieldValue string
+	// get configuration from flags
+	unixfbp.DefFlags()
+	flag.BoolVar(&brackets, "brackets", false, "expect bracketed input streams")
+	flag.BoolVar(&control, "control", false, "count control packets as well")
+	flag.BoolVar(&size, "size", false, "count size of packet bodies")
+	flag.BoolVar(&packets, "packets", false, "count number of packets")
+	flag.StringVar(&packetsPerFieldValue, "packetsperfieldvalue", "", "count number of packets per value of given header field")
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments given")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
 	}
-	fmt.Fprintln(os.Stderr, "got output ports", outPorts)
-
-	var frame *flowd.Frame //TODO why is this pointer to Frame?
+	if len(unixfbp.OutPorts) == 0 {
+		fmt.Println("ERROR: no output ports given")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	// connect to the network
 	var err error
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	// NOTE: is backed by an array internally for small number of entries
+	for portName, outPort := range unixfbp.OutPorts {
+		_, _, err = unixfbp.OpenOutPort(portName)
+		if err != nil {
+			fmt.Println("ERROR:", err)
+			os.Exit(2)
+		}
+		defer outPort.Writer.Flush()
+	}
+	if !unixfbp.Quiet {
+		fmt.Fprintln(os.Stderr, "got output ports", unixfbp.OutPorts)
+	}
 
+	// main loop
+	var frame *flowd.Frame
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
@@ -47,15 +69,17 @@ func main() {
 		}
 
 		// send it to given output ports
-		for _, outPort := range outPorts {
-			frame.Port = outPort
-			if err = frame.Serialize(netout); err != nil {
+		for _, outPort := range unixfbp.OutPorts {
+			//frame.Port = outPort
+			if err = frame.Serialize(outPort.Writer); err != nil {
+				//TODO handle EOF gracefully = remove from list of ouptorts and continue as usual; if len(outports) == 0 then break
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 			}
-		}
-		// send it now (flush)
-		if err = netout.Flush(); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			// send it now (flush)
+			//TODO optimize; only flush if no packets waiting on input
+			if err = outPort.Writer.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			}
 		}
 	}
 }

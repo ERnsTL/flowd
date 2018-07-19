@@ -1,34 +1,42 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	//TODO seems unnecessary
-	//netout := bufio.NewWriter(os.Stdout)
-	//defer netout.Flush()
+	// get configuration from argemunts = Unix IIP
+	unixfbp.DefFlags()
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s)")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	// checks
+	if len(unixfbp.OutPorts) > 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: only one input port supported at the moment")
+		os.Exit(2)
+	}
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 
-	var frame *flowd.Frame
-	var err error
-
+	// main loop
 	for {
 		// read frame
-		frame, err = flowd.Deserialize(netin)
+		_, err = flowd.Deserialize(netin)
 		if err != nil {
+			//TODO check for EOF
 			fmt.Fprintln(os.Stderr, err)
-		}
-
-		// check for closed input port
-		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
-			// shut down operations
-			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
 			break
 		}
 

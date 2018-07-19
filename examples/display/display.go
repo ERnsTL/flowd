@@ -2,53 +2,62 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 func main() {
+	// check arguments
+	//TODO
+	// 1st argument = FIFO path
+	inPipePath := os.Args[1]
+	// open FIFOs
+	inPipe, err := os.OpenFile(inPipePath, os.O_RDONLY, os.ModeNamedPipe)
+	if err != nil {
+		panic(err)
+	}
 	// open connection to network and display output
-	netin := bufio.NewReader(os.Stdin)
+	netin := bufio.NewReader(inPipe)
 	errout := bufio.NewWriter(os.Stderr)
 	defer errout.Flush()
 
 	// main loop
 	var frame *flowd.Frame
-	var err error
-
+	//newline := []byte{'\n'}
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				break
+			}
 			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")
-			break
-		}
-
-		// check for closed input port
-		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
-			// shut down operations
-			fmt.Fprintln(errout, "received port close notification - exiting.")
 			break
 		}
 
 		// display frame body
 		if frame.Body != nil {
+			errout.Write(frame.Body)
+			//os.Stdout.Write(frame.Body)
 			// output newline only if needed
-			if bytes.HasSuffix(frame.Body, []byte{byte('\n')}) {
-				fmt.Fprint(errout, string(frame.Body))
-			} else {
-				fmt.Fprintln(errout, string(frame.Body))
+			if frame.Body[len(frame.Body)-1] != '\n' {
+				errout.WriteByte('\n')
+				//os.Stdout.Write(newline)
 			}
 		} else {
-			fmt.Fprintln(errout, "<nil>")
+			errout.WriteString("<nil>")
+			//os.Stdout.Write([]byte("<nil>"))
 		}
-		if netin.Buffered() == 0 {
-			if err = errout.Flush(); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: flushing errout:", err)
+		/*
+			if netin.Buffered() == 0 {
+				if err = errout.Flush(); err != nil {
+					fmt.Fprintln(os.Stderr, "ERROR: flushing errout:", err)
+				}
 			}
-		}
+		*/
 	}
 }

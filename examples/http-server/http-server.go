@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
@@ -27,41 +29,89 @@ type Client struct {
 var (
 	// prepared frame
 	closeConnectionCommand = &flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "CloseConnection",
 		Extensions: map[string]string{
 			"conn-id": "",
 		},
 	}
+	netin *bufio.Reader // NOTE: not for concurrent use, but only for buffer checking
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
+	// get configuration from arguments = Unix IIP
+	unixfbp.DefFlags()
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered")
+		flag.PrintDefaults()
+		os.Exit(2)
+	}
+
+	// connect to FBP network
+	var err error
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
-	// prepare commonly-used variables
+	// prepare variables
 	var frame *flowd.Frame
-	var err error
 	var connID string
 	var found bool
 	clients := map[string]*Client{} // key = connection ID
+	inChan := make(chan *flowd.Frame, 5)
+	respChan := make(chan *flowd.Frame, 5)
+
+	// start input port handlers
+	go func() {
+		// open port IN
+		netin, _, err = unixfbp.OpenInPort("IN")
+		if err != nil {
+			fmt.Println("ERROR:", err)
+			os.Exit(2)
+		}
+
+		for {
+			// read frame
+			frame, err = flowd.Deserialize(netin)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
+				break
+			}
+			// send to main loop
+			inChan <- frame
+		}
+	}()
+	go func() {
+		// open port RESP
+		netresp, _, err := unixfbp.OpenInPort("RESP")
+		if err != nil {
+			fmt.Println("ERROR:", err)
+			os.Exit(2)
+
+		}
+
+		for {
+			// read frame
+			frame, err = flowd.Deserialize(netresp)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
+				break
+			}
+			// send to main loop
+			respChan <- frame
+		}
+	}()
 
 	// main loop
 nextframe:
 	for {
-		// read frame
-		frame, err = flowd.Deserialize(netin)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
-			break
-		}
-
-		// NOTE: demux could also be done over just IN port depending on BodyType
-		switch frame.Port {
-		case "IN": // IP from network to be sent to HTTP router and/or handlers
+		select {
+		case frame = <-inChan: // IP from network to be sent to HTTP router and/or handlers
 			// get connection ID
 			//id = frame.Extensions["conn-id"]
 			if connID, found = frame.Extensions["conn-id"]; !found {
@@ -82,7 +132,7 @@ nextframe:
 					close: make(chan struct{}, 0),
 				}
 				// handle request
-				go handleConnection(connID, clients[connID], netin, netout)
+				go handleConnection(connID, clients[connID], netout)
 			} else if frame.BodyType == "CloseNotification" {
 				fmt.Fprintf(os.Stderr, "%s: got close notification, removing.\n", connID)
 				// send notification to handler goroutine
@@ -94,7 +144,7 @@ nextframe:
 				fmt.Fprintf(os.Stderr, "%s: got request chunk, feeding to HTTP request parser.\n", connID)
 				clients[connID].pipew.Write(frame.Body)
 			}
-		case "RESP": // IP from a handler to be sent back to network
+		case frame = <-respChan: // IP from a handler to be sent back to network
 			// get connection ID
 			//TODO change to use req-id and translate req-id -> conn-id
 			if connID, found = frame.Extensions["conn-id"]; !found {
@@ -144,7 +194,7 @@ nextframe:
 
 			// package up into frame
 			respFrame := &flowd.Frame{
-				Port:     "RESP",
+				//Port:     "RESP",
 				Type:     "data",
 				BodyType: "HTTPResponse",
 				Extensions: map[string]string{
@@ -171,7 +221,7 @@ nextframe:
 	}
 }
 
-func handleConnection(connID string, client *Client, netin *bufio.Reader, netout *bufio.Writer) {
+func handleConnection(connID string, client *Client, netout *bufio.Writer) {
 	// read HTTP request from series of frames
 	var req *http.Request
 	var err error
@@ -198,7 +248,7 @@ func handleConnection(connID string, client *Client, netin *bufio.Reader, netout
 		body, _ := ioutil.ReadAll(req.Body)
 		fmt.Fprintf(os.Stderr, "%s: request body complete\n", connID)
 		reqFrame := &flowd.Frame{
-			Port:     "OUT",
+			//Port:     "OUT",
 			Type:     "data",
 			BodyType: "HTTPRequest",
 			Extensions: map[string]string{

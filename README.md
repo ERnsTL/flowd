@@ -316,3 +316,77 @@ After the change:
 * The responsibility and code for building and maintaining a network will allow for easier network reconfiguration in the future.
 * Less copying as delivery of IPs between components is now done inside ```flowd``` using Go channels.
 * Much higher performance.
+
+
+### UnixFBP concept
+
+* IPC type resp. transport medium:
+  * named pipes resp. FIFOs
+  * components communicate directly without passing through a daemon
+  * only one serialization and one deserialization needed for a graph edge transition instead of two and two
+* graph definition language:
+  * shell script -- has problems:
+  * these become large even for simple applications
+  * every program is started in a subshell -- huge waste
+  * much of the surrounding functionality is duplicated for each application shell script
+  * need a generator some sort -- or a *flowd* again, which only starts and stops the network
+  * a concise declarative language to define networks (.fbp data format) would be useful
+  * **Result**: adapt *flowd* to named pipes and convert IIPs to ARGV port to component arguments
+* start and stop method:
+  * using PIDs; KILL -> components can shut down in order as defined by start and stop action
+* resume (checkpointing):
+  * just keep the named pipes as they are and start again
+  * drain all named pipes and save to files, then fill them again on resume
+* monitoring, tracing:
+  * using regular unix tools (strace, stat on named pipe files and file descriptors, lsof)
+  * tracing using custom format
+  * syscallx.Tee() which acts like tee = copies pipe contents without draining it -> pull copy
+* component metadata:
+  * file system extended attributes on the named pipe files
+  * list of components: ls bin/
+  * list of connections: ls fifos/
+* network testing:
+  * insert data: echo testdata > fifo
+* distributed operation, extending the processing network over LAN/WAN:
+  * share the FIFO, which is a file, over a network file system like NFS, sshfs, 9P etc.
+  * use a "network pipe" like ssh, netcat, socat etc.
+  * [several solutions](https://unix.stackexchange.com/questions/151056/how-can-i-pipe-data-over-network-or-serial-to-the-display-of-another-linux-machi#151058)
+  * more options for this when using FIFO than unix socket
+
+Design decisions (can be revised if other solutions prove to be better):
+
+* Packet transport medium:
+  * named pipe aka FIFO
+    * file-based
+    * file operations are implemented everywhere and in all programming languages
+    * optimization possibility using splice system call (Linux) = direct fd-to-fd copy in kernel space
+    * multi-writer support is limited by atomic message size, see POSIX PIPE_BUF; 4096 in Linux; 512 in other implementations; this might be a limitation of FIFOs as the transport medium
+    * multi-reader support would be possible if messages were of the same size
+    * can start writer before reader is there -- open(3) will block until other end is there; FIFO is a connection no matter what even with O_NONBLOCK, not a mailbox
+    * faster than unix sockets for message sizes smallen than 64K ([source](https://github.com/avsm/ipc-bench))
+    * connection handling logic is much simpler than any type of socket
+  * Unix sockets
+    * also widely implemented and available in most programming languages
+    * server needs to be up before client can connect (perfect ordering or retries required -> cannot start network in parallel)
+    * bidirectional, but not required in FBP (except for ACKs maybe) -- would be best choice for actor system
+    * message / datagram semantics -- SEQPACKET mode would be best = connection-oriented (can detect other side disconnecting) and message-oriented
+  * shared memory / memory mapping / mmap:
+    * would be fastest, but not possible due to integration of different programming languages (which align their data differently, have different data types, have their own GC etc.)
+    * chunking size / granularity can be decided based on performance requirements by developer anyway
+    * the exact way of how to "do shared memory" needs to be agreed upon for all programs; it's complex and needs to be done carefully
+    * not possible in all programming languages
+  * POSIX message queues
+    * not file-based nor socket-based
+    * not widely implemented in programming languages
+    * Golang: syscallx.Syscall() and call msgsend() and msgrecv())
+    * message / datagram semantics (reduce need for framing format)
+* One-inport style or dedicated FIFOs per in-/outport?
+  * one-FIFO style: can easily add a port since all packets are coming in over this anyway
+  * dedicated: FIFO close = port close -> no need for a PortClosed notification via IP
+  * one-FIFO style: easier to hit the multiple-writer limitation
+  * Result: use a dedicated pipe per port
+* Use IIPs for parametrization or Unix argv program parameters?
+  * IIPs = within the FBP framework; can be generated from another component
+  * OTOH, the program parameters can also be read from a FIFO, the contents of which could be generated a program resp. component
+  * and reading from an IIP via a CONF inport or a file can be added on anyway
+  * Result: either way is generally fine, but with the exception of online/runtime reconfiguration, parametrization is mostly done only once and the most efficient way is program arguments

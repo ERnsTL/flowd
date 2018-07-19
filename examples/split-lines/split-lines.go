@@ -2,25 +2,41 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
-	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
-const delayDuration = 1 * time.Millisecond
-
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
+	// get configuration from flags = Unix IIP (which can be generated out of another FIFO or similar)
+	unixfbp.DefFlags()
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) found")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	// open network connections
+	var err error
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
 	// prepare variables
 	var frame *flowd.Frame //TODO why is this pointer to Frame?
-	var err error
+	//var err error
 	scannerDone := make(chan struct{})
 	piper, pipew := io.Pipe()
 
@@ -43,6 +59,7 @@ func main() {
 			// send it to FBP network
 			if err = outframe.Serialize(netout); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+				os.Exit(1)
 			}
 		}
 
@@ -59,14 +76,24 @@ func main() {
 	}()
 
 	// read data from FBP network, hand it over to scanner buffer
+	if !unixfbp.Quiet {
+		fmt.Println("splitting")
+	}
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Println("EOF on input - finishing up.")
+				pipew.Close()
+				break
+			}
 			fmt.Fprintln(os.Stderr, err)
+			break
 		}
 
 		// check for closed input port
+		//TODO not neccessary any more
 		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
 			// shut down operations
 			fmt.Fprintln(os.Stderr, "input port closed - finishing up.")
@@ -88,6 +115,7 @@ func main() {
 				frame.Port = "OUT"
 				if err = frame.Serialize(netout); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+					os.Exit(1)
 				}
 			}
 		} else {

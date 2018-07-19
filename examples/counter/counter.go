@@ -4,15 +4,15 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 var (
-	debug, quiet bool
 	// prepared frame
 	countFrame = &flowd.Frame{
 		Type:     "data",
@@ -23,54 +23,54 @@ var (
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
 	// flag variables
 	var brackets, control bool
 	var packets, size bool
 	var packetsPerFieldValue string
-
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("counter", flag.ContinueOnError)
-		flags.BoolVar(&brackets, "brackets", false, "expect bracketed input streams")
-		flags.BoolVar(&control, "control", false, "count control packets as well")
-		flags.BoolVar(&size, "size", false, "count size of packet bodies")
-		flags.BoolVar(&packets, "packets", false, "count number of packets")
-		flags.StringVar(&packetsPerFieldValue, "packetsperfieldvalue", "", "count number of packets per value of given header field")
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		if flags.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments given")
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		countersGiven := 0
-		if size {
-			countersGiven++
-		}
-		if packets {
-			countersGiven++
-		}
-		if packetsPerFieldValue != "" {
-			countersGiven++
-		}
-		if countersGiven != 1 {
-			fmt.Fprintln(os.Stderr, "ERROR: either -size, -packets or -packetsperfieldvalue expected - unable to proceed")
-			//TODO add this printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
+	// get configuration from flags
+	unixfbp.DefFlags()
+	flag.BoolVar(&brackets, "brackets", false, "expect bracketed input streams")
+	flag.BoolVar(&control, "control", false, "count control packets as well")
+	flag.BoolVar(&size, "size", false, "count size of packet bodies")
+	flag.BoolVar(&packets, "packets", false, "count number of packets")
+	flag.StringVar(&packetsPerFieldValue, "packetsperfieldvalue", "", "count number of packets per value of given header field")
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments given")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	countersGiven := 0
+	if size {
+		countersGiven++
+	}
+	if packets {
+		countersGiven++
+	}
+	if packetsPerFieldValue != "" {
+		countersGiven++
+	}
+	if countersGiven != 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: either -size, -packets or -packetsperfieldvalue expected - unable to proceed")
+		//TODO add this printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	// connect to the network
+	var err error
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err = unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+	if !unixfbp.Quiet {
+		fmt.Println("counting")
 	}
 
 	// prepare according counter
@@ -89,14 +89,19 @@ func main() {
 		os.Exit(2)
 	}
 
+	// main loop
 	var frame *flowd.Frame
-	var err error
-
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Println("got EOF - finishing up.")
+				counter.Report()
+				return
+			}
 			fmt.Fprintln(os.Stderr, err)
+			break
 		}
 
 		// handle control frames
@@ -127,14 +132,14 @@ func main() {
 			// check for special requests
 			if frame.Port == "RESET" {
 				// reset counts
-				if !quiet {
+				if !unixfbp.Quiet {
 					fmt.Fprintln(os.Stderr, "resetting count as requested")
 				}
 				counter.Reset()
 				continue
 			} else if frame.Port == "REPORT" {
 				// report current count value
-				if !quiet {
+				if !unixfbp.Quiet {
 					fmt.Fprintln(os.Stderr, "reporting count as requested")
 				}
 				counter.Report()
@@ -161,14 +166,14 @@ type packetCounter struct {
 
 func (c *packetCounter) Count(frame *flowd.Frame) {
 	c.packetCount++
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "increased packet count to", c.packetCount)
 	}
 }
 
 func (c *packetCounter) Report() {
 	// fill count frame
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "sending packet count of", c.packetCount)
 	}
 	countFrame.Body = []byte(strconv.Itoa(c.packetCount))
@@ -188,14 +193,14 @@ type sizeCounter struct {
 
 func (c *sizeCounter) Count(frame *flowd.Frame) {
 	c.totalSize += len(frame.Body)
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "increased total packet size to", c.totalSize)
 	}
 }
 
 func (c *sizeCounter) Report() {
 	// fill count frame
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "sending total size of", c.totalSize)
 	}
 	countFrame.Body = []byte(strconv.Itoa(c.totalSize))
@@ -224,29 +229,29 @@ func (c *packetsPerFieldValueCounter) Count(frame *flowd.Frame) {
 				// make new entry with initial value
 				c.countsPerFieldValue[valueInFrame] = 1
 			}
-			if !quiet {
+			if !unixfbp.Quiet {
 				fmt.Fprintf(os.Stderr, "increased packet count for %s=%s to %d\n", c.Field, valueInFrame, c.countsPerFieldValue[valueInFrame])
 			}
 		} else {
 			// given field not found in frame, nothing to count
-			if !quiet {
+			if !unixfbp.Quiet {
 				fmt.Fprintln(os.Stderr, c.Field, "not found, count unchanged")
 			}
 		}
 	} else {
 		// no extensions found, nothing to count
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintln(os.Stderr, c.Field, "not found, count unchanged")
 		}
 	}
 }
 
 func (c *packetsPerFieldValueCounter) Report() {
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "sending packet counts per values of field", c.Field)
 	}
 	for fieldValue, count := range c.countsPerFieldValue {
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "\t%s=%s appeared %d times\n", c.Field, fieldValue, count)
 		}
 		// fill count frame

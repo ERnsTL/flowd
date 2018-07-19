@@ -8,59 +8,54 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
 
-	flowd "github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
+	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
 
 var (
-	debug, quiet bool
-	netout       *bufio.Writer //TODO is that safe for concurrent use in this case here? restructure handleConnection!
+	netout *bufio.Writer //TODO is that safe for concurrent use in this case here? restructure handleConnection!
 )
 
 func main() {
-	// open connection to FBP network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", netin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
-		os.Exit(1)
-	}
-	// parse IIP
-	flags := flag.NewFlagSet("unix-client", flag.ContinueOnError)
+	// get configuration from arguments = Unix IIP
 	var retry, bridge bool
-	flags.BoolVar(&bridge, "bridge", true, "bridge mode, true = forward frames from/to FBP network, false = send frame body over TCP, frame data from TCP")
-	flags.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
-	flags.BoolVar(&debug, "debug", false, "give detailed event output")
-	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
-		printUsage()
-		flags.PrintDefaults() // prints to STDERR
-		os.Exit(2)
-	}
-	if flags.NArg() != 1 {
+	unixfbp.DefFlags()
+	flag.BoolVar(&bridge, "bridge", true, "bridge mode, true = forward frames from/to FBP network, false = send frame body over TCP, frame data from TCP")
+	flag.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
+	flag.Parse()
+	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
-
 	//TODO implement
 	if retry {
 		fmt.Fprintln(os.Stderr, "ERROR: flag -retry currently unimplemented - exiting.")
 		os.Exit(2)
 	}
 
+	// connect to FBP network
+	var err error
+	netout, _, err = unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+
 	// parse remote address as URL
 	// NOTE: no double slashes after semicolon, otherwise what is given after that
 	// gets put into .Host and .Path and @ (for abstract sockets) cannot be recognized
-	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
+	remoteURL, err := url.ParseRequestURI(flag.Args()[0])
 	checkError(err)
 	remoteNetwork := remoteURL.Scheme
 	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
@@ -86,13 +81,13 @@ func main() {
 	if bridge {
 		// set up bi-directional copy
 		fmt.Fprintln(os.Stderr, "starting bridge...")
-		// copy STDIN to network connection
+		// copy ingoing FIFO to network connection
 		go func() {
 			up <- true
 			io.Copy(conn, netin)
 			done <- true
 		}()
-		// copy network connection to STDOUT
+		// copy network connection to outgoing FIFO
 		go func() {
 			up <- true
 			io.Copy(netout, conn)
@@ -118,9 +113,9 @@ func main() {
 				frame, err := flowd.Deserialize(netin)
 				if err != nil {
 					if err == io.EOF {
-						fmt.Fprintln(os.Stderr, "unix out: EOF from FBP network on STDIN. Exiting.")
+						fmt.Fprintln(os.Stderr, "unix out: EOF from FBP network. Exiting.")
 					} else {
-						fmt.Fprintln(os.Stderr, "unix out: ERROR parsing frame from FBP network on STDIN:", err, "- Exiting.")
+						fmt.Fprintln(os.Stderr, "unix out: ERROR parsing frame from FBP network:", err, "- Exiting.")
 						//TODO notification feedback into FBP network
 					}
 					os.Stdin.Close()
@@ -129,9 +124,9 @@ func main() {
 					return
 				}
 
-				if debug {
+				if unixfbp.Debug {
 					fmt.Fprintln(os.Stderr, "unix out: received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
-				} else if !quiet {
+				} else if !unixfbp.Quiet {
 					fmt.Fprintln(os.Stderr, "unix out: frame in with", len(frame.Body), "bytes body")
 				}
 
@@ -152,7 +147,7 @@ func main() {
 					os.Exit(1)
 				} else {
 					// success
-					if !quiet {
+					if !unixfbp.Quiet {
 						fmt.Fprintf(os.Stderr, "unix out: wrote %d bytes to %s\n", bytesWritten, conn.RemoteAddr())
 					}
 				}
@@ -185,7 +180,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
+	fmt.Fprintln(os.Stderr, "Arguments: [flags] [unix|unixpacket|unixgram]:[@][path|name]")
 }
 
 //TODO pretty much 1:1 copy from unix-server handleConnection() -> reuse?
@@ -193,9 +188,9 @@ func handleConnection(conn *net.UnixConn, closeChan chan bool) {
 	// prepare data structures
 	buf := make([]byte, bufSize)
 	outframe := flowd.Frame{
-		Type:       "data",
-		BodyType:   "UNIXPacket",
-		Port:       "OUT",
+		Type:     "data",
+		BodyType: "UNIXPacket",
+		//Port:       "OUT",
 		Extensions: nil,
 		Body:       nil,
 	}
@@ -222,9 +217,9 @@ func handleConnection(conn *net.UnixConn, closeChan chan bool) {
 			return
 		}
 
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "unix in: read %d bytes from %s: %s\n", bytesRead, conn.RemoteAddr(), buf[:bytesRead])
-		} else if !quiet {
+		} else if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "unix in: read %d bytes from %s\n", bytesRead, conn.RemoteAddr())
 		}
 

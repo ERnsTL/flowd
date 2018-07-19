@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/signalsciences/tlstext"
 )
@@ -19,43 +20,38 @@ import (
 const bufSize = 65536
 
 var (
-	debug, quiet bool          //TODO is that a good idea performance-wise?
-	netout       *bufio.Writer //TODO is that safe for concurrent use?
+	netout *bufio.Writer //TODO is that safe for concurrent use?
 )
 
 func main() {
-	// open connection to FBP network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", netin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	}
-	// parse IIP
-	flags := flag.NewFlagSet("tls-server", flag.ContinueOnError)
+	// get configuration from arguments = Unix IIP
 	var bridge bool
 	var maxconn int
 	var certPath, keyPath string
-	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
-	flags.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
-	flags.StringVar(&certPath, "cert", "./cert.pem", "server certificate path in PEM format")
-	flags.StringVar(&keyPath, "key", "./key.pem", "server key path in PEM format")
-	flags.BoolVar(&debug, "debug", false, "give detailed event output")
-	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
-		printUsage()
-		flags.PrintDefaults() // prints to STDERR
-		os.Exit(2)
-	}
-	if flags.NArg() != 1 {
+	unixfbp.DefFlags()
+	flag.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over socket, frame data from socket")
+	flag.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
+	flag.StringVar(&certPath, "cert", "./cert.pem", "server certificate path in PEM format")
+	flag.StringVar(&keyPath, "key", "./key.pem", "server key path in PEM format")
+	flag.Parse()
+	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
+		os.Exit(2)
+	}
+
+	// connect to FBP network
+	var err error
+	netout, _, err = unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
 		os.Exit(2)
 	}
 
@@ -72,7 +68,7 @@ func main() {
 
 	// parse listen address as URL
 	// NOTE: add double slashes after semicolon so that host:port is put into .Host
-	listenURL, err := url.ParseRequestURI(flags.Args()[0])
+	listenURL, err := url.ParseRequestURI(flag.Args()[0])
 	checkError(err)
 	listenNetwork := listenURL.Scheme
 	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
@@ -116,7 +112,7 @@ func main() {
 
 	// pre-declare often-used IPs/frames
 	closeNotification := flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data", //TODO could be marked as "control", but control should probably only be FBP-level control, not application-level control
 		BodyType: "CloseNotification",
 		Extensions: map[string]string{
@@ -131,7 +127,7 @@ func main() {
 	conn-id header is relevant.
 	*/
 	openNotification := flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "OpenNotification",
 		Extensions: map[string]string{
@@ -150,9 +146,9 @@ func main() {
 			frame, err := flowd.Deserialize(stdin)
 			if err != nil {
 				if err == io.EOF {
-					fmt.Fprintln(os.Stderr, "EOF from FBP network on STDIN. Exiting.")
+					fmt.Fprintln(os.Stderr, "EOF from FBP network. Exiting.")
 				} else {
-					fmt.Fprintln(os.Stderr, "ERROR parsing frame from FBP network on STDIN:", err, "- Exiting.")
+					fmt.Fprintln(os.Stderr, "ERROR parsing frame from FBP network:", err, "- Exiting.")
 					//TODO notification feedback into FBP network
 				}
 				os.Stdin.Close()
@@ -161,9 +157,9 @@ func main() {
 				return
 			}
 
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
-			} else if !quiet {
+			} else if !unixfbp.Quiet {
 				fmt.Fprintln(os.Stderr, "frame in with", len(frame.Body), "bytes body")
 			}
 
@@ -288,7 +284,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] [tcp|tcp4|tcp6]://[host][:port]")
+	fmt.Fprintln(os.Stderr, "Arguments: [flags] [tcp|tcp4|tcp6]://[host][:port]")
 }
 
 func handleConnection(conn net.Conn, id int, closeChan chan int) {
@@ -297,7 +293,7 @@ func handleConnection(conn net.Conn, id int, closeChan chan int) {
 	outframe := flowd.Frame{
 		Type:     "data",
 		BodyType: "TLSPacket",
-		Port:     "OUT",
+		//Port:     "OUT",
 		//ContentType: "application/octet-stream",
 		Extensions: map[string]string{"conn-id": strconv.Itoa(id)}, // NOTE: only on OpenNotification, "remote-address": fmt.Sprintf("%v", conn.RemoteAddr().(*net.TCPAddr))},
 		Body:       nil,

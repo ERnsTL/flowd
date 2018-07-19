@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
@@ -17,40 +18,36 @@ const bufSize = 65536
 var netout *bufio.Writer //TODO is this concurrently useable? better give as param to handler function?
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// flag variables
+	// get configuration from arguments = Unix IIP
 	var operatingMode OperatingMode
-	var framing bool
-	var retry bool
+	var framing, retry bool
 	var cmdargs []string
-	var debug, quiet bool
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("cmd", flag.ContinueOnError)
-		flags.Var(&operatingMode, "mode", "operating mode: one (command instance handling all IPs) or each (IP handled by new instance)")
-		flags.BoolVar(&framing, "framing", true, "true = frame mode, false = send frame body to command STDIN, frame the data from command STDOUT")
-		flags.BoolVar(&retry, "retry", false, "retry/restart command on non-zero return code")
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		if flags.NArg() == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: missing command to run")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		cmdargs = flags.Args()
+	unixfbp.DefFlags()
+	flag.Var(&operatingMode, "mode", "operating mode: one (command instance handling all IPs) or each (IP handled by new instance)")
+	flag.BoolVar(&framing, "framing", true, "true = frame mode, false = send frame body to command STDIN, frame the data from command STDOUT")
+	flag.BoolVar(&retry, "retry", false, "retry/restart command on non-zero return code")
+	flag.Parse()
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing command to run")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
 	}
+	cmdargs = flag.Args()
+
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err = unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+
 	fmt.Fprintln(os.Stderr, "starting up, command is", strings.Join(cmdargs, " "))
 
 	// prepare subprocess variables
@@ -91,7 +88,7 @@ func main() {
 		defer cin.Close()
 
 		// handle subprocess output
-		go handleCommandOutput(debug, cout)
+		go handleCommandOutput(cout)
 
 		// handle subprocess input
 		if framing == true {
@@ -107,7 +104,7 @@ func main() {
 		}
 	case Each:
 		// prepare variables
-		var frame *flowd.Frame //TODO why is this pointer to Frame?
+		var frame *flowd.Frame
 		var bufcin *bufio.Writer
 		var err error
 
@@ -116,7 +113,7 @@ func main() {
 			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
-			} else if debug {
+			} else if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "received frame:", string(frame.Body))
 			}
 
@@ -127,9 +124,9 @@ func main() {
 
 				// handle subprocess output
 				if framing {
-					go handleCommandOutput(debug, cout)
+					go handleCommandOutput(cout)
 				} else {
-					go handleCommandOutputRaw(debug, cout)
+					go handleCommandOutputRaw(cout)
 				}
 
 				// forward frame or frame body to subprocess
@@ -157,7 +154,7 @@ func main() {
 					if _, err := cin.Write(frame.Body); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: writing frame body to command STDIN:", err, "- Exiting.")
 						os.Exit(3)
-					} else if debug {
+					} else if unixfbp.Debug {
 						fmt.Fprintln(os.Stderr, "sent frame body to subcommand STDIN:", string(frame.Body))
 					}
 					// done sending = close command STDIN
@@ -204,7 +201,7 @@ func startCommand(cmdargs []string) (cmd *exec.Cmd, cin io.WriteCloser, cout io.
 	return
 }
 
-func handleCommandOutput(debug bool, cout io.ReadCloser) {
+func handleCommandOutput(cout io.ReadCloser) {
 	bufr := bufio.NewReader(cout)
 	for {
 		frame, err := flowd.Deserialize(bufr)
@@ -219,26 +216,26 @@ func handleCommandOutput(debug bool, cout io.ReadCloser) {
 		}
 
 		// got a complete frame
-		if debug == true {
+		if unixfbp.Debug {
 			fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
 		}
 		// set correct port
 		frame.Port = "OUT"
 		// send into FBP network
 		if err := frame.Serialize(netout); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to FBP network:", err, "- Closing.")
 			os.Stdout.Close()
 			return
 		}
 	}
 }
 
-func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
+func handleCommandOutputRaw(cout io.ReadCloser) {
 	// prepare readers and variables
 	bufr := bufio.NewReader(cout)
 	buf := make([]byte, bufSize)
 	frame := &flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "Data",
 	}
@@ -260,7 +257,7 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 		// frame command output and send into FBP network
 		frame.Body = buf[0:nbytes]
 		if err := frame.Serialize(netout); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
+			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to FBP network:", err, "- Closing.")
 			os.Stdout.Close()
 			return
 		}
@@ -275,7 +272,7 @@ func handleCommandOutputRaw(debug bool, cout io.ReadCloser) {
 }
 
 func copyFrameBodies(cin io.WriteCloser, bufr *bufio.Reader) {
-	var frame *flowd.Frame //TODO why is this pointer to Frame?
+	var frame *flowd.Frame
 	var err error
 	for {
 		// read frame

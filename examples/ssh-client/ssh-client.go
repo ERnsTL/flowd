@@ -15,66 +15,42 @@ import (
 	"os"
 	"strings"
 
-	"github.com/kballard/go-shellquote"
 	"golang.org/x/crypto/ssh"
 	sshagent "golang.org/x/crypto/ssh/agent"
 
-	flowd "github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
+	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
 
 var (
-	debug  bool
-	quiet  bool
 	netout *bufio.Writer //TODO safe to use concurrently?
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", netin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
-		os.Exit(1)
-	}
-	// parse IIP
+	// get configuration from arguments = Unix IIP
 	var retry, bridge, useAgent, subsystem bool
 	var pkPath, khPath, hostkeyLine string
 	var operatingMode OperatingMode
-	iipSplit, err := shellquote.Split(iip)
-	checkError(err)
-	//TODO add flag for subsystem -> session.RequestSubsystem instead of session.Run()
-	flags := flag.NewFlagSet("ssh-client", flag.ContinueOnError)
-	flags.Var(&operatingMode, "mode", "operating mode: one (command instance handling all IPs) or each (IP handled by new instance)")
-	flags.BoolVar(&useAgent, "agent", true, "use ssh-agent as key source")
-	flags.StringVar(&pkPath, "i", "", "use private key file, e.g. ~/.ssh/id_ed25519|ecdsa|rsa|dsa")
-	flags.StringVar(&khPath, "knownhosts", os.ExpandEnv("$HOME/.ssh/known_hosts"), "path to SSH known_hosts file containing known host keys, may select wrong algo if multiple")
-	flags.StringVar(&hostkeyLine, "hostkey", "", "use hostkey line for server verification, put in quotes, get it using ssh-keyscan or from /etc/ssh/ssh_host_*_key.pub, must be for algo actually used")
-	flags.BoolVar(&subsystem, "subsystem", false, "request invocation of a subsystem on the remote system; which, is specified as the remote command")
-	flags.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over SSH, frame data from SSH")
-	flags.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
-	flags.BoolVar(&debug, "debug", false, "give detailed event output")
-	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-	//if err = flags.Parse(strings.Split(iip, " ")); err != nil {
-	if err = flags.Parse(iipSplit); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
-		printUsage()
-		//flags.PrintDefaults() // prints to STDERR
-		os.Exit(2)
-	}
-	if flags.NArg() < 2 {
+	unixfbp.DefFlags()
+	flag.Var(&operatingMode, "mode", "operating mode: one (command instance handling all IPs) or each (IP handled by new instance)")
+	flag.BoolVar(&useAgent, "agent", true, "use ssh-agent as key source")
+	flag.StringVar(&pkPath, "i", "", "use private key file, e.g. ~/.ssh/id_ed25519|ecdsa|rsa|dsa")
+	flag.StringVar(&khPath, "knownhosts", os.ExpandEnv("$HOME/.ssh/known_hosts"), "path to SSH known_hosts file containing known host keys, may select wrong algo if multiple")
+	flag.StringVar(&hostkeyLine, "hostkey", "", "use hostkey line for server verification, put in quotes, get it using ssh-keyscan or from /etc/ssh/ssh_host_*_key.pub, must be for algo actually used")
+	flag.BoolVar(&subsystem, "subsystem", false, "request invocation of a subsystem on the remote system; which, is specified as the remote command")
+	flag.BoolVar(&bridge, "bridge", false, "bridge mode, true = forward frames from/to FBP network, false = send frame body over SSH, frame data from SSH")
+	flag.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
+	flag.Parse()
+	if flag.NArg() < 2 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing remote command")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
-	cmdargs := flags.Args()[1:]
-	if debug {
+	cmdargs := flag.Args()[1:]
+	if unixfbp.Debug {
 		fmt.Fprintf(os.Stderr, "cmdargs=%v\n", cmdargs)
 	}
 
@@ -89,10 +65,23 @@ func main() {
 		os.Exit(2)
 	}
 
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+
 	// parse remote address as URL
 	//TODO parse something like ssh://user@sampleserver.com
 	// NOTE: add double slashes after semicolon
-	remoteURLStr := flags.Args()[0]
+	remoteURLStr := flag.Args()[0]
 	if !strings.HasPrefix(remoteURLStr, "tcp") {
 		remoteURLStr = "tcp://" + remoteURLStr
 	}
@@ -104,13 +93,13 @@ func main() {
 		password, _ = remoteURL.User.Password()
 		username = remoteURL.User.Username()
 	}
-	if debug {
+	if unixfbp.Debug {
 		fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s, User=%s, Pass=%s\n", remoteURL.Scheme, remoteURL.Opaque, remoteURL.Host, remoteURL.Path, username, password)
 	}
 	if remoteURL.Path != "" {
 		fmt.Fprintln(os.Stderr, "ERROR: remote URL must not contain path")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
 	remoteHost := remoteURL.Host
@@ -156,7 +145,7 @@ func main() {
 	// get host key
 	if hostkeyLine != "" {
 		// read from arguments
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "parsing hostkey line '%s'\n", hostkeyLine)
 		}
 		//pk, err := ssh.ParsePublicKey([]byte(hostkeyLine))
@@ -166,7 +155,7 @@ func main() {
 		sshConfig.HostKeyCallback = ssh.FixedHostKey(pk)
 	} else if khPath != "" {
 		// read known_hosts file
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "using '%s' for hostkey verification\n", khPath)
 		}
 		khFile, err := os.Open(khPath)
@@ -184,7 +173,7 @@ func main() {
 			// -> cache check results in a map with key.Marshal() as key or similar
 			// NOTE: need hostname without port and without [] braces, contrary to suggestions in many places
 			hostname = strings.SplitN(hostname, ":", 2)[0]
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintf(os.Stderr, "host key callback shall check host '%s'\n", hostname)
 			}
 			//hasher := sha1.New() // NOTE: hasher.Sum() returns []byte, but sha1.Sum() returns [size]byte
@@ -245,14 +234,14 @@ func main() {
 			}
 
 			// check actual host key
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "host key found, checking...")
 			}
 			if !bytes.Equal(key.Marshal(), foundHostKey.Marshal()) {
 				return fmt.Errorf("known host key found for active key type, but mismatch")
 			}
 
-			if !quiet {
+			if !unixfbp.Quiet {
 				fmt.Fprintln(os.Stderr, "host key verified")
 			}
 			return nil
@@ -264,14 +253,14 @@ func main() {
 	}
 
 	// connect to SSH server
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "connecting to server")
 	}
 	connServer, err := ssh.Dial(remoteNetwork, remoteHost, sshConfig)
 	checkError(err)
 	defer connServer.Close()
 	//TODO unreachable defer agentConn.Close()
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "connected")
 	}
 
@@ -291,9 +280,9 @@ func main() {
 
 		// handle subprocess output
 		if bridge {
-			go handleCommandOutput(debug, cout)
+			go handleCommandOutput(cout)
 		} else {
-			go handleCommandOutputRaw(debug, cout)
+			go handleCommandOutputRaw(cout)
 		}
 
 		// handle subprocess input
@@ -319,7 +308,7 @@ func main() {
 			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
-			} else if debug {
+			} else if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "received frame:", string(frame.Body))
 			}
 
@@ -330,9 +319,9 @@ func main() {
 
 				// handle subprocess output
 				if bridge {
-					go handleCommandOutput(debug, cout)
+					go handleCommandOutput(cout)
 				} else {
-					go handleCommandOutputRaw(debug, cout)
+					go handleCommandOutputRaw(cout)
 				}
 
 				// forward frame or frame body to subprocess
@@ -360,7 +349,7 @@ func main() {
 					if _, err := cin.Write(frame.Body); err != nil {
 						fmt.Fprintln(os.Stderr, "ERROR: writing frame body to command STDIN:", err, "- Exiting.")
 						os.Exit(3)
-					} else if debug {
+					} else if unixfbp.Debug {
 						fmt.Fprintln(os.Stderr, "sent frame body to subcommand STDIN:", string(frame.Body))
 					}
 					// done sending = close command STDIN
@@ -376,7 +365,7 @@ func main() {
 					fmt.Fprintln(os.Stderr, "ERROR: command exited with error:", err, "- Exiting.")
 					os.Exit(3)
 				} else {
-					if !quiet {
+					if !unixfbp.Quiet {
 						fmt.Fprintln(os.Stderr, "command exited with code", exitCode)
 					}
 				}
@@ -402,14 +391,14 @@ func printUsage() {
 func startCommand(connServer *ssh.Client, cmdargs []string) (session *ssh.Session, cin io.WriteCloser, cout io.Reader) {
 	// make session for remote command
 	// NOTE: each session accepts only one call to Run, Start, Shell, Output or CombinedOutput
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "asking for new session")
 	}
 	var err error
 	session, err = connServer.NewSession()
 	checkError(err)
 	//defer session.Close()	- must not do this here in this function
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "session established")
 	}
 
@@ -442,7 +431,7 @@ func startCommand(connServer *ssh.Client, cmdargs []string) (session *ssh.Sessio
 	// start the remote command
 	// NOTE: Run = Start + Wait
 	// TODO optimize - first split in IIP and flags, then joined here
-	if !quiet {
+	if !unixfbp.Quiet {
 		fmt.Fprintf(os.Stderr, "starting remote command %v\n", cmdargs)
 	}
 	cmdargsStr := strings.Join(cmdargs, " ")
@@ -466,7 +455,7 @@ func getExitCode(err error) (int, error) {
 		case *ssh.ExitError:
 			exitCode = err.ExitStatus()
 		case *ssh.ExitMissingError:
-			if debug {
+			if unixfbp.Debug {
 				fmt.Fprintln(os.Stderr, "program exited, error status missing")
 			}
 			return -1, fmt.Errorf("program exited, error status missing")
@@ -477,11 +466,11 @@ func getExitCode(err error) (int, error) {
 		}
 	}
 	if exitCode != 0 {
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "program exited with status code %d\n", exitCode)
 		}
 	} else {
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintln(os.Stderr, "program exited normally")
 		}
 	}
@@ -489,7 +478,7 @@ func getExitCode(err error) (int, error) {
 }
 
 //TODO pretty much 1:1 copy from cmd handleCommandOutput() -> reuse?
-func handleCommandOutput(debug bool, cout io.Reader) {
+func handleCommandOutput(cout io.Reader) {
 	bufr := bufio.NewReader(cout)
 	for {
 		frame, err := flowd.Deserialize(bufr)
@@ -504,11 +493,11 @@ func handleCommandOutput(debug bool, cout io.Reader) {
 		}
 
 		// got a complete frame
-		if debug == true {
+		if unixfbp.Debug == true {
 			fmt.Fprintln(os.Stderr, "STDOUT received frame type", frame.Type, "and data type", frame.BodyType, "for port", frame.Port, "with body:", (string)(frame.Body)) //TODO what is difference between this and string(frame.Body) ?
 		}
 		// set correct port
-		frame.Port = "OUT"
+		//frame.Port = "OUT"
 		// send into FBP network
 		if err := frame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: could not send frame to STDOUT:", err, "- Closing.")
@@ -519,12 +508,12 @@ func handleCommandOutput(debug bool, cout io.Reader) {
 }
 
 //TODO pretty much 1:1 copy from cmd handleCommandOutputRaw() -> reuse?
-func handleCommandOutputRaw(debug bool, cout io.Reader) {
+func handleCommandOutputRaw(cout io.Reader) {
 	// prepare readers and variables
 	bufr := bufio.NewReader(cout)
 	buf := make([]byte, bufSize)
 	frame := &flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "Data",
 	}

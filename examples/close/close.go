@@ -1,31 +1,26 @@
+// Closes its output port as a signal for the following component to exit.
+
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"os"
-
-	"github.com/ERnsTL/flowd/libflowd"
 )
-
-/*
-Closes its output port as a signal for the following component to exit.
-TODO flowd: Send port close notification if all IIPs have been send and no input is connected.
-	-> making this component useless.
-TODO .fbp parser: Cannot currently have just a single component -> need this close component.
-*/
 
 func main() {
 	// open connection to network
-	//netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
+	portName := "OUT"
+	portPath := os.Args[1]
+	outPipe, err := os.OpenFile(portPath, os.O_WRONLY, os.ModeNamedPipe)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: opening outport %s at path %s: %s\n", portName, portPath, err)
+	}
+	// create buffered writer
+	//netout := bufio.NewWriter(outPipe)
+	//defer netout.Flush()
 
-	// generate port close control frame
-	frame := flowd.PortClose("OUT")
-
-	// send it to output port
-	if err := frame.Serialize(netout); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+	// close outport
+	if err = outPipe.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "ERROR: closing outport:", err)
 	}
 }

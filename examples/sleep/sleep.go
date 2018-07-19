@@ -1,40 +1,42 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 func main() {
-	// connect to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-
-	// get configuration from IIP = initial information packet/frame
+	// get configuration from argemunts = Unix IIP
 	var delay time.Duration
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		if len(iip) == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: no delay time given in IIP, format is [duration]")
-			os.Exit(1)
-		} else if delay, err = time.ParseDuration(iip); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: malformed delay time given in IIP, format is [duration], eg. 5s")
-			os.Exit(1)
-		}
+	unixfbp.DefFlags()
+	flag.DurationVar(&delay, "delay", 5*time.Second, "delay time")
+	flag.Parse()
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: no delay time given in IIP, format is [duration]")
+		os.Exit(2)
 	}
-	fmt.Fprintln(os.Stderr, "got delay time", delay)
+	if unixfbp.Debug {
+		fmt.Fprintln(os.Stderr, "got delay time", delay)
+	}
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 
-	var frame *flowd.Frame //TODO why is this pointer to frame?
-	var err error
-
+	// main loop
+	var frame *flowd.Frame
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
@@ -43,19 +45,16 @@ func main() {
 		}
 
 		// sleep
-		fmt.Fprintln(os.Stderr, "got frame, delaying...")
-		time.Sleep(delay)
-		// check for closed input port
-		//TODO delayed response to port close is useful when there is a closer on input port, but does this otherwise make sense?
-		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
-			// shut down operations
-			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
-			break
+		if unixfbp.Debug {
+			fmt.Fprintln(os.Stderr, "got frame, delaying...")
 		}
-		fmt.Fprintln(os.Stderr, "now forwarding.")
+		time.Sleep(delay)
+		if unixfbp.Debug {
+			fmt.Fprintln(os.Stderr, "now forwarding.")
+		}
 
 		// send it to given output ports
-		frame.Port = "OUT"
+		//frame.Port = "OUT"
 		if err = frame.Serialize(netout); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 		}

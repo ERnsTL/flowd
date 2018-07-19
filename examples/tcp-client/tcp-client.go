@@ -8,49 +8,38 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
 
-	flowd "github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
+	"github.com/ERnsTL/flowd/libflowd"
 )
 
 const bufSize = 65536
 
-var (
-	debug bool
-	quiet bool
-)
-
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	iip, err := flowd.GetIIP("CONF", netin)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- exiting.")
-		os.Exit(1)
-	}
-	// parse IIP
-	flags := flag.NewFlagSet("tcp-client", flag.ContinueOnError)
+	// get configuration from arguments = Unix IIP
 	var retry, bridge bool
-	flags.BoolVar(&bridge, "bridge", true, "bridge mode, true = forward frames from/to FBP network, false = send frame body over TCP, frame data from TCP")
-	flags.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
-	flags.BoolVar(&debug, "debug", false, "give detailed event output")
-	flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-	if err = flags.Parse(strings.Split(iip, " ")); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR parsing IIP arguments - exiting.")
-		printUsage()
-		flags.PrintDefaults() // prints to STDERR
-		os.Exit(2)
-	}
-	if flags.NArg() != 1 {
+	unixfbp.DefFlags()
+	flag.BoolVar(&bridge, "bridge", true, "bridge mode, true = forward frames from/to FBP network, false = send frame body over TCP, frame data from TCP")
+	flag.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
+	flag.Parse()
+	if flag.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
 		printUsage()
-		flags.PrintDefaults()
+		flag.PrintDefaults()
 		os.Exit(2)
 	}
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
 
 	//TODO implement
 	if retry {
@@ -60,7 +49,7 @@ func main() {
 
 	// parse remote address as URL
 	// NOTE: add double slashes after semicolon so that host:port is put into .Host
-	remoteURL, err := url.ParseRequestURI(flags.Args()[0])
+	remoteURL, err := url.ParseRequestURI(flag.Args()[0])
 	checkError(err)
 	remoteNetwork := remoteURL.Scheme
 	//fmt.Fprintf(os.Stderr, "Scheme=%s, Opaque=%s, Host=%s, Path=%s\n", listenURL.Scheme, listenURL.Opaque, listenURL.Host, listenURL.Path)
@@ -85,8 +74,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "forwarding frames")
 		// copy STDIN to network connection
 		go func() {
-			_, err := io.Copy(conn, os.Stdin)
-			if err != nil {
+			if _, err := io.Copy(conn, os.Stdin); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR on FBP->TCP:", err)
 				return
 			}
@@ -124,9 +112,9 @@ func main() {
 					return
 				}
 
-				if debug {
+				if unixfbp.Debug {
 					fmt.Fprintln(os.Stderr, "tcp out: received frame type", frame.Type, "data type", frame.BodyType, "for port", frame.Port, "with body:", string(frame.Body))
-				} else if !quiet {
+				} else if !unixfbp.Quiet {
 					fmt.Fprintln(os.Stderr, "tcp out: frame in with", len(frame.Body), "bytes body")
 				}
 
@@ -178,7 +166,7 @@ func checkError(err error) {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [-debug] [-quiet] [-bridge] [-retry] [host]:[port]")
+	fmt.Fprintln(os.Stderr, "Arguments: [-debug] [-quiet] [-bridge] [-retry] [host]:[port]")
 }
 
 //TODO optimize: give netout as parameter or use global variable? safe for concurrent use?
@@ -189,7 +177,7 @@ func handleConnection(conn *net.TCPConn, closeChan chan<- bool, netout *bufio.Wr
 	outframe := flowd.Frame{
 		Type:     "data",
 		BodyType: "TCPPacket",
-		Port:     "OUT",
+		//Port:     "OUT",
 		//ContentType: "application/octet-stream",
 		Extensions: nil,
 		Body:       nil,
@@ -229,9 +217,9 @@ func handleConnection(conn *net.TCPConn, closeChan chan<- bool, netout *bufio.Wr
 			return
 		}
 
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "tcp in: read %d bytes from %s: %s\n", bytesRead, conn.RemoteAddr(), buf[:bytesRead])
-		} else if !quiet {
+		} else if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "tcp in: read %d bytes from %s\n", bytesRead, conn.RemoteAddr())
 		}
 

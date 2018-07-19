@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/gorhill/cronexpr"
-	shellquote "github.com/kballard/go-shellquote"
 )
 
 type entry struct {
@@ -27,85 +27,72 @@ var (
 	wakeupFrame = &flowd.Frame{
 		Type:     "data",
 		BodyType: "Wakeup",
-		Port:     "",
 	}
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout = bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// flag variables
-	var debug, quiet bool
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		var when whenFlag
-		var to toFlag
-		// split into arguments, respecting quoted multi-word arguments
-		iipSplit, err := shellquote.Split(iip)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: parsing IIP:", err)
-			os.Exit(2)
-		}
-		flags := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-		flags.Var(&when, "when", "cron expression when to send IP")
-		flags.Var(&to, "to", "port to send IP from for preceding -when")
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		if err := flags.Parse(iipSplit); err != nil {
-			os.Exit(2)
-		}
+	// get configuration from flags = Unix IIP
+	var when whenFlag
+	var to toFlag
+	unixfbp.DefFlags()
+	flag.Var(&when, "when", "cron expression when to send IP")
+	flag.Var(&to, "to", "port to send IP from for preceding -when")
+	flag.Parse()
+	// check flags
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered:", flag.Args())
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if whenTemp != nil {
+		fmt.Fprintln(os.Stderr, "ERROR: -when without following -to, but both required")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if len(entries) == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing cron expression(s) in -when")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
 
-		// check flags
-		if flags.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered:", flags.Args())
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
+	// parse cron expressions
+	// NOTE: range over array and array slices is ordered (vs. maps)
+	now := time.Now()
+	for index, entry := range entries {
+		// parse cron expression
+		if schedule, err := cronexpr.Parse(*entry.cronExpression); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: parsing cron expression '%s': %s\n", *entry.cronExpression, err)
 			os.Exit(2)
-		}
-		if whenTemp != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: -when without following -to, but both required")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		if len(entries) == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: missing cron expression(s) in -when")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-
-		// parse cron expressions
-		// NOTE: range over array and array slices is ordered (vs. maps)
-		now := time.Now()
-		for index, entry := range entries {
-			// parse cron expression
-			if schedule, err := cronexpr.Parse(*entry.cronExpression); err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: parsing cron expression '%s': %s\n", *entry.cronExpression, err)
+		} else {
+			// save schedule
+			entries[index].schedule = schedule
+			// generate and check for next event time
+			entries[index].nextEvent = schedule.Next(now)
+			if entries[index].nextEvent.IsZero() {
+				// entry has no future events
+				fmt.Fprintf(os.Stderr, "ERROR: cron expression '%s' has no future events\n", *entry.cronExpression)
 				os.Exit(2)
-			} else {
-				// save schedule
-				entries[index].schedule = schedule
-				// generate and check for next event time
-				entries[index].nextEvent = schedule.Next(now)
-				if entries[index].nextEvent.IsZero() {
-					// entry has no future events
-					fmt.Fprintf(os.Stderr, "ERROR: cron expression '%s' has no future events\n", *entry.cronExpression)
-					os.Exit(2)
-				}
-				// else activate
-				entries[index].active = true
-				// GC string
-				entries[index].cronExpression = nil
 			}
+			// else activate
+			entries[index].active = true
+			// GC string
+			entries[index].cronExpression = nil
 		}
+	}
+
+	// connect to FBP network
+	var err error
+	for portName := range unixfbp.OutPorts {
+		// open all given ports, assuming they will be needed at some point and so that the other side does not block
+		netout, _, err = unixfbp.OpenOutPort(portName)
+		if err != nil {
+			fmt.Println("ERROR:", err)
+			os.Exit(2)
+		}
+		defer netout.Flush()
 	}
 
 	// handle events
@@ -114,7 +101,6 @@ func main() {
 	//	e.g. multiple @midnight schedules or similar
 	var foundNext bool
 	var minIndex int
-	var now time.Time
 	for {
 		// find nearest next event
 		foundNext = false
@@ -138,7 +124,7 @@ func main() {
 					foundNext = true
 				}
 			} else {
-				if !quiet {
+				if !unixfbp.Quiet {
 					fmt.Fprintf(os.Stderr, "WARNING: entry %d has no more future events - disabling entry\n", index+1)
 				}
 				// mark as unactive
@@ -147,21 +133,21 @@ func main() {
 		}
 		if !foundNext {
 			// done, exit
-			if !quiet {
+			if !unixfbp.Quiet {
 				fmt.Fprintln(os.Stderr, "all entries have no more future events - exiting.")
 			}
 			return
 		}
 
 		// sleep
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintln(os.Stderr, "sleeping until next event")
 		}
 		time.Sleep(time.Until(entries[minIndex].nextEvent))
 
 		// send notification
 		//TODO optimize: entry or index as parameter?
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintln(os.Stderr, "woke up, notifying", entries[minIndex].outport)
 		}
 		sendNotification(minIndex)
@@ -171,7 +157,7 @@ func main() {
 		for index, entry := range entries {
 			if index != minIndex && entry.active && entry.nextEvent.Before(now) {
 				// send notification for that also
-				if !quiet {
+				if !unixfbp.Quiet {
 					fmt.Fprintln(os.Stderr, "also notifying", entries[index].outport)
 				}
 				sendNotification(index)
@@ -183,44 +169,18 @@ func main() {
 			fmt.Fprintln(os.Stderr, "ERROR: flushing net out:", err.Error())
 		}
 	}
-
-	// NOTE: currently no frames expected, but may change in future (shutdown notification etc.)
-	/*
-		var err error
-		var frame *flowd.Frame
-
-		for {
-			// read frame
-			frame, err = flowd.Deserialize(netin)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-			}
-
-			// handle control frames
-			if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
-				fmt.Fprintln(os.Stderr, "input port closed - exiting.")
-				// exit
-				return
-			}
-
-			// anything else is an error since nothing expected
-			if !quiet {
-				fmt.Fprintln(os.Stderr, "WARNING: got unexpected frame with body:", string(frame.Body))
-			}
-		}
-	*/
 }
 
 func sendNotification(index int) {
 	// send wake-up frame
-	wakeupFrame.Port = entries[index].outport
+	//wakeupFrame.Port = entries[index].outport
 	if err := wakeupFrame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
 	}
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] {-when [cron-expression] -to [output-port]}...")
+	fmt.Fprintln(os.Stderr, "Arguments: [flags] {-when [cron-expression] -to [output-port]}...")
 	fmt.Fprintln(os.Stderr, "multiple when+to possible; expression format at https://github.com/gorhill/cronexpr")
 }
 

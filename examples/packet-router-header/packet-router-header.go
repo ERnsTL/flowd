@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
@@ -23,65 +23,50 @@ var (
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-
 	// flag variables
-	var debug, quiet bool
 	var field, present, missing, nomatchPort string
 	var equals equalsFlag
 	var hasprefix prefixFlag
 	var to toFlag
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("packet-router-header", flag.ContinueOnError)
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		flags.StringVar(&field, "field", "", "header field to inspect")
-		flags.StringVar(&present, "present", "", "outport for packets with header field present")
-		flags.StringVar(&missing, "missing", "NOMATCH", "outport for packets with header field missing")
-		flags.StringVar(&nomatchPort, "nomatch", "NOMATCH", "outport for unmatched packets")
-		flags.Var(&hasprefix, "hasprefix", "matching on prefix in header field value")
-		flags.Var(&equals, "equals", "matching equal value of header field")
-		flags.Var(&to, "to", "outport for matching packets")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		// check flags
-		if len(rules) > 0 && rules[len(rules)-1].value == "" {
-			fmt.Fprintln(os.Stderr, "ERROR:", getLastRuleType(), "without following -to, but both required")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		//TODO allow both -present and detailed conditions -> if len(rules) > 0 then append present-ruleFunc as last when no details condition matched
-		if (present != "" && len(rules) != 0) || (present == "" && len(rules) == 0) {
-			fmt.Fprintln(os.Stderr, "ERROR: either -present or specific condition expected")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		if field == "" {
-			fmt.Fprintln(os.Stderr, "ERROR: -field missing")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		if flags.NArg() != 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument encountered")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
+	// get configuration from arguments = Unix IIP
+	unixfbp.DefFlags()
+	flag.StringVar(&field, "field", "", "header field to inspect")
+	flag.StringVar(&present, "present", "", "outport for packets with header field present")
+	flag.StringVar(&missing, "missing", "NOMATCH", "outport for packets with header field missing")
+	flag.StringVar(&nomatchPort, "nomatch", "NOMATCH", "outport for unmatched packets")
+	flag.Var(&hasprefix, "hasprefix", "matching on prefix in header field value")
+	flag.Var(&equals, "equals", "matching equal value of header field")
+	flag.Var(&to, "to", "outport for matching packets")
+	flag.Parse()
+
+	// check flags
+	if len(rules) > 0 && rules[len(rules)-1].value == "" {
+		fmt.Fprintln(os.Stderr, "ERROR:", getLastRuleType(), "without following -to, but both required")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
 	}
-	if !quiet {
+	//TODO allow both -present and detailed conditions -> if len(rules) > 0 then append present-ruleFunc as last when no details condition matched
+	if (present != "" && len(rules) != 0) || (present == "" && len(rules) == 0) {
+		fmt.Fprintln(os.Stderr, "ERROR: either -present or specific condition expected")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if field == "" {
+		fmt.Fprintln(os.Stderr, "ERROR: -field missing")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument encountered")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "starting up")
 	}
 
@@ -110,7 +95,7 @@ func main() {
 	}
 	// regular equality rules
 	if len(rules) > 0 {
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintln(os.Stderr, "routing table:")
 		}
 		for _, rule := range rules {
@@ -120,7 +105,7 @@ func main() {
 			targetPortCopy := rule.targetport
 			// append rule function depending on rule type
 			if rule.isEquals {
-				if debug {
+				if unixfbp.Debug {
 					fmt.Fprintf(os.Stderr, "\tif %s equals %s, forward to %s\n", field, matchValueCopy, targetPortCopy)
 				}
 				ruleFuncs = append(ruleFuncs, func(value *string) *string {
@@ -135,7 +120,7 @@ func main() {
 					return nil
 				})
 			} else if rule.isHasPrefix {
-				if debug {
+				if unixfbp.Debug {
 					fmt.Fprintf(os.Stderr, "\tif %s has prefix %s, forward to %s\n", field, matchValueCopy, targetPortCopy)
 				}
 				ruleFuncs = append(ruleFuncs, func(value *string) *string {
@@ -154,7 +139,7 @@ func main() {
 				os.Exit(2)
 			}
 		}
-		if debug {
+		if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "\tif %s missing, forward to %s\n", field, nomatchPort)
 		}
 	}
@@ -190,9 +175,22 @@ func main() {
 		}
 	}
 
+	// connect to FBP network
+	var err error
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+
 	// prepare variables
 	var frame *flowd.Frame
-	var err error
 	var fieldValue *string
 
 	// main work loop
@@ -225,7 +223,7 @@ nextframe:
 			}
 		*/
 		fieldValue = fieldGetter(frame)
-		if debug {
+		if unixfbp.Debug {
 			if fieldValue != nil {
 				fmt.Fprintf(os.Stderr, "field %s has value %s\n", field, *fieldValue)
 			} else {
@@ -237,7 +235,7 @@ nextframe:
 		for _, ruleFunc := range ruleFuncs {
 			if targetPort := ruleFunc(fieldValue); targetPort != nil {
 				// rule applies, forward frame to returned port
-				if debug {
+				if unixfbp.Debug {
 					fmt.Fprintf(os.Stderr, "forwarding to port %s\n", *targetPort)
 				}
 				frame.Port = *targetPort
@@ -261,7 +259,7 @@ nextframe:
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [-field] [-missing] [-present] {[-equals|-hasprefix] [-to]}...")
+	fmt.Fprintln(os.Stderr, "Arguments: [-field] [-missing] [-present] {[-equals|-hasprefix] [-to]}...")
 }
 
 // flag acceptors of ( -equals [value] or -hasprefix [prefix] ) and -to [output-port] couples

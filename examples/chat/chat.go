@@ -1,12 +1,14 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
@@ -19,38 +21,29 @@ type ChatClient struct {
 }
 
 func main() {
-	/*
-		// read list of output ports from program arguments
-		outPorts := os.Args[1:]
-		if len(outPorts) == 0 {
-			// get configuration from IIP = initial information packet/frame
-			fmt.Fprintln(os.Stderr, "wait for IIP")
-			if iip, err := flowd.GetIIP("CONF"); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-				os.Exit(1)
-			} else {
-				outPorts = strings.Split(iip, ",")
-				if len(outPorts) == 0 {
-					fmt.Fprintln(os.Stderr, "ERROR: no output ports names given in IIP, format is [port],[port],[port]...")
-					os.Exit(1)
-				}
-			}
-		}
-		fmt.Fprintln(os.Stderr, "got output ports", outPorts)
-	*/
+	// get configuration from flags = Unix IIP
+	unixfbp.DefFlags()
+	flag.Parse()
 
-	var frame *flowd.Frame //TODO why is this pointer of Frame?
-	var err error
-	var id string // connection ID
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
+	// prepare variables
+	var frame *flowd.Frame
+	var id string                       // connection ID
 	clients := map[string]*ChatClient{} // key = connection ID
-
-	// prepare commonly-used variables
 	closeCommand := &flowd.Frame{
-		Port:     "OUT",
+		//Port:     "OUT",
 		Type:     "data",
 		BodyType: "CloseConnection",
 		Extensions: map[string]string{
@@ -58,9 +51,18 @@ func main() {
 		},
 	}
 
+	// main loop
 	for {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(os.Stderr, "EOF from input port - exiting.")
+				break
+			}
+			fmt.Fprintln(os.Stderr, "ERROR from input port:", err, "- exiting.")
+			break
+		}
 		// get connection ID
 		id = frame.Extensions["conn-id"]
 
@@ -137,9 +139,9 @@ func main() {
 		}
 
 		// send it to output port
-		frame.Port = "OUT"
+		//frame.Port = "OUT"
 		if err = frame.Serialize(netout); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+			fmt.Fprintln(os.Stderr, "ERROR: serializing frame:", err.Error())
 		}
 		// send it now (flush)
 		if err = netout.Flush(); err != nil {

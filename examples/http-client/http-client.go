@@ -1,15 +1,17 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
+	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
 	"time"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
@@ -17,16 +19,31 @@ const timeout = 10 * time.Second //TODO make this configurable in IIP
 
 //TODO convert to true FBP component useable together with tcp-client, unix-client etc.
 // -> connection the Go HTTP client uses is a buffered writer into the FBP network -> tcp-client
-// drawback currently: cannot set a tcp-client's remote host dynamically
+// drawback currently (TODO is this still so?): cannot set a tcp-client's remote host dynamically
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
+	// get configuration from arguments = Unix IIP
+	unixfbp.DefFlags()
+	flag.Parse()
+	if flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free argument(s) encountered - exiting.")
+		flag.PrintDefaults()
+		os.Exit(2)
+	}
+	// connect to FBP network
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
-	// commonly-used variables
+	// prepare variables
 	var frame *flowd.Frame
-	var err error
 	var found bool
 	var method, url string
 	var bodyr *bytes.Reader
@@ -41,13 +58,11 @@ func main() {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(os.Stderr, "EOF on input port - exiting.")
+				break
+			}
 			fmt.Fprintln(os.Stderr, "ERROR: parsing frame:", err, "- exiting.")
-			break
-		}
-
-		// check for closed ports
-		if frame.Type == "control" && frame.BodyType == "PortClose" {
-			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
 			break
 		}
 
@@ -92,7 +107,7 @@ func main() {
 
 		// package response up into frame
 		respFrame := &flowd.Frame{
-			Port:       "OUT",
+			//Port:       "OUT",
 			Type:       "data",
 			BodyType:   "HTTPResponse",
 			Extensions: map[string]string{},

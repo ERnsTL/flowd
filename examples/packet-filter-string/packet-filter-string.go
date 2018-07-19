@@ -5,72 +5,73 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"io"
 	"os"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-
 	// flag variables
 	var filterStrings []string
-	var debug, quiet, pass, drop, and, or bool
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("packet-filter-string", flag.ContinueOnError)
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		flags.BoolVar(&and, "and", false, "all given substrings must be present in packet body")
-		flags.BoolVar(&or, "or", false, "any of the given substrings must be present in packet body")
-		flags.BoolVar(&pass, "pass", false, "let matching packets pass")
-		flags.BoolVar(&drop, "drop", false, "drop matching packets")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		if (!and && !or) || (and && or) {
-			if flags.NArg() == 1 {
-				// do not annoy user if only one substring -> set to or (or and)
-				and = false
-				or = true
-			} else {
-				fmt.Fprintln(os.Stderr, "ERROR: either -and or -or expected - unable to proceed")
-				printUsage()
-				flags.PrintDefaults() // prints to STDERR
-				os.Exit(2)
-			}
-		}
-		if (!pass && !drop) || (pass && drop) {
-			fmt.Fprintln(os.Stderr, "ERROR: either -pass or -drop expected - unable to proceed")
+	var pass, drop, and, or bool
+	// get configuration from arguments = Unix IIP
+	unixfbp.DefFlags()
+	flag.BoolVar(&and, "and", false, "all given substrings must be present in packet body")
+	flag.BoolVar(&or, "or", false, "any of the given substrings must be present in packet body")
+	flag.BoolVar(&pass, "pass", false, "let matching packets pass")
+	flag.BoolVar(&drop, "drop", false, "drop matching packets")
+	flag.Parse()
+
+	// check flags
+	if (!and && !or) || (and && or) {
+		if flag.NArg() == 1 {
+			// do not annoy user if only one substring -> set to or (or and)
+			and = false
+			or = true
+		} else {
+			fmt.Fprintln(os.Stderr, "ERROR: either -and or -or expected - unable to proceed")
 			printUsage()
-			flags.PrintDefaults() // prints to STDERR
+			flag.PrintDefaults() // prints to STDERR
 			os.Exit(2)
 		}
-		if flags.NArg() == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: no filter substrings given")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		//TODO optimize - convert search substrings to []byte, since frame.Body is []byte
-		filterStrings = flags.Args()
 	}
-	if !quiet {
+	if (!pass && !drop) || (pass && drop) {
+		fmt.Fprintln(os.Stderr, "ERROR: either -pass or -drop expected - unable to proceed")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: no filter substrings given")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	//TODO optimize - convert search substrings to []byte, since frame.Body is []byte
+	filterStrings = flag.Args()
+
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "starting up")
 	}
 
-	// prepare variables
-	var frame *flowd.Frame //TODO why is this pointer to Frame?
+	// connect to FBP network
 	var err error
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
+
+	// prepare variables
+	var frame *flowd.Frame
 
 	// main work loop
 	/* pseudo-code:
@@ -107,13 +108,11 @@ nextframe:
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				break
+			}
 			fmt.Fprintln(os.Stderr, err)
-		}
-
-		// check for closed input port
-		if frame.Type == "control" && frame.BodyType == "PortClose" {
-			// shut down operations
-			fmt.Fprintln(os.Stderr, "received port close notification - exiting.")
 			break
 		}
 
@@ -172,12 +171,12 @@ nextframe:
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [-pass|-drop] [-and|-or] [flags] [substring]...")
+	fmt.Fprintln(os.Stderr, "Arguments: [-pass|-drop] [-and|-or] [flags] [substring]...")
 }
 
 //TODO optimize: give netout as parameter or have it as global variable?
 func forwardFrame(frame *flowd.Frame, netout *bufio.Writer) {
-	frame.Port = "OUT"
+	//frame.Port = "OUT"
 	if err := frame.Serialize(netout); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
 	}

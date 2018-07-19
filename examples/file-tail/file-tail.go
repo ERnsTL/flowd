@@ -1,54 +1,46 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/hpcloud/tail"
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
+	// flag variables
+	var filePath string
+	// get configuration from flags = Unix IIP
+	unixfbp.DefFlags()
+	flag.Parse()
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing filepath to read")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	} else if flag.NArg() > 1 {
+		fmt.Fprintln(os.Stderr, "ERROR: more than one filepath currently unimplemented")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	// parse free arguments
+	filePath = flag.Arg(0)
+	// open network connections
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
 	// flag variables
-	var filePath string
-	var debug, quiet bool
-	// get configuration from IIP = initial information packet/frame
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		// parse IIP
-		flags := flag.NewFlagSet("file-tail", flag.ContinueOnError)
-		flags.BoolVar(&debug, "debug", false, "give detailed event output")
-		flags.BoolVar(&quiet, "quiet", false, "no informational output except errors")
-		if err := flags.Parse(strings.Split(iip, " ")); err != nil {
-			os.Exit(2)
-		}
-		if flags.NArg() == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: missing filepath to read")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		} else if flags.NArg() > 1 {
-			fmt.Fprintln(os.Stderr, "ERROR: more than one filepath unimplemented")
-			printUsage()
-			flags.PrintDefaults() // prints to STDERR
-			os.Exit(2)
-		}
-		filePath = flags.Args()[0]
-	}
-	if !debug {
+	if !unixfbp.Quiet {
 		fmt.Fprintln(os.Stderr, "tailing")
-	} else {
+	} else if unixfbp.Debug {
 		fmt.Fprintf(os.Stderr, "now tailing, filepath is %s\n", filePath)
 	}
 
@@ -56,7 +48,7 @@ func main() {
 	outframe := &flowd.Frame{ //TODO why is this pointer to Frame?
 		Type:     "data",
 		BodyType: "FileLine",
-		Port:     "OUT",
+		//Port:     "OUT",
 	}
 
 	// start tailing
@@ -68,9 +60,9 @@ func main() {
 
 	// main work loop
 	for line := range t.Lines {
-		if !quiet {
+		if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "received line (%d bytes)\n", len([]byte(line.Text)))
-		} else if debug {
+		} else if unixfbp.Debug {
 			fmt.Fprintf(os.Stderr, "received line (%d bytes): %s\n", len([]byte(line.Text)), line.Text)
 		}
 
@@ -79,23 +71,18 @@ func main() {
 
 		// send it to given output ports
 		if err = outframe.Serialize(netout); err != nil {
-			fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
-		}
-		if netin.Buffered() == 0 {
-			if err = netout.Flush(); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
-			}
+			fmt.Fprintln(os.Stderr, "ERROR: serializing frame:", err)
 		}
 	}
 
 	//TODO add error handling on line.Err
 
 	// report
-	if debug {
+	if unixfbp.Debug {
 		fmt.Fprintln(os.Stderr, "all done")
 	}
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] [file-path]")
+	fmt.Fprintln(os.Stderr, "Arguments: [flags] [file-path]")
 }

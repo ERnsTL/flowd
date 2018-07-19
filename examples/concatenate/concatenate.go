@@ -1,99 +1,70 @@
 package main
 
 import (
-	"bufio"
+	"flag"
 	"fmt"
 	"os"
-	"strings"
 
+	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
 )
 
 func main() {
-	// open connection to network
-	netin := bufio.NewReader(os.Stdin)
-	netout := bufio.NewWriter(os.Stdout)
-	defer netout.Flush()
-	// get configuration from IIP = initial information packet/frame
-	var inPorts []string
-	fmt.Fprintln(os.Stderr, "wait for IIP")
-	if iip, err := flowd.GetIIP("CONF", netin); err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR getting IIP:", err, "- Exiting.")
-		os.Exit(1)
-	} else {
-		inPorts = strings.Split(iip, ",")
-		if len(inPorts) == 0 {
-			fmt.Fprintln(os.Stderr, "ERROR: no input ports names given in IIP, format is [port],[port],[port]...")
-			os.Exit(1)
-		}
+	// get configuration from argemunts = Unix IIP
+	unixfbp.DefFlags() //TODO ordering of ports is currently not guaranteed -> need to give ordering as free arguments
+	flag.Parse()
+	if flag.NArg() == 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: missing port order in free arguments")
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
 	}
-	fmt.Fprintln(os.Stderr, "got input ports", inPorts)
+	//TODO check if all ports from list are also declared
+	if unixfbp.Debug {
+		fmt.Printf("got %d inports: %v\n", len(unixfbp.InPorts), flag.Args())
+	}
+	// connect to FBP network
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	defer netout.Flush()
 
 	// prepare variables
 	var frame *flowd.Frame
-	var err error
-	var frameBuffer []*flowd.Frame
 
 	// for each specified input port...
-forPorts:
-	for portIndex, inPort := range inPorts {
-		//TODO if debug fmt.Fprintf(os.Stderr, "inPort=%s\n", inPort)
-		// catch up any buffered IPs for new input port, in order
-		for bufferIndex, frame := range frameBuffer {
-			if frame.Port == inPort {
-				// check for port close notification
-				if frame.Type == "control" && frame.BodyType == "PortClose" {
-					// done with this input port
-					fmt.Fprintln(os.Stderr, "done with "+inPort)
-					// remove it from buffer
-					// source: https://github.com/golang/go/wiki/SliceTricks
-					copy(frameBuffer[bufferIndex:], frameBuffer[bufferIndex+1:])
-					// if last input port, then exit
-					if portIndex == len(inPorts)-1 {
-						//TODO if debug fmt.Fprintln(os.Stderr, "this was last input port")
-						break forPorts
-					}
-					break
-				}
-				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
-				// send it to output port
-				frame.Port = "OUT"
-				if err = frame.Serialize(netout); err != nil {
-					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
-				}
-				// remove it from buffer
-				copy(frameBuffer[bufferIndex:], frameBuffer[bufferIndex+1:])
-			}
+	for _, portName := range flag.Args() {
+		// open that inport
+		if unixfbp.Debug {
+			fmt.Println("draining input port", portName)
 		}
-
+		netin, inPipe, err := unixfbp.OpenInPort(portName)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "ERROR: opening input port:", err, "- exiting.")
+			os.Exit(1)
+		}
 		// read new frames
 		for {
 			// read frame
 			frame, err = flowd.Deserialize(netin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
+				err = inPipe.Close()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "ERROR: closing input port %s: %s\n", portName, err)
+				}
+				break
 			}
 
-			// if from current input port
-			//TODO if debug fmt.Fprintln(os.Stderr, "got IP on input port "+frame.Port+"; inPort="+inPort)
-			if frame.Port == inPort {
-				// check for port close notification
-				if frame.Type == "control" && frame.BodyType == "PortClose" {
-					// done with this input port
-					fmt.Fprintln(os.Stderr, "done with "+inPort)
-					break
-				}
-				// send it to output port
-				//TODO if debug fmt.Fprintln(os.Stderr, "sending it on")
-				frame.Port = "OUT"
-				if err := frame.Serialize(netout); err != nil {
-					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
-				}
-			} else {
-				//TODO check for IP on unexpected input port (loop currentIndex+1 until end)
-				// store it for later, in order
-				//TODO if debug fmt.Fprintln(os.Stderr, "buffering it")
-				frameBuffer = append(frameBuffer, frame)
+			// send it to output port
+			if unixfbp.Debug {
+				fmt.Println("forwarding packet")
+			}
+			//frame.Port = "OUT"
+			if err := frame.Serialize(netout); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err.Error())
+				break
 			}
 		}
 	}
