@@ -2,19 +2,19 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/kballard/go-shellquote"
 )
 
 const (
-	connCapacity = 100 // 0 = synchronous
+//connCapacity = 100 // 0 = synchronous
 )
 
 var (
@@ -128,8 +128,8 @@ func main() {
 		}
 
 		// start component as subprocess, with arguments
-		procs[proc.Name].Instance = newComponentInstance()
-		go startInstance(proc, procs, exitChan) //TODO maybe make procs and exitChan global
+		procs[proc.Name].Instance = newComponentInstance() //TODO optimize function call away
+		go startInstance(proc, procs, exitChan)            //TODO maybe make procs and exitChan global
 	}
 
 	// start up online configuration
@@ -152,60 +152,9 @@ func main() {
 		if debug {
 			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
-		// wait that all frames sent by the exited component have been delivered
-		// NOTE: otherwise the port close notification would be injected,
-		// because cmd.Wait() and exitChan easily overtakes handleComponentOutput() goroutine
-		<-procs[procName].Instance.AllDelivered
-		// same for exited component's stderr output
+		// wait that all output from the sub-process has been read
 		<-procs[procName].Instance.AllOutputted
-		// send PortClose notifications to all affected downstream components
-		proc := procs[procName]
-		var found bool
-	nextRemoteInstance:
-		for _, port := range proc.OutPorts {
-			// check for other processes still connected to that remote port
-			found = false
-			// for all running instances...
-			//TODO optimize - dont go through whole list -> needs better network datastructure
-			for _, procLookup := range procs {
-				// only not-deleted instances are considered alive
-				if proc.Instance == nil {
-					continue
-				}
-				// check for outport to same process on same remote port
-				for _, outPort := range procLookup.OutPorts {
-					if outPort.RemoteProc == port.RemoteProc && outPort.RemotePort == port.RemotePort {
-						// still got a running process feeding into that remote port
-						// NOTE: one match will be same connection as one currently notifying remote
-						if !found {
-							found = true
-						} else {
-							// found second match
-							continue nextRemoteInstance
-						}
-					}
-				}
-			}
-			// create notification for the remote port
-			notification := flowd.PortClose(port.RemotePort)
-			// send it to the remote process
-			//instancesLock.RLock()
-			//instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
-			input := procs[port.RemoteProc].Instance.Input
-			//instancesLock.RUnlock()
-			input <- SourceFrame{Frame: &notification, Source: proc}
-			/*
-				TODO
-				if instance, found := instances[port.RemoteProc]; found {
-					instance.Input <- SourceFrame{Frame: &notification, Source: proc}
-				} else {
-					fmt.Printf("ERROR: main loop: Instance %s not found / deleted - exiting.\n", port.RemoteProc)
-					os.Exit(1)
-				}
-			*/
-			//instancesLock.RUnlock()
-		}
-		// remove from list of instances
+		// remove instance information from the process
 		//instancesLock.Lock()
 		//delete(instances, procName)
 		//instancesLock.Unlock()
@@ -224,38 +173,85 @@ func main() {
 }
 
 // startProcess starts a process instance
+///TODO add option to give own Stdin and Stdout instead (for terminal applications) -- and send all output from components to log or STDERR instead
 func startInstance(proc *Process, procs Network, exitChan chan string) {
 	//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 
 	// start component as subprocess, with arguments
 	cmd := exec.Command(proc.Path)
 	// connect to STDOUT
-	cout, err := cmd.StdoutPipe()
-	if err != nil {
-		fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
-	}
-	//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
-	/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
-	-> maybe AllDelivered and AllRead unnecessary with own pipe.
-	cout, coutw := io.Pipe()
-	cmd.Stdout = coutw
+	///TODO prefix component name from stdout too
+	/*
+		cout, err := cmd.StdoutPipe()
+		if err != nil {
+			fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
+		}
+		//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
+		/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
+		-> maybe AllDelivered and AllRead unnecessary with own pipe.
+		cout, coutw := io.Pipe()
+		cmd.Stdout = coutw
 	*/
 	// connect to STDIN
-	cinPipe, err := cmd.StdinPipe()
-	if err != nil {
-		fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
-	}
-	cin := bufio.NewWriter(cinPipe)
+	/*
+		cinPipe, err := cmd.StdinPipe()
+		if err != nil {
+			fmt.Println("ERROR: could not allocate pipe to component stdin:", err)
+		}
+		cin := bufio.NewWriter(cinPipe)
+	*/
 	// connect to STDERR
 	cerr, err := cmd.StderrPipe()
 	if err != nil {
 		fmt.Println("ERROR: could not allocate pipe to component stderr:", err)
+		exitChan <- proc.Name
 	}
+	// set arguments
+	//TODO optimize appends and allocations
+	cmd.Args = []string{proc.Name}
+	/// add arguments for libunixfbp
+	for _, inport := range proc.InPorts {
+		// make that named pipe (FIFO)
+		path := fmt.Sprintf("/dev/shm/%s.%s", proc.Name, inport.LocalPort)
+		os.Remove(path)
+		syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		// append to arguments
+		cmd.Args = append(cmd.Args, "-inport", inport.LocalPort, "-inpath", path) //TODO optimize string concatenation
+	}
+	for _, outport := range proc.OutPorts {
+		// make that named pipe (FIFO)
+		path := fmt.Sprintf("/dev/shm/%s.%s", outport.RemoteProc, outport.RemotePort)
+		os.Remove(path)
+		syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		// append to arguments
+		cmd.Args = append(cmd.Args, "-outport="+outport.LocalPort, "-outpath="+path) //TODO optimize string concatenation
+	}
+	// send IIPs into component argv
+	if len(proc.IIPs) > 0 && proc.IIPs[0].Port == "ARGS" {
+		// add free arguments
+		args, err := shellquote.Split(proc.IIPs[0].Data)
+		if err != nil {
+			fmt.Printf("ERROR: could not split arguments in IIP to ARGS for component %s: %s\n", proc.Name, err)
+			exitChan <- proc.Name
+		}
+		cmd.Args = append(cmd.Args, args...)
+	}
+	if debug {
+		fmt.Printf("argv for %s: %v\n", proc.Name, cmd.Args)
+	}
+	// set more file descriptors
+	/*
+		TODO check if cmd.ExtraFiles []*os.File makes sense to transfer the named pipes directly
+		https://golang.org/pkg/os/exec/#Cmd
+		is this available in all programming languages? advantages?
+	*/
 	// start subprocess
 	if err = cmd.Start(); err != nil {
 		fmt.Printf("ERROR: could not start %s: %v\n", proc.Name, err)
 		exitChan <- proc.Name
 	}
+
+	///TODO also display component stdout? use stdout for something different than stderr?
 
 	// display component stderr
 	go func() {
@@ -272,41 +268,44 @@ func startInstance(proc *Process, procs Network, exitChan chan string) {
 
 	// first deliver initial information packets/frames
 	for i := 0; i < len(proc.IIPs); i++ {
-		iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
-		port := iipInfo.Port
-		data := iipInfo.Data
-		iip := &flowd.Frame{
-			Type:     "data",
-			BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
-			Port:     port,
-			//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
-			Extensions: nil,
-			Body:       []byte(data),
-		}
-		if !quiet {
-			fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
-		}
-		if err = iip.Serialize(cin); err != nil {
-			fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
-			os.Exit(3)
-		}
+		///TODO send regular IIPs to the given named pipe
+		/*
+			iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
+			port := iipInfo.Port
+			data := iipInfo.Data
+			iip := &flowd.Frame{
+				Type:     "data",
+				BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
+				Port:     port,
+				//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
+				Extensions: nil,
+				Body:       []byte(data),
+			}
+			if !quiet {
+				fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
+			}
+			if err = iip.Serialize(cin); err != nil {
+				fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+				os.Exit(3)
+			}
+		*/
 	}
 	// flush buffer
-	if err = cin.Flush(); err != nil {
-		fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
-		os.Exit(3)
-	}
+	/*
+		if err = cin.Flush(); err != nil {
+			fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
+			os.Exit(3)
+		}
+	*/
 	// GC it
 	proc.IIPs = nil
 
 	// start handler for regular packets/frames
-	//instancesLock.RLock()
-	inputChan := proc.Instance.Input
-	//instancesLock.RUnlock()
-	go handleComponentInput(inputChan, proc, cin)
+	//inputChan := proc.Instance.Input
+	//go handleComponentInput(inputChan, proc, cin)
 
 	// NOTE: this using manual buffering
-	go handleComponentOutput(proc, procs, cout)
+	//go handleComponentOutput(proc, procs, cout)
 
 	// wait for process to finish
 	//err = cmd.Wait()
@@ -328,6 +327,7 @@ func startInstance(proc *Process, procs Network, exitChan chan string) {
 	exitChan <- proc.Name
 }
 
+/*
 func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Writer) {
 	// for transferred bytes counting
 	var countBuf *bytes.Buffer
@@ -394,7 +394,9 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 	// channel got closed -> exit goroutine
 	fmt.Println("EOF from network input channel - closing.")
 }
+*/
 
+/*
 func handleComponentOutput(proc *Process, procs Network, cout io.ReadCloser) {
 	// initialize direct pointers to processes on other side of output ports
 	for index, outPort := range proc.OutPorts {
@@ -482,7 +484,10 @@ func handleComponentOutput(proc *Process, procs Network, cout io.ReadCloser) {
 		}
 	}
 }
+*/
 
+//TODO re-enable this functionality
+/*
 func handleNetOut(instance *ComponentInstance) {
 	var frame SourceFrame
 	for frame = range instance.Input {
@@ -493,6 +498,7 @@ func handleNetOut(instance *ComponentInstance) {
 	// channel got closed = EOF
 	fmt.Println("NETOUT received EOF on channel, exiting.")
 }
+*/
 
 func printUsage() {
 	//TODOfmt.Println("Usage:", os.Args[0], "-in [inport-endpoint(s)]", "-out [outport-endpoint(s)]", "[network-def-file]")
@@ -509,15 +515,12 @@ func printUsage() {
 // ComponentInstance contains state about a running network process
 type ComponentInstance struct {
 	//TODO only keep sendable chans here, return receiving channels from newComponentInstance()
-	ExitTo       chan bool        // tell command handler - and therefore component - to shut down	//TODO change to struct{} and close it
-	Input        chan SourceFrame // handler inbox for sending a frame to it
-	AllDelivered chan struct{}    // tells mail loop that all messages the exited component sent to STDOUT are now delivered
-	AllOutputted chan struct{}    // tells main loop that all output the exited component sent to STDERR are now read and displayed
-	Deleted      bool             //TODO mark entry as deleted to avoid concurrent read (many) and write (one for each instance on cleanup) panic on instance map
+	AllOutputted chan struct{} // tells main loop that all output the exited component sent to STDERR are now read and displayed
+	Cmd          *exec.Cmd     // subprocess state
 }
 
 func newComponentInstance() *ComponentInstance {
-	return &ComponentInstance{ExitTo: make(chan bool), Input: make(chan SourceFrame, connCapacity), AllDelivered: make(chan struct{}), AllOutputted: make(chan struct{})}
+	return &ComponentInstance{AllOutputted: make(chan struct{})}
 }
 
 // SourceFrame contains an actual frame plus sender information used in handler functions

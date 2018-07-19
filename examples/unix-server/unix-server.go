@@ -10,8 +10,8 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
 const bufSize = 65536

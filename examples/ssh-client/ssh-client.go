@@ -18,8 +18,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	sshagent "golang.org/x/crypto/ssh/agent"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
 const bufSize = 65536

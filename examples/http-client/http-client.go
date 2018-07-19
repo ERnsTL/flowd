@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
 const timeout = 10 * time.Second //TODO make this configurable in IIP

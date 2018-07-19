@@ -6,7 +6,7 @@ Reader(bin/file-read) OUT -> IN LineSplitter(bin/split-lines) OUT -> IN Filter(b
 # check ^ with stat /var/log/syslog
 
 # comment in/out as needed
-'/var/log/syslog' -> CONF Reader
-'-pass -or cron network sudo' -> CONF Filter
-#'-packets' -> CONF Counter
-#'-size' -> CONF Counter
+'/var/log/syslog' -> ARGS Reader
+'-pass -or cron network sudo' -> ARGS Filter
+#'-packets' -> ARGS Counter
+#'-size' -> ARGS Counter

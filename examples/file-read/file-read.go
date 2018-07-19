@@ -6,8 +6,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
 const bufSize = 65536
@@ -119,5 +119,5 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "IIP format: [flags] [file-path]...")
+	fmt.Fprintln(os.Stderr, "Arguments: [flags] [file-path]...")
 }

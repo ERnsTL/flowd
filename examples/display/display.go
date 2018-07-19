@@ -13,7 +13,7 @@ func main() {
 	// check arguments
 	//TODO
 	// 1st argument = FIFO path
-	inPipePath := os.Args[1]
+	inPipePath := os.Args[3+1] // [prog-name] -inport IN -inpath [fifo-path]
 	// open FIFOs
 	inPipe, err := os.OpenFile(inPipePath, os.O_RDONLY, os.ModeNamedPipe)
 	if err != nil {

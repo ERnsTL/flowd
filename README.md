@@ -322,6 +322,7 @@ After the change:
 
 * IPC type resp. transport medium:
   * named pipes resp. FIFOs
+  * should also be available on Windows
   * components communicate directly without passing through a daemon
   * only one serialization and one deserialization needed for a graph edge transition instead of two and two
 * graph definition language:
@@ -332,6 +333,8 @@ After the change:
   * need a generator some sort -- or a *flowd* again, which only starts and stops the network
   * a concise declarative language to define networks (.fbp data format) would be useful
   * **Result**: adapt *flowd* to named pipes and convert IIPs to ARGV port to component arguments
+  * simplifies flowd also
+  * and still possible to run via a shell script for testing if need be
 * start and stop method:
   * using PIDs; KILL -> components can shut down in order as defined by start and stop action
 * resume (checkpointing):

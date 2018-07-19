@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
 type message struct {

@@ -11,8 +11,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/ERnsTL/UnixFBP/libunixfbp"
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 	"github.com/signalsciences/tlstext"
 )
 
