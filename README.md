@@ -1,6 +1,6 @@
 # flowd
 
-> This is pre-alpha software. It basically works, but far from all of the planned features currently present.
+> This is pre-alpha software. It basically works, but not all of the planned features are currently present. The API is not stable.
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
@@ -318,7 +318,9 @@ After the change:
 * Much higher performance.
 
 
-### UnixFBP concept
+### Change of transport medium (UnixFBP concept)
+
+The transport medium was changed from STDIN/STDOUT through ```flowd``` to direct communication between the components via named pipes, which are managed by the operating system kernel. This was done in the commits d26901554b737c9d9ede94e02206a0a8c3922de2 and b5a4991e994506d9c9e2c3e2fd1fae47cd04cbac of 2018-07-19 with prototype work going back to 2018-07-10.
 
 * IPC type resp. transport medium:
   * named pipes resp. FIFOs
@@ -332,8 +334,8 @@ After the change:
   * much of the surrounding functionality is duplicated for each application shell script
   * need a generator some sort -- or a *flowd* again, which only starts and stops the network
   * a concise declarative language to define networks (.fbp data format) would be useful
-  * **Result**: adapt *flowd* to named pipes and convert IIPs to ARGV port to component arguments
-  * simplifies flowd also
+  * **Result**: adapt *flowd* to named pipes and convert IIPs into ARGV port to component arguments
+  * also simplifies ```flowd```
   * and still possible to run via a shell script for testing if need be
 * start and stop method:
   * using PIDs; KILL -> components can shut down in order as defined by start and stop action
@@ -393,3 +395,8 @@ Design decisions (can be revised if other solutions prove to be better):
   * OTOH, the program parameters can also be read from a FIFO, the contents of which could be generated a program resp. component
   * and reading from an IIP via a CONF inport or a file can be added on anyway
   * Result: either way is generally fine, but with the exception of online/runtime reconfiguration, parametrization is mostly done only once and the most efficient way is program arguments
+
+After the change:
+
+* Networks use 53 percent the real time = 1.87 as fast.
+* Networks use 35 percent the CPU time (user+sys) = 2.65 times as fast.
