@@ -146,6 +146,7 @@ func main() {
 	}
 	instanceCount := len(instances)
 	for instanceCount > 0 {
+		//TODO check for signal here
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
 		if debug {
@@ -526,3 +527,41 @@ type SourceFrame struct {
 	*flowd.Frame
 	Source *Process
 }
+
+/*TODO
+func handleSignals() {
+	signalChannel := make(chan os.Signal, 1) // subscribe to notification on signal
+	signal.Notify(signalChannel,
+		syscall.SIGHUP,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+		syscall.SIGINT,
+		syscall.SIGKILL,
+		syscall.SIGUSR1,
+	)
+	for sig := range signalChannel {
+		if sig == syscall.SIGHUP {
+			//TODO reload network
+		} else if sig == syscall.SIGUSR1 {
+			//TODO reopen log file
+		} else if sig == syscall.SIGTERM || sig == syscall.SIGQUIT || sig == syscall.SIGINT {
+			fmt.Println("Shutdown signal caught")
+			go func() {
+				select {
+				// exit if graceful shutdown not finished in 60 sec.
+				case <-time.After(time.Second * 60):
+					fmt.Println("ERROR: Graceful shutdown timed out")
+					os.Exit(1)
+				}
+			}()
+			//TODO shut all down here
+			fmt.Println("Shutdown completed, exiting.")
+			break
+			//TODO optimize breaks/returns here
+		} else {
+			fmt.Println("Shutdown, unknown signal caught")
+			break
+		}
+	}
+}
+*/
