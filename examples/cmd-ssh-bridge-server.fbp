@@ -7,9 +7,9 @@
 
 Server OUT -> IN Copy OUT -> IN Server
 
-'unixpacket://@flowd/bridge/in' -> CONF Server(bin/unix-server)
+'unixpacket://@flowd/bridge/in' -> ARGS Server(bin/unix-server)
 
-'OUT1' -> CONF copy(bin/copy)
+'OUT1' -> ARGS copy(bin/copy)
 
 # stdin2unix2stdout (started via SSH) will connect to UNIX server path
 # and FBP network sends back to stdin2unix2stdout over UNIX socket

@@ -7,9 +7,9 @@
 Schedule(bin/cron) OUT1 -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
 
 # every 1 seconds
-'-when "*/1 * * * * * *" -to OUT1' -> CONF Schedule
+'-when "*/1 * * * * * *" -to OUT1' -> ARGS Schedule
 # count packts, not body sizes
-'-packets' -> CONF Counter
+'-packets' -> ARGS Counter
 
 
 # Ask counter to send report every 10 seconds
@@ -17,7 +17,7 @@ Schedule(bin/cron) OUT1 -> IN Counter(bin/counter) OUT -> IN Display(bin/display
 RequestReport(bin/cron) REQREPORT -> REPORT Counter(bin/counter)
 
 # every 10 seconds
-'-when "*/10 * * * * * *" -to REQREPORT' -> CONF RequestReport
+'-when "*/10 * * * * * *" -to REQREPORT' -> ARGS RequestReport
 
 
 # exercise for the reader: achieve the same using only one instance of the cron component

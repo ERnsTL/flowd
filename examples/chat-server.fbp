@@ -3,4 +3,4 @@
 # bin/flowd -debug src/github.com/ERnsTL/flowd/examples/chat-server.fbp
 
 tcp(bin/tcp-server) OUT -> IN chat(bin/chat) OUT -> IN tcp
-'tcp4://localhost:4000' -> CONF tcp
+'tcp4://localhost:4000' -> ARGS tcp

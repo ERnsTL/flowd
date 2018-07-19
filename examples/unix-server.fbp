@@ -8,11 +8,11 @@
 unix(bin/unix-server) OUT -> IN chat(bin/chat) OUT -> IN unix
 
 # abstract UNIX socket are also supported, e.g. @path/path/path
-'unix:@myflowdchatserver/test' -> CONF unix
+'unix:@myflowdchatserver/test' -> ARGS unix
 
 # regular filesystem-bound UNIX socket:
-#'unix:/tmp/myflowdchatserver' -> CONF unix
+#'unix:/tmp/myflowdchatserver' -> ARGS unix
 
 # packet-oriented UNIX sockets (SEQPACKET) are also supported (untested, TODO):
-#'unixpacket:@myflowdchatserver/test' -> CONF unix
-#'unixpacket:/tmp/myflowdchatserver' -> CONF unix
+#'unixpacket:@myflowdchatserver/test' -> ARGS unix
+#'unixpacket:/tmp/myflowdchatserver' -> ARGS unix

@@ -6,7 +6,7 @@
 # framed network bridge via SSH to another part of the FBP network
 # starts a forwarding program on SSH server, which forwards to/from the ssh-bridge-server.fbp network via UNIX socket
 # NOTE: requires the stdin2unix2stdout program on SSH server
-'-debug -mode=one /usr/bin/ssh user@server bin/stdin2unix2stdout @flowd/bridge/in' -> CONF SSHClient(bin/cmd)
+'-debug -mode=one /usr/bin/ssh user@server bin/stdin2unix2stdout @flowd/bridge/in' -> ARGS SSHClient(bin/cmd)
 
 # send one test data packet as "data source"
 'somedata' IN SSHClient

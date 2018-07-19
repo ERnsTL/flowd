@@ -7,14 +7,14 @@ Router OUTB -> IN DisplayB(bin/display)
 Router NOMATCH -> IN DisplayNomatch(bin/display)
 
 # configuration
-'-field Myfield -missing NOMATCH -equals A -to OUTA -equals B -to OUTB' -> CONF Router
+'-field Myfield -missing NOMATCH -equals A -to OUTA -equals B -to OUTB' -> ARGS Router
 
-'/proc/version' -> CONF Reader1
-'Myfield=A' -> CONF SetHeader1
+'/proc/version' -> ARGS Reader1
+'Myfield=A' -> ARGS SetHeader1
 
-'/proc/uptime' -> CONF Reader2
-'Myfield=B' -> CONF SetHeader2
+'/proc/uptime' -> ARGS Reader2
+'Myfield=B' -> ARGS SetHeader2
 
-'/proc/loadavg' -> CONF Reader3
+'/proc/loadavg' -> ARGS Reader3
 
 # result: version on DisplayA, uptime on DisplayB and partitions on DisplayNomatch

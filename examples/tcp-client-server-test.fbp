@@ -4,16 +4,16 @@
 
 # TCP server with listen address and display what comes in
 tcps(bin/tcp-server) OUT -> IN display(bin/display)
-'tcp://localhost:4000' -> CONF tcps
+'tcp://localhost:4000' -> ARGS tcps
 
 # TCP client and send some data to TCP server
-delayConn(bin/sleep) OUT -> CONF tcpc(bin/tcp-client)
+delayConn(bin/sleep) OUT -> ARGS tcpc(bin/tcp-client)
 
-# allow TCP server to start, then send it its remote address to CONF
-'3s' -> CONF delayConn
+# allow TCP server to start, then send it its remote address to ARGS
+'3s' -> ARGS delayConn
 'tcp://localhost:4000' -> IN delayConn
 
 # send some data with delay
 delayData(bin/sleep) OUT -> IN tcpc
-'5s' -> CONF delayData
+'5s' -> ARGS delayData
 'some testdata from TCP client!' -> IN delayData

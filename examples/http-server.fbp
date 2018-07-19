@@ -20,5 +20,5 @@ EchoHandler OUT -> RESP HTTP
 HTTP RESP -> IN TCP
 
 # configuration
-'tcp://localhost:8080' -> CONF TCP
-'OUT' -> CONF EchoHandler
+'tcp://localhost:8080' -> ARGS TCP
+'OUT' -> ARGS EchoHandler
