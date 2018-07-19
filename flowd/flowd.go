@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
@@ -19,9 +18,8 @@ const (
 )
 
 var (
-	instancesLock sync.RWMutex // lock to the process instances array
-	debug         bool
-	quiet         bool
+	debug bool
+	quiet bool
 )
 
 func main() {
@@ -112,14 +110,16 @@ func main() {
 	//TODO
 
 	// launch network
-	//TODO make it unnecessary to have separate Process and ComponentInstance
-	instances := make(ComponentInstances)
 	exitChan := make(chan string)
 	// launch handler for NETOUT, if required
 	if len(nw.Outports) > 0 {
-		netout := newComponentInstance()
-		go handleNetOut(netout)
-		instances["NETOUT"] = netout
+		fmt.Println("WARNING: NETOUT currently unimplemented")
+		//TODO
+		/*
+			netout := newComponentInstance()
+			go handleNetOut(netout)
+			instances["NETOUT"] = netout
+		*/
 	}
 	// launch processes
 	for _, proc := range procs {
@@ -128,8 +128,8 @@ func main() {
 		}
 
 		// start component as subprocess, with arguments
-		instances[proc.Name] = newComponentInstance()
-		go startInstance(proc, instances, exitChan) //TODO maybe make instances and exitChan global
+		procs[proc.Name].Instance = newComponentInstance()
+		go startInstance(proc, procs, exitChan) //TODO maybe make procs and exitChan global
 	}
 
 	// start up online configuration
@@ -144,8 +144,9 @@ func main() {
 	if printruntime {
 		begin = time.Now()
 	}
-	instanceCount := len(instances)
+	instanceCount := len(procs)
 	for instanceCount > 0 {
+		//TODO check for signal here
 		procName := <-exitChan
 		//TODO detect if component exited intentionally (all data processed) or if it failed -> INFO, WARNING or ERROR and different behavior
 		if debug {
@@ -154,9 +155,9 @@ func main() {
 		// wait that all frames sent by the exited component have been delivered
 		// NOTE: otherwise the port close notification would be injected,
 		// because cmd.Wait() and exitChan easily overtakes handleComponentOutput() goroutine
-		<-instances[procName].AllDelivered
+		<-procs[procName].Instance.AllDelivered
 		// same for exited component's stderr output
-		<-instances[procName].AllOutputted
+		<-procs[procName].Instance.AllOutputted
 		// send PortClose notifications to all affected downstream components
 		proc := procs[procName]
 		var found bool
@@ -166,13 +167,11 @@ func main() {
 			found = false
 			// for all running instances...
 			//TODO optimize - dont go through whole list -> needs better network datastructure
-			for procNameLookup, instance := range instances {
+			for _, procLookup := range procs {
 				// only not-deleted instances are considered alive
-				if instance.Deleted {
+				if proc.Instance == nil {
 					continue
 				}
-				// get process = static network info
-				procLookup := procs[procNameLookup]
 				// check for outport to same process on same remote port
 				for _, outPort := range procLookup.OutPorts {
 					if outPort.RemoteProc == port.RemoteProc && outPort.RemotePort == port.RemotePort {
@@ -192,7 +191,7 @@ func main() {
 			// send it to the remote process
 			//instancesLock.RLock()
 			//instances[port.RemoteProc].Input <- SourceFrame{Frame: &notification, Source: proc}
-			input := instances[port.RemoteProc].Input
+			input := procs[port.RemoteProc].Instance.Input
 			//instancesLock.RUnlock()
 			input <- SourceFrame{Frame: &notification, Source: proc}
 			/*
@@ -210,7 +209,7 @@ func main() {
 		//instancesLock.Lock()
 		//delete(instances, procName)
 		//instancesLock.Unlock()
-		instances[procName].Deleted = true
+		procs[procName].Instance = nil
 		instanceCount--
 	}
 	if !quiet {
@@ -225,7 +224,7 @@ func main() {
 }
 
 // startProcess starts a process instance
-func startInstance(proc *Process, instances ComponentInstances, exitChan chan string) {
+func startInstance(proc *Process, procs Network, exitChan chan string) {
 	//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 
 	// start component as subprocess, with arguments
@@ -261,7 +260,7 @@ func startInstance(proc *Process, instances ComponentInstances, exitChan chan st
 	// display component stderr
 	go func() {
 		// prepare instance AllOutputted chan
-		donechan := instances[proc.Name].AllOutputted
+		donechan := proc.Instance.AllOutputted
 		// read each line and display with component name prepended
 		scanner := bufio.NewScanner(cerr)
 		for scanner.Scan() {
@@ -302,12 +301,12 @@ func startInstance(proc *Process, instances ComponentInstances, exitChan chan st
 
 	// start handler for regular packets/frames
 	//instancesLock.RLock()
-	inputChan := instances[proc.Name].Input
+	inputChan := proc.Instance.Input
 	//instancesLock.RUnlock()
 	go handleComponentInput(inputChan, proc, cin)
 
 	// NOTE: this using manual buffering
-	go handleComponentOutput(proc, instances, cout)
+	go handleComponentOutput(proc, procs, cout)
 
 	// wait for process to finish
 	//err = cmd.Wait()
@@ -396,11 +395,11 @@ func handleComponentInput(input <-chan SourceFrame, proc *Process, cin *bufio.Wr
 	fmt.Println("EOF from network input channel - closing.")
 }
 
-func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.ReadCloser) {
+func handleComponentOutput(proc *Process, procs Network, cout io.ReadCloser) {
 	// initialize direct pointers to processes on other side of output ports
 	for index, outPort := range proc.OutPorts {
 		// NOTE: changes to outPort here are not visible outside this loop
-		proc.OutPorts[index].RemoteInput = instances[outPort.RemoteProc].Input
+		proc.OutPorts[index].RemoteInput = procs[outPort.RemoteProc].Instance.Input
 	}
 	// for transferred bytes counting
 	var countBuf *bytes.Buffer
@@ -431,9 +430,8 @@ func handleComponentOutput(proc *Process, instances ComponentInstances, cout io.
 			// notify that all messages from component were delivered - main loop waits for this
 			//instancesLock.RLock()
 			//close(instances[proc.Name].AllDelivered)
-			instance := instances[proc.Name]
 			//instancesLock.RUnlock()
-			close(instance.AllDelivered)
+			close(proc.Instance.AllDelivered)
 			return
 		}
 
@@ -505,7 +503,8 @@ func printUsage() {
 
 // ComponentInstances is the collection type for holding the ComponentInstance list
 //TODO optimize: small optimization; instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
-type ComponentInstances map[string]*ComponentInstance
+//TODO use ^ for procs map (type Network)
+//type ComponentInstances map[string]*ComponentInstance
 
 // ComponentInstance contains state about a running network process
 type ComponentInstance struct {
@@ -526,3 +525,41 @@ type SourceFrame struct {
 	*flowd.Frame
 	Source *Process
 }
+
+/*TODO
+func handleSignals() {
+	signalChannel := make(chan os.Signal, 1) // subscribe to notification on signal
+	signal.Notify(signalChannel,
+		syscall.SIGHUP,
+		syscall.SIGTERM,
+		syscall.SIGQUIT,
+		syscall.SIGINT,
+		syscall.SIGKILL,
+		syscall.SIGUSR1,
+	)
+	for sig := range signalChannel {
+		if sig == syscall.SIGHUP {
+			//TODO reload network
+		} else if sig == syscall.SIGUSR1 {
+			//TODO reopen log file
+		} else if sig == syscall.SIGTERM || sig == syscall.SIGQUIT || sig == syscall.SIGINT {
+			fmt.Println("Shutdown signal caught")
+			go func() {
+				select {
+				// exit if graceful shutdown not finished in 60 sec.
+				case <-time.After(time.Second * 60):
+					fmt.Println("ERROR: Graceful shutdown timed out")
+					os.Exit(1)
+				}
+			}()
+			//TODO shut all down here
+			fmt.Println("Shutdown completed, exiting.")
+			break
+			//TODO optimize breaks/returns here
+		} else {
+			fmt.Println("Shutdown, unknown signal caught")
+			break
+		}
+	}
+}
+*/
