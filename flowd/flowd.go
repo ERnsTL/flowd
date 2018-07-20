@@ -153,7 +153,8 @@ func main() {
 			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
 		// wait that all output from the sub-process has been read
-		<-procs[procName].Instance.AllOutputted
+		<-procs[procName].Instance.AllOutputtedSTDOUT
+		<-procs[procName].Instance.AllOutputtedSTDERR
 		// remove instance information from the process
 		//instancesLock.Lock()
 		//delete(instances, procName)
@@ -180,18 +181,15 @@ func startInstance(proc *Process, procs Network, exitChan chan string) {
 	// start component as subprocess, with arguments
 	cmd := exec.Command(proc.Path)
 	// connect to STDOUT
-	///TODO prefix component name from stdout too
-	/*
-		cout, err := cmd.StdoutPipe()
-		if err != nil {
-			fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
-		}
-		//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
-		/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
+	cout, err := cmd.StdoutPipe()
+	if err != nil {
+		fmt.Println("ERROR: could not allocate pipe from component stdout:", err)
+	}
+	//TODO optimize: try custom buffered pipe: Faster / more directly into Frame?
+	/*TODO cmd.StdoutPipe() returns a pipe which is closed on wait -> data gets lost
 		-> maybe AllDelivered and AllRead unnecessary with own pipe.
 		cout, coutw := io.Pipe()
 		cmd.Stdout = coutw
-	*/
 	// connect to STDIN
 	/*
 		cinPipe, err := cmd.StdinPipe()
@@ -251,12 +249,23 @@ func startInstance(proc *Process, procs Network, exitChan chan string) {
 		exitChan <- proc.Name
 	}
 
-	///TODO also display component stdout? use stdout for something different than stderr?
-
-	// display component stderr
+	// display component STDOUT
 	go func() {
 		// prepare instance AllOutputted chan
-		donechan := proc.Instance.AllOutputted
+		donechan := proc.Instance.AllOutputtedSTDOUT
+		// read each line and display with component name prepended
+		scanner := bufio.NewScanner(cout)
+		for scanner.Scan() {
+			fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
+		}
+		// notify main loop
+		close(donechan)
+	}()
+
+	// display component STDERR
+	go func() {
+		// prepare instance AllOutputted chan
+		donechan := proc.Instance.AllOutputtedSTDERR
 		// read each line and display with component name prepended
 		scanner := bufio.NewScanner(cerr)
 		for scanner.Scan() {
@@ -515,12 +524,13 @@ func printUsage() {
 // ComponentInstance contains state about a running network process
 type ComponentInstance struct {
 	//TODO only keep sendable chans here, return receiving channels from newComponentInstance()
-	AllOutputted chan struct{} // tells main loop that all output the exited component sent to STDERR are now read and displayed
-	Cmd          *exec.Cmd     // subprocess state
+	AllOutputtedSTDOUT chan struct{} // tells main loop that all output the exited component sent to STDOUT are now read and displayed
+	AllOutputtedSTDERR chan struct{} // tells main loop that all output the exited component sent to STDERR are now read and displayed
+	Cmd                *exec.Cmd     // subprocess state
 }
 
 func newComponentInstance() *ComponentInstance {
-	return &ComponentInstance{AllOutputted: make(chan struct{})}
+	return &ComponentInstance{AllOutputtedSTDOUT: make(chan struct{}), AllOutputtedSTDERR: make(chan struct{})}
 }
 
 // SourceFrame contains an actual frame plus sender information used in handler functions
