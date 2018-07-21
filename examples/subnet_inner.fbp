@@ -1,0 +1,12 @@
+LineSplitter(bin/split-lines) OUT -> IN Filter(bin/packet-filter-string)
+
+# second IN = network IN
+INPORT=LineSplitter.IN:IN
+# second OUT = network OUT
+OUTPORT=Filter.OUT:OUT
+
+# comment in/out as needed
+#'/var/log/syslog' -> ARGS Reader
+'-pass -or cron network sudo' -> ARGS Filter
+#'-packets' -> ARGS Counter
+#'-size' -> ARGS Counter

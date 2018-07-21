@@ -1,0 +1,8 @@
+Reader(bin/file-read) OUT -> IN Subnet(bin/flowd) OUT -> IN Display(bin/display)
+
+# comment in/out as needed
+'/var/log/syslog' -> ARGS Reader
+'subnet_inner.fbp' -> ARGS Subnet
+#'-pass -or cron network sudo' -> ARGS Filter
+#'-packets' -> ARGS Counter
+#'-size' -> ARGS Counter
