@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/ERnsTL/flowd/libflowd"
+	"github.com/ERnsTL/flowd/libunixfbp"
 	"github.com/kballard/go-shellquote"
+	"github.com/oleksandr/fbp"
 )
 
 const (
@@ -36,9 +38,10 @@ func main() {
 	// read program arguments
 	var help, graph, dependencies, printruntime bool
 	var olc string
+	unixfbp.DefFlags()
 	flag.BoolVar(&help, "h", false, "print usage information")
-	flag.BoolVar(&debug, "debug", false, "give detailed event output")
-	flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
+	//flag.BoolVar(&debug, "debug", false, "give detailed event output")
+	//flag.BoolVar(&quiet, "quiet", false, "no informational output except errors")
 	flag.StringVar(&olc, "olc", "", "host:port for online configuration using JSON FBP protocol")
 	flag.BoolVar(&graph, "graph", false, "output visualization of given network in GraphViz format and exit")
 	flag.BoolVar(&dependencies, "deps", false, "output required components for given network and exit")
@@ -49,6 +52,8 @@ func main() {
 	}
 
 	// consistency of flags
+	debug = unixfbp.Debug //TODO optimize
+	quiet = unixfbp.Quiet
 	if debug && quiet {
 		fmt.Println("ERROR: cannot have both -debug and -quiet")
 		os.Exit(1)
@@ -111,16 +116,18 @@ func main() {
 
 	// launch network
 	exitChan := make(chan string)
-	// launch handler for NETOUT, if required
-	if len(nw.Outports) > 0 {
-		fmt.Println("WARNING: NETOUT currently unimplemented")
-		//TODO
-		/*
+	// launch handler(s) for INPORT, if required
+	// NOTE: not necessary, because this will be picked up in startInstance()
+
+	// launch handler(s) for NETOUT, if required
+	/*
+		if len(nw.Outports) > 0 {
+			//fmt.Println("WARNING: NETOUT currently unimplemented")
 			netout := newComponentInstance()
 			go handleNetOut(netout)
 			instances["NETOUT"] = netout
-		*/
-	}
+		}
+	*/
 	// launch processes
 	for _, proc := range procs {
 		if !quiet {
@@ -129,7 +136,7 @@ func main() {
 
 		// start component as subprocess, with arguments
 		procs[proc.Name].Instance = newComponentInstance() //TODO optimize function call away
-		go startInstance(proc, procs, exitChan)            //TODO maybe make procs and exitChan global
+		go startInstance(proc, procs, nw, exitChan)        //TODO maybe make procs, nw and exitChan global
 	}
 
 	// start up online configuration
@@ -175,7 +182,7 @@ func main() {
 
 // startProcess starts a process instance
 ///TODO add option to give own Stdin and Stdout instead (for terminal applications) -- and send all output from components to log or STDERR instead
-func startInstance(proc *Process, procs Network, exitChan chan string) {
+func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan string) {
 	//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 
 	// start component as subprocess, with arguments
@@ -208,19 +215,55 @@ func startInstance(proc *Process, procs Network, exitChan chan string) {
 	//TODO optimize appends and allocations
 	cmd.Args = []string{proc.Name}
 	/// add arguments for libunixfbp
+	var path string
 	for _, inport := range proc.InPorts {
-		// make that named pipe (FIFO)
-		path := fmt.Sprintf("/dev/shm/%s.%s", proc.Name, inport.LocalPort)
-		os.Remove(path)
-		syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		path = ""
+		// check if this port is target of a network INPORT
+		if len(nw.Inports) > 0 {
+			for inPortName, inPort := range nw.Inports {
+				if inPort.Process == proc.Name && inPort.Port == inport.LocalPort {
+					// this component is target of a network INPORT
+					///TODO see what makes more sense -- the unixfbp parameters would be consistent and are given automatically by flowd (could make exception for subnets), but nwName and using that as prefix is simpler and less parsing
+					//path = fmt.Sprintf("/dev/shm/%s.%s", nwName, inPortName)
+					path = unixfbp.InPorts[inPortName].Path
+					if debug {
+						fmt.Println("yes, INPORT-connected: INPORT", inPortName, "goes into component", proc.Name, "port", inport.LocalPort)
+					}
+					break
+				}
+			}
+		}
+		if path == "" {
+			// make that named pipe (FIFO)
+			path = fmt.Sprintf("/dev/shm/%s.%s", proc.Name, inport.LocalPort)
+			os.Remove(path)
+			syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		}
 		// append to arguments
 		cmd.Args = append(cmd.Args, "-inport", inport.LocalPort, "-inpath", path) //TODO optimize string concatenation
 	}
 	for _, outport := range proc.OutPorts {
-		// make that named pipe (FIFO)
-		path := fmt.Sprintf("/dev/shm/%s.%s", outport.RemoteProc, outport.RemotePort)
-		os.Remove(path)
-		syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		path = ""
+		// check if this port is source of a network OUTPORT
+		if len(nw.Outports) > 0 {
+			for outPortName, outPort := range nw.Outports {
+				if outPort.Process == proc.Name && outPort.Port == outport.LocalPort {
+					// this component is source of a network OUTPORT
+					//path = fmt.Sprintf("/dev/shm/%s.%s", nwName, outPortName)
+					path = unixfbp.OutPorts[outPortName].Path
+					if debug {
+						fmt.Println("yes, OUTPORT-connected: component", proc.Name, "port", outport.LocalPort, "goes into OUTPORT", outPortName)
+					}
+					break
+				}
+			}
+		}
+		if path == "" {
+			// make that named pipe (FIFO)
+			path = fmt.Sprintf("/dev/shm/%s.%s", outport.RemoteProc, outport.RemotePort)
+			os.Remove(path)
+			syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+		}
 		// append to arguments
 		cmd.Args = append(cmd.Args, "-outport="+outport.LocalPort, "-outpath="+path) //TODO optimize string concatenation
 	}

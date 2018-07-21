@@ -43,13 +43,8 @@ type Port struct {
 
 func getNetworkDefinition() []byte {
 	var nwSource io.ReadCloser
-	if termutil.Isatty(os.Stdin.Fd()) {
+	if flag.NArg() == 1 {
 		// get from file
-		if flag.NArg() != 1 {
-			fmt.Println("ERROR: missing network definition file to run")
-			printUsage()
-		}
-
 		if debug {
 			fmt.Println("reading network definition from file", flag.Arg(0))
 		}
@@ -59,12 +54,15 @@ func getNetworkDefinition() []byte {
 			fmt.Println(err.Error())
 			os.Exit(1)
 		}
-	} else {
+	} else if !termutil.Isatty(os.Stdin.Fd()) {
 		// get from STDIN
 		if debug {
 			fmt.Println("found something piped on STDIN, reading network definition from it")
 		}
 		nwSource = os.Stdin
+	} else {
+		fmt.Println("ERROR: missing network definition file to run")
+		printUsage()
 	}
 
 	// read network definition
@@ -81,6 +79,7 @@ func getNetworkDefinition() []byte {
 }
 
 func parseNetworkDefinition(nwBytes []byte) *fbp.Fbp {
+	//TODO set Subgraph attribute to nwName if flowd is running as a network component -> process names get that as prefix -> solves name clashes
 	nw := &fbp.Fbp{Buffer: (string)(nwBytes)}
 	if debug {
 		fmt.Println("init")
