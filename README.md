@@ -365,7 +365,7 @@ Design decisions (can be revised if other solutions prove to be better):
     * file-based
     * file operations are implemented everywhere and in all programming languages
     * optimization possibility using splice system call (Linux) = direct fd-to-fd copy in kernel space
-    * multi-writer support is limited by atomic message size, see POSIX PIPE_BUF; 4096 in Linux; 512 in other implementations; this might be a limitation of FIFOs as the transport medium
+    * multi-writer support is limited by atomic message size, see POSIX PIPE_BUF; 4096 in Linux; 512 in other implementations; this might be a limitation of FIFOs as the transport medium; OTOH array ports should solve this issue
     * multi-reader support would be possible if messages were of the same size
     * can start writer before reader is there -- open(3) will block until other end is there; FIFO is a connection no matter what even with O_NONBLOCK, not a mailbox
     * faster than unix sockets for message sizes smallen than 64K ([source](https://github.com/avsm/ipc-bench))
