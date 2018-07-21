@@ -1,6 +1,6 @@
 # flowd: *the data must flow*
 
-> This is alpha software. It works, is reasonably optimized, but not all of the planned features are currently present. The API may change unexpectedly.
+> This is alpha software. It works, is quite optimized, but not all of the planned features are currently present. The API may change unexpectedly.
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
@@ -41,7 +41,8 @@ Currently present features:
 * Sub-networks resp. composite components
 * Fast, direct transfer of IPs between components using named pipes (FIFOs); only shared memory would be faster
 * Running a processing network with or without ```flowd``` as the orchestrator
-* Ability to run a terminal UI component - and then bring it to the web using [gotty](https://github.com/yudai/gotty) :-)
+* Can inspect, debug and interact with network components using standard Unix tools
+* Can run a terminal UI component - and then bring it to the web using [gotty](https://github.com/yudai/gotty) :-)
 
 The included example components cover:
 
