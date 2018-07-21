@@ -1,6 +1,6 @@
-# flowd
+# flowd: *the data must flow*
 
-> This is pre-alpha software. It basically works, but not all of the planned features are currently present. The API is not stable.
+> This is alpha software. It works, is reasonably optimized, but not all of the planned features are currently present. The API may change unexpectedly.
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
@@ -27,6 +27,8 @@ You can find out more about this paradigm on J. Paul Morrison's website linked a
 
 ## Features
 
+Currently present features:
+
 * Parsing of ```.fbp``` network specifications
 * Starting a network of the specified components
 * Simple and easy to implement framing format
@@ -47,7 +49,7 @@ The included example components cover:
 * Unix domain client and server (abstract and path-based)
 * TLS client and server
 * SSH client
-* simple HTTP server and client
+* Simple HTTP server and client
 * Re-use of any existing programs and their output or for transformation of data
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
@@ -58,7 +60,7 @@ The included example components cover:
 * Extraction of data from frame body
 * Routing based on frame contents or header values
 * Time-based events with cron expressions
-* Counter for packets and packet sizes
+* Counter for packets, packet sizes and packets matching by header field
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
 
@@ -266,4 +268,4 @@ GNU LGPLv3+
 
 ## Further documentation
 
-* [design history and rationale](doc/design_history.md)
+* [Design history and rationale](doc/design_history.md)
