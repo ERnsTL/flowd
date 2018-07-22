@@ -64,6 +64,7 @@ The included example components cover:
 * Counter for packets, packet sizes and packets matching by header field
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
+* Compression in XZ/LZMA2 format
 
 Planned features:
 
