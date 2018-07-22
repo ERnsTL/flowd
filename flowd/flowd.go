@@ -214,6 +214,17 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 	// set arguments
 	//TODO optimize appends and allocations
 	cmd.Args = []string{proc.Name}
+	// add ports for IIPs
+	//TODO optimize: proc.IIPs is traversed more than once
+	for _, iip := range proc.IIPs {
+		if iip.Port != "ARGS" {
+			// regular IIP - make port for that and create named pipe and deliver IIP
+			proc.InPorts = append(proc.InPorts, Port{
+				LocalPort: iip.Port,
+				// leave RemotePort and RemotePort unset
+			})
+		}
+	}
 	/// add arguments for libunixfbp
 	var path string
 	for _, inport := range proc.InPorts {
@@ -267,7 +278,7 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 		// append to arguments
 		cmd.Args = append(cmd.Args, "-outport="+outport.LocalPort, "-outpath="+path) //TODO optimize string concatenation
 	}
-	// send IIPs into component argv
+	// send IIPs: ARGS go into component argv, others need named pipes
 	if len(proc.IIPs) > 0 && proc.IIPs[0].Port == "ARGS" {
 		// add free arguments
 		args, err := shellquote.Split(proc.IIPs[0].Data)
@@ -318,38 +329,49 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 		close(donechan)
 	}()
 
-	// first deliver initial information packets/frames
-	for i := 0; i < len(proc.IIPs); i++ {
-		///TODO send regular IIPs to the given named pipe
-		/*
-			iipInfo := proc.IIPs[i] //TODO optimize reduce allocations here
-			port := iipInfo.Port
-			data := iipInfo.Data
-			iip := &flowd.Frame{
+	// deliver initial information packets/frames
+	// NOTE: opening a named pipe will block until the other side has opened it
+	// -> deliver the IIPs after the process has been started or before in Goroutines
+	for _, iip := range proc.IIPs {
+		if iip.Port != "ARGS" { //TODO optimize so that IIPs list does not have to traversed multiple times
+			// get port path
+			path := fmt.Sprintf("/dev/shm/%s.%s", proc.Name, iip.Port)
+			// open named pipe = FIFO
+			outPipe, err := os.OpenFile(path, os.O_WRONLY, os.ModeNamedPipe)
+			if err != nil {
+				fmt.Printf("ERROR: opening pipe to %s.%s at path %s for IIP delivery: %s - exiting.\n", proc.Name, iip.Port, path, err)
+				os.Exit(2)
+			}
+			// create buffered writer
+			outWriter := bufio.NewWriter(outPipe)
+			// prepare frame
+			iipFrame := &flowd.Frame{
 				Type:     "data",
-				BodyType: "IIP", //TODO maybe this could be user-defined, but would make argument-passing more complicated for little return
-				Port:     port,
-				//ContentType: "text/plain", // is a string from commandline, unlikely to be binary = application/octet-stream, no charset info needed since on same platform
-				Extensions: nil,
-				Body:       []byte(data),
+				BodyType: "IIP",
+				Body:     []byte(iip.Data),
 			}
-			if !quiet {
-				fmt.Printf("in xfer 1 IIP to %s.%s\n", proc.Name, port)
-			}
-			if err = iip.Serialize(cin); err != nil {
-				fmt.Println("ERROR sending IIP to port", port, ": ", err, "- Exiting.")
+			// send it to the component
+			if err = iipFrame.Serialize(outWriter); err != nil {
+				fmt.Printf("ERROR: serializing IIP for %s.%s: %s - exiting.\n", proc.Name, iip.Port, err)
 				os.Exit(3)
 			}
-		*/
-	}
-	// flush buffer
-	/*
-		if err = cin.Flush(); err != nil {
-			fmt.Println("ERROR flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
-			os.Exit(3)
+			// flush buffer
+			if err = outWriter.Flush(); err != nil {
+				fmt.Println("ERROR: flushing IIPs to process", proc.Name, ": ", err, "- Exiting.")
+				os.Exit(3)
+			}
+			// close the named pipe
+			if err = outPipe.Close(); err != nil {
+				fmt.Printf("ERROR: closing pipe to %s.%s: %s - exiting.\n", proc.Name, iip.Port, err)
+				os.Exit(3)
+			}
+			// success
+			if !quiet {
+				fmt.Printf("sent IIP to %s.%s\n", proc.Name, iip.Port)
+			}
 		}
-	*/
-	// GC it
+	}
+	// GC IIP information
 	proc.IIPs = nil
 
 	// start handler for regular packets/frames
