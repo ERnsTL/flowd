@@ -181,7 +181,7 @@ func main() {
 }
 
 // startProcess starts a process instance
-///TODO add option to give own Stdin and Stdout instead (for terminal applications) -- and send all output from components to log or STDERR instead
+// NOTE: own STDIN and STDOUT is given to components by default, thus enabling terminal UIs
 func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan string) {
 	//TODO implement exit channel behavior to goroutine ("we are going down for shutdown!")
 
