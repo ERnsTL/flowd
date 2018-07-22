@@ -101,11 +101,12 @@ func main() {
 				frame, err := flowd.Deserialize(netin)
 				if err != nil {
 					if err == io.EOF {
-						fmt.Fprintln(os.Stderr, "tcp out: EOF from FBP network on STDIN. Exiting.")
+						fmt.Fprintln(os.Stderr, "tcp out: EOF from FBP network. Exiting.")
 					} else {
-						fmt.Fprintln(os.Stderr, "tcp out: ERROR parsing frame from FBP network on STDIN:", err, "- Exiting.")
+						fmt.Fprintln(os.Stderr, "tcp out: ERROR parsing frame from FBP network:", err, "- Exiting.")
 						//TODO notification feedback into FBP network
 					}
+					//FIXME
 					os.Stdin.Close()
 					//TODO gracefully shut down / close all connections
 					os.Exit(3)
@@ -135,8 +136,9 @@ func main() {
 					os.Exit(1)
 				} else {
 					// success
-					//TODO if !quiet - add that flag
-					fmt.Fprintf(os.Stderr, "tcp out: wrote %d bytes to %s\n", bytesWritten, conn.RemoteAddr())
+					if !unixfbp.Quiet {
+						fmt.Fprintf(os.Stderr, "tcp out: wrote %d bytes to %s\n", bytesWritten, conn.RemoteAddr())
+					}
 				}
 
 				if frame.BodyType == "CloseConnection" {
