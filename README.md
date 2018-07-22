@@ -43,6 +43,9 @@ Currently present features:
 * Running a processing network with or without ```flowd``` as the orchestrator
 * Can inspect, debug and interact with network components using standard Unix tools
 * Can run a terminal UI component - and then bring it to the web using [gotty](https://github.com/yudai/gotty) :-)
+* Delivery of *initial information packets* (IIPs)
+* Delivery of program parameters to components
+* Connections between components in framed or raw way
 
 The included example components cover:
 
