@@ -36,7 +36,7 @@ Currently present features:
 * Closing of ports and close detection
 * Gracelful shutdown once all data has been processed and all components shut down
 * Visualization of the given network in *GraphViz* format
-* Display of required components and file dependencies of the given network
+* Display of required components and file dependencies of the given network for deployment
 * Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice - kpc, WebSocket,  GRPC, CapnProto, Protobuf, Flatbuffers, JSON, MsgPack, gob, RON, ...
 * Sub-networks resp. composite components
 * Fast, direct transfer of IPs between components using named pipes (FIFOs); only shared memory would be faster
