@@ -1,4 +1,4 @@
-# flowd: *the data must flow*
+# flowd: *the data must flow*<sup>[1](https://en.wikiquote.org/wiki/Dune_(film)#Others)</sup>
 
 > This is alpha software. It works, is quite optimized, but not all of the planned features are currently present. The API may change unexpectedly.
 
@@ -21,8 +21,6 @@ This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Pa
 The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which then constitutes an *application* or processing system of some kind.
 
 The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and visual kind of programming with direct feedback of the changes just made, based on the combination and connection of re-usable *black boxes* working together in a *visually drawable and mappable* processing network resp. application.
-
-The network is the application, in which *[the data must flow](https://en.wikiquote.org/wiki/Dune_(film)#Others)* ;-)
 
 You can find out more about this paradigm on J. Paul Morrison's website linked above.
 
