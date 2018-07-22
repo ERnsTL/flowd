@@ -16,6 +16,7 @@ type Network map[string]*Process
 
 // Process holds information about a network process
 //TODO optimize: small optimization; instead of string maps -> int32 using symbol table, see https://syslog.ravelin.com/making-something-faster-56dd6b772b83
+//TODO mixes concern "hold network information" and "hold handy runtime information"
 type Process struct {
 	Path     string
 	Name     string
@@ -33,12 +34,10 @@ type IIP struct {
 
 // Port holds connection information about a process port (connection), whether input or output
 //TODO optimize: convert network information to <E,V> = edges and vertices = nodes and connections structure
-//TODO mixes concern "hold network information" and "hold handy runtime information"
 type Port struct {
-	LocalPort   string
-	RemotePort  string
-	RemoteProc  string
-	RemoteInput chan<- SourceFrame // direct connection to running instance
+	LocalPort  string
+	RemotePort string
+	RemoteProc string
 }
 
 func getNetworkDefinition() []byte {
