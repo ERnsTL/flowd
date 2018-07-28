@@ -6,7 +6,7 @@ Wire up components (programs) written in different programming languages, using 
 
 Make them communicate in a network of components.
 
-Build a *data factory* in which components transform the passed data frames around to produce a uselful output.
+Build a *data factory* in which components transform the passed data frames around to produce a useful output.
 
 Components naturally make use of all available processor cores.
 
