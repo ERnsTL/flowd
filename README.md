@@ -162,11 +162,6 @@ You can find out more about the ```.fbp``` network description grammar here:
 * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
 * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
 
-Community contacts:
-
-* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
-* [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
-
 
 ## Visualization Example
 
@@ -269,3 +264,9 @@ GNU LGPLv3+
 ## Further documentation
 
 * [Design history and rationale](doc/design_history.md)
+
+
+## Community
+
+* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
+* [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
