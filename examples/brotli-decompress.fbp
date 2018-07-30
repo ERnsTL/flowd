@@ -2,4 +2,4 @@ File(bin/file-read) OUT -> IN Decompresser(bin/brotli-read) OUT -> IN Display(bi
 
 '-debug' -> ARGS Decompresser
 
-'-debug -framed=false /dev/shm/testdata.br' -> ARGS File
+'-debug -framed=false /dev/shm/testdata.bro' -> ARGS File
