@@ -1,5 +1,5 @@
 /*
-Writer resp. encoder for LZMA2 from the liblzma from the xzutils project.
+Writer resp. encoder for LZMA2 from liblzma from the xzutils project.
 Output is a raw = unframed compressed bytestream.
 
 Requires C headers for liblzma:
@@ -65,7 +65,7 @@ func main() {
 	// main loop
 	if bridge {
 		fmt.Fprintln(os.Stderr, "forwarding frames")
-		// copy IN to compression writer
+		// copy IN to compressing writer
 		if _, err = io.Copy(xzWriter, netin); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR on FBP->LZMA:", err)
 			return
