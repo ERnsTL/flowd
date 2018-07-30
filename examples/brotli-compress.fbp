@@ -1,0 +1,6 @@
+Compresser(bin/brotli-write) OUT -> IN File(bin/file-write)
+
+'-debug -level 11' -> ARGS Compresser
+'testdata' -> IN Compresser
+
+'-debug -framed=false /dev/shm/testdata.br' -> ARGS File
