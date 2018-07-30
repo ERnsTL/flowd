@@ -15,13 +15,20 @@ const bufSize = 65536
 func main() {
 	// flag variables
 	var filePaths []string
-	var brackets bool
+	var brackets, framed bool
 	// get configuration from flags = Unix IIP (which can be generated out of another FIFO or similar)
 	unixfbp.DefFlags()
 	flag.BoolVar(&brackets, "brackets", false, "enclose each file in brackets")
+	flag.BoolVar(&framed, "framed", true, "frame the file data or not")
 	flag.Parse()
 	if flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: missing filepath(s) to read")
+		printUsage()
+		flag.PrintDefaults() // prints to STDERR
+		os.Exit(2)
+	}
+	if brackets && framed {
+		fmt.Fprintln(os.Stderr, "ERROR: cannot have both -framed and -brackets")
 		printUsage()
 		flag.PrintDefaults() // prints to STDERR
 		os.Exit(2)
@@ -63,35 +70,42 @@ func main() {
 			continue
 		}
 
-		// send open bracket
-		//TODO send filename also?
-		if brackets {
-			obracket.Serialize(netout)
-		}
+		if framed {
+			// send open bracket
+			//TODO send filename also?
+			if brackets {
+				obracket.Serialize(netout)
+			}
 
-		// read it in chunks until end, forward chunks
-		for {
-			// read chunk
-			n, err = file.Read(buf)
-			if err != nil {
-				// just EOF or did any real error occur?
-				if err != io.EOF {
-					fmt.Fprintln(os.Stderr, "ERROR: reading file:", err)
+			// read it in chunks until end, forward chunks
+			for {
+				// read chunk
+				n, err = file.Read(buf)
+				if err != nil {
+					// just EOF or did any real error occur?
+					if err != io.EOF {
+						fmt.Fprintln(os.Stderr, "ERROR: reading file:", err)
+					}
+					// done with this file
+					break
 				}
-				// done with this file
-				break
-			}
-			if unixfbp.Debug {
-				fmt.Fprintf(os.Stderr, "file %d: read %d bytes\n", i+1, n)
-			}
+				if unixfbp.Debug {
+					fmt.Fprintf(os.Stderr, "file %d: read %d bytes\n", i+1, n)
+				}
 
-			// save as body
-			outframe.Body = buf[:n]
+				// save as body
+				outframe.Body = buf[:n]
 
-			// send it to output port
-			if err = outframe.Serialize(netout); err != nil {
-				fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
-				break
+				// send it to output port
+				if err = outframe.Serialize(netout); err != nil {
+					fmt.Fprintln(os.Stderr, "ERROR: marshaling frame:", err)
+					break
+				}
+			}
+		} else {
+			// copy raw byte stream
+			if _, err = io.Copy(netout, file); err != nil {
+				fmt.Fprintf(os.Stderr, "ERROR: reading from file '%s': %s\n", filePaths[i], err)
 			}
 		}
 
