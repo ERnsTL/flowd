@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
@@ -10,24 +9,10 @@ import (
 	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
-type PortHandle struct {
-	//Name string
-	Writer *bufio.Writer
-	Pipe   *os.File
-}
-
 func main() {
 	// flag variables
-	var brackets, control bool
-	var packets, size bool
-	var packetsPerFieldValue string
 	// get configuration from flags
 	unixfbp.DefFlags()
-	flag.BoolVar(&brackets, "brackets", false, "expect bracketed input streams")
-	flag.BoolVar(&control, "control", false, "count control packets as well")
-	flag.BoolVar(&size, "size", false, "count size of packet bodies")
-	flag.BoolVar(&packets, "packets", false, "count number of packets")
-	flag.StringVar(&packetsPerFieldValue, "packetsperfieldvalue", "", "count number of packets per value of given header field")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments given")
