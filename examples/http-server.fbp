@@ -3,6 +3,7 @@
 # bin/flowd -debug src/github.com/ERnsTL/flowd/examples/http-server.fbp
 # send test request:
 # wget --post-data="test=my-POST-data" http://localhost:8080/ --server-response -O /dev/shm/out && cat /dev/shm/out
+# wget --body-data="hello HTTP" --method=get http://localhost:8080/ --server-response -O /dev/shm/out && cat /dev/shm/out
 
 # only display each received HTTP request body
 #TCP(bin/tcp-server) OUT -> IN HTTP(bin/http-server) OUT -> IN Display(bin/display)
@@ -21,4 +22,8 @@ HTTP RESP -> IN TCP
 
 # configuration
 'tcp://localhost:8080' -> ARGS TCP
-'OUT' -> ARGS EchoHandler
+
+# debug configuration
+#'-debug tcp://localhost:8080' -> ARGS TCP
+#'-debug' -> ARGS HTTP
+#'-debug' -> ARGS EchoHandler
