@@ -116,7 +116,7 @@ Design decisions (can be revised if other solutions prove to be better):
     * bidirectional, but not required in FBP (except for ACKs maybe) -- would be best choice for actor system
     * message / datagram semantics -- SEQPACKET mode would be best = connection-oriented (can detect other side disconnecting) and message-oriented
   * shared memory / memory mapping / mmap:
-    * would be fastest, but not possible due to integration of different programming languages (which align their data differently, have different data types, have their own GC etc.)
+    * would be fastest, but not possible due to integration of different programming languages (which align their data differently, have different data types, have their own GC etc.) -- or would require conformance to a specific C-compatible ABI, thus excluding several languages and easy re-use of existing programs unmodified
     * chunking size / granularity can be decided based on performance requirements by developer anyway
     * the exact way of how to "do shared memory" needs to be agreed upon for all programs; it's complex and needs to be done carefully
     * not possible in all programming languages
