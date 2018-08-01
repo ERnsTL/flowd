@@ -1,3 +1,13 @@
+/*
+a simple HTTP server
+
+ports:
+- IN for connections from a network transport
+- OUT for sending out the HTTP requests to a handler inside the FBP network
+- RESP (inport) to receive responses from the handler(s)
+- RESP (outport) to send HTTP-packaged responses back over the network transport
+*/
+
 package main
 
 import (
@@ -87,12 +97,11 @@ func main() {
 		}
 	}()
 	go func() {
-		// open port RESP
+		// open input port RESP
 		netresp, _, err := unixfbp.OpenInPort("RESP")
 		if err != nil {
 			fmt.Println("ERROR:", err)
 			os.Exit(2)
-
 		}
 
 		for {
@@ -106,6 +115,15 @@ func main() {
 			respChan <- frame
 		}
 	}()
+	// open output port RESP
+	respout, _, err := unixfbp.OpenOutPort("RESP")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	if !unixfbp.Quiet {
+		fmt.Fprintln(os.Stderr, "serving")
+	}
 
 	// main loop
 nextframe:
@@ -204,20 +222,16 @@ nextframe:
 			}
 
 			// send to network
-			if err := respFrame.Serialize(netout); err != nil {
+			if err := respFrame.Serialize(respout); err != nil {
 				fmt.Fprintf(os.Stderr, "%s: ERROR: marshaling HTTP response frame downstream: %v - dropping.\n", connID, err)
 			}
 			if netin.Buffered() == 0 {
-				if err := netout.Flush(); err != nil {
+				if err := respout.Flush(); err != nil {
 					fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
 				}
 			}
 			fmt.Fprintf(os.Stderr, "%s: response forwarded\n", connID)
-		default:
-			fmt.Fprintln(os.Stderr, "WARNING: packet received on unexpected port:", frame.Port, "- discarding.")
-			continue
 		}
-
 	}
 }
 
