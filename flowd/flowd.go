@@ -370,6 +370,7 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 	// wait for process to finish
 	//err = cmd.Wait()
 	// NOTE: cmd.Wait() would close the Stdout pipe (too early?), dropping unread frames
+	//TODO optimize - is this still necessary? move channel receives from STDOUT and STDERR before cmd.Wait()
 	state, err := cmd.Process.Wait()
 	cmd.ProcessState = state
 	if err != nil {
