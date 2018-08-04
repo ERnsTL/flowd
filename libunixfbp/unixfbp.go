@@ -14,10 +14,13 @@ func OpenOutPort(portName string) (netout *bufio.Writer, outPipe *os.File, err e
 		return nil, nil, fmt.Errorf("outport unknown: %s", portName)
 	}
 	// open named pipe = FIFO
+	//outPipe, err = os.OpenFile(port.Path, os.O_RDWR, os.ModeNamedPipe)
+	// NOTE: this would allow opening a FIFO for writing without a writer currently present, then blokc on first write
 	outPipe, err = os.OpenFile(port.Path, os.O_WRONLY, os.ModeNamedPipe)
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening outport %s at path %s: %s", portName, port.Path, err)
 	}
+	fmt.Fprintln(os.Stderr, "fifo", port.Path, "opened")
 	// create buffered writer
 	netout = bufio.NewWriter(outPipe)
 	// return everything, but also keep it here
@@ -34,6 +37,9 @@ func OpenInPort(portName string) (netin *bufio.Reader, inPipe *os.File, err erro
 		return nil, nil, fmt.Errorf("inport unknown: %s", portName)
 	}
 	// open named pipe = FIFO
+	// NOTE: this allows opening the FIFO without a writer being present; will return length 0 bytes on read,
+	// which is unfortunately interpreted as an error condition or EOF in Go
+	//inPipe, err = os.OpenFile(port.Path, os.O_RDONLY|syscall.O_NONBLOCK, os.ModeNamedPipe)
 	inPipe, err = os.OpenFile(port.Path, os.O_RDONLY, os.ModeNamedPipe)
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening inport %s at path %s: %s", portName, port.Path, err)
