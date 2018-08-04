@@ -367,13 +367,6 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 	// GC IIP information
 	proc.IIPs = nil
 
-	// start handler for regular packets/frames
-	//inputChan := proc.Instance.Input
-	//go handleComponentInput(inputChan, proc, cin)
-
-	// NOTE: this using manual buffering
-	//go handleComponentOutput(proc, procs, cout)
-
 	// wait for process to finish
 	//err = cmd.Wait()
 	// NOTE: cmd.Wait() would close the Stdout pipe (too early?), dropping unread frames
