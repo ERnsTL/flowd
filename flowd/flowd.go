@@ -159,9 +159,6 @@ func main() {
 		if debug {
 			fmt.Println("DEBUG: Removing process instance for", procName)
 		}
-		// wait that all output from the sub-process has been read
-		<-procs[procName].Instance.AllOutputtedSTDOUT
-		<-procs[procName].Instance.AllOutputtedSTDERR
 		// remove instance information from the process
 		//instancesLock.Lock()
 		//delete(instances, procName)
@@ -397,6 +394,9 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 	} else if !quiet {
 		fmt.Println("INFO: Process", proc.Name, "exited normally.")
 	}
+	// wait that all output from the sub-process has been read
+	<-proc.Instance.AllOutputtedSTDOUT
+	<-proc.Instance.AllOutputtedSTDERR
 	// notify main thread
 	exitChan <- proc.Name
 }
