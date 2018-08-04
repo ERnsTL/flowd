@@ -302,28 +302,24 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 
 	// display component STDOUT
 	go func() {
-		// prepare instance AllOutputted chan
-		donechan := proc.Instance.AllOutputtedSTDOUT
 		// read each line and display with component name prepended
 		scanner := bufio.NewScanner(cout)
 		for scanner.Scan() {
 			fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
 		}
 		// notify main loop
-		close(donechan)
+		close(proc.Instance.AllOutputtedSTDOUT)
 	}()
 
 	// display component STDERR
 	go func() {
-		// prepare instance AllOutputted chan
-		donechan := proc.Instance.AllOutputtedSTDERR
 		// read each line and display with component name prepended
 		scanner := bufio.NewScanner(cerr)
 		for scanner.Scan() {
 			fmt.Printf("%s: %s\n", proc.Name, scanner.Text())
 		}
 		// notify main loop
-		close(donechan)
+		close(proc.Instance.AllOutputtedSTDERR)
 	}()
 
 	// deliver initial information packets/frames
