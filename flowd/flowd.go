@@ -244,7 +244,7 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 		if path == "" {
 			// make that named pipe (FIFO)
 			path = fmt.Sprintf("/dev/shm/%s.%s", proc.Name, inport.LocalPort)
-			os.Remove(path)
+			//os.Remove(path)
 			syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
 		}
 		// append to arguments
