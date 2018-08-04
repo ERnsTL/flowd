@@ -69,6 +69,9 @@ func main() {
 		os.Exit(2)
 	}
 	defer netout.Flush()
+	if !unixfbp.Quiet {
+		fmt.Fprintln(os.Stderr, "filtering")
+	}
 
 	// prepare variables
 	var frame *flowd.Frame
