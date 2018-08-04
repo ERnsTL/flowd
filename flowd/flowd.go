@@ -269,8 +269,11 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 		if path == "" {
 			// make that named pipe (FIFO)
 			path = fmt.Sprintf("/dev/shm/%s.%s", outport.RemoteProc, outport.RemotePort)
-			os.Remove(path)
-			syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+			// NOTE: create it only once - otherwise both ends would create their own version, creating weird timing-based hangs
+			/*
+				os.Remove(path)
+				syscall.Mkfifo(path, syscall.S_IFIFO|syscall.S_IRWXU|syscall.S_IRWXG)
+			*/
 		}
 		// append to arguments
 		cmd.Args = append(cmd.Args, "-outport="+outport.LocalPort, "-outpath="+path) //TODO optimize string concatenation
