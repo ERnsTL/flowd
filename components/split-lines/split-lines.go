@@ -67,7 +67,7 @@ func main() {
 		if scanner.Err() != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: scanning for line: "+scanner.Err().Error())
 			os.Exit(1)
-		} else {
+		} else if !unixfbp.Quiet {
 			fmt.Fprintf(os.Stderr, "finished at %d lines total\n", linecount)
 		}
 
