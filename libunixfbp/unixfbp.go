@@ -20,7 +20,6 @@ func OpenOutPort(portName string) (netout *bufio.Writer, outPipe *os.File, err e
 	if err != nil {
 		return nil, nil, fmt.Errorf("opening outport %s at path %s: %s", portName, port.Path, err)
 	}
-	fmt.Fprintln(os.Stderr, "fifo", port.Path, "opened")
 	// create buffered writer
 	netout = bufio.NewWriter(outPipe)
 	// return everything, but also keep it here
