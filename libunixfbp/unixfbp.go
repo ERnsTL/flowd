@@ -55,7 +55,30 @@ func OpenInPort(portName string) (netin *bufio.Reader, inPipe *os.File, err erro
 	return
 }
 
-// internal state for
+// ArrayPortMemberNames filters the list of outports to those ports with the given prefix, returning their names.
+func ArrayPortMemberNames(prefix string) (members []string) {
+	members = make([]string, 2) // assumption (TODO optimize?)
+	for name := range OutPorts {
+		if strings.HasPrefix(name, prefix) {
+			members = append(members, name)
+		}
+	}
+	return
+}
+
+// ArrayPortMemberWriters filters the list of outports to those ports with the given prefix, returning their writers.
+//TODO optimize: libflowd.SerializeAll(members) could serialize once into a buffer, then write the bytes into the given writers. Used that often?
+func ArrayPortMemberWriters(prefix string) (members []*bufio.Writer) {
+	members = make([]*bufio.Writer, 2) // assumption (TODO optimize?)
+	for name, outport := range OutPorts {
+		if strings.HasPrefix(name, prefix) {
+			members = append(members, outport.Writer)
+		}
+	}
+	return
+}
+
+// internal state for the flag parsers for -inport and -inpath as well as -outport and -outpath
 var inPortName, outPortName string
 
 type inPortFlag struct{}
