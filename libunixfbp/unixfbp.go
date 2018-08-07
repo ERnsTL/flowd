@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
+// OpenOutPort opens an output port resp. its named pipe, returns the pipe a buffered writer on it and also stores the entry in OutPorts.
 func OpenOutPort(portName string) (netout *bufio.Writer, outPipe *os.File, err error) {
 	// check for existence of port
 	port, exists := OutPorts[portName]
@@ -29,6 +31,7 @@ func OpenOutPort(portName string) (netout *bufio.Writer, outPipe *os.File, err e
 	return
 }
 
+// OpenInPort opens an output port resp. its named pipe, returns the pipe and a buffered reader on it and also stores the entry in OutPorts.
 func OpenInPort(portName string) (netin *bufio.Reader, inPipe *os.File, err error) {
 	// check for existence of port
 	port, exists := InPorts[portName]
@@ -90,11 +93,14 @@ func (p outPortFlag) Set(value string) error {
 	return nil
 }
 
+// InPort holds the file descriptor and a buffered reader
 type InPort struct {
 	Path   string
 	Pipe   *os.File
 	Reader *bufio.Reader
 }
+
+// OutPort holds the file descriptor and a buffered reader
 type OutPort struct {
 	Path   string
 	Pipe   *os.File
@@ -102,10 +108,14 @@ type OutPort struct {
 }
 
 var (
-	InPorts  = map[string]InPort{}
+	// InPorts is the list of input ports
+	InPorts = map[string]InPort{}
+	// OutPorts is the list of output ports
 	OutPorts = map[string]OutPort{}
-	Debug    bool
-	Quiet    bool
+	// Debug flag value
+	Debug bool
+	// Quiet flag value
+	Quiet bool
 )
 
 // DefFlags sets the most common flags for input and output ports as wll as debug and quiet flags
