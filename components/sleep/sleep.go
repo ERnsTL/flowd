@@ -16,14 +16,15 @@ func main() {
 	unixfbp.DefFlags()
 	flag.DurationVar(&delay, "delay", 5*time.Second, "delay time")
 	flag.Parse()
-	if flag.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "ERROR: no delay time given in IIP, format is [duration]")
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments - exiting.")
 		os.Exit(2)
 	}
 	if unixfbp.Debug {
 		fmt.Fprintln(os.Stderr, "got delay time", delay)
 	}
 	// connect to FBP network
+	var err error
 	netin, _, err := unixfbp.OpenInPort("IN")
 	if err != nil {
 		fmt.Println("ERROR:", err)
@@ -42,6 +43,7 @@ func main() {
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
+			break
 		}
 
 		// sleep
