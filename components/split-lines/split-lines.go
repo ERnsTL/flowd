@@ -47,7 +47,7 @@ func main() {
 		outframe := &flowd.Frame{
 			Type:     "data",
 			BodyType: "LineData",
-			Port:     "OUT",
+			//Port:     "OUT",
 		}
 
 		// scan loop
