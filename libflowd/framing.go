@@ -52,6 +52,14 @@ var (
 	typeBytes   = []byte{'t', 'y', 'p', 'e'}
 )
 
+// StringByteWriter is what Serialize() uses - satisfied by *bufio.Writer and *bytes.Buffer
+// NOTE: io.WriteString() uses type assertion whereas bufio.Writer.WriteString() does not
+type StringByteWriter interface {
+	io.Writer
+	io.ByteWriter
+	WriteString(s string) (int, error)
+}
+
 // Deserialize reads an IP from a buffered data stream, like STDOUT from a network process or a network connection
 /*
 The frame format is that of STOMP v1.2, with the following modifications:
@@ -252,7 +260,7 @@ var (
 // Serialize serializes an IP into a data stream, like STDIN into a network process or a network connection
 //TODO optimize: does Go pre-calculate all values like []byte{'2'} ?
 //TODO optimize: is +"\n" efficient?
-func (f *Frame) Serialize(stream *bufio.Writer) (err error) {
+func (f *Frame) Serialize(stream StringByteWriter) (err error) {
 	// write version marker
 	err = stream.WriteByte('2')
 	if err != nil {
@@ -377,7 +385,7 @@ func (f *Frame) Serialize(stream *bufio.Writer) (err error) {
 
 // SerializeV1 serializes an IP into a data stream in previous format (strict MIME + content-length)
 //TODO avoid allocating buffered writer on every call
-func (f *Frame) SerializeV1(stream *bufio.Writer) error {
+func (f *Frame) SerializeV1(stream StringByteWriter) error {
 	if f == nil {
 		return errors.New("refusing to marshal nil frame")
 	}

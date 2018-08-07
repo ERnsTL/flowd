@@ -67,7 +67,7 @@ func ArrayPortMemberNames(prefix string) (members []string) {
 }
 
 // ArrayPortMemberWriters filters the list of outports to those ports with the given prefix, returning their writers.
-//TODO optimize: libflowd.SerializeAll(members) could serialize once into a buffer, then write the bytes into the given writers. Used that often?
+// NOTE: see also libflowd.SerializeMultiple()
 func ArrayPortMemberWriters(prefix string) (members []*bufio.Writer) {
 	members = make([]*bufio.Writer, 2) // assumption (TODO optimize?)
 	for name, outport := range OutPorts {
