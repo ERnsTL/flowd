@@ -22,28 +22,16 @@ func main() {
 	}
 	// open network connections
 	var err error
-	var netin *bufio.Reader
-	var netout *bufio.Writer
-	openChan1 := make(chan struct{})
-	openChan2 := make(chan struct{})
-	go func() {
-		netin, _, err = unixfbp.OpenInPort("IN")
-		if err != nil {
-			fmt.Println("ERROR:", err)
-			os.Exit(2)
-		}
-		close(openChan1)
-	}()
-	go func() {
-		netout, _, err = unixfbp.OpenOutPort("OUT")
-		if err != nil {
-			fmt.Println("ERROR:", err)
-			os.Exit(2)
-		}
-		close(openChan2)
-	}()
-	<-openChan1
-	<-openChan2
+	netin, _, err := unixfbp.OpenInPort("IN")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
+	netout, _, err := unixfbp.OpenOutPort("OUT")
+	if err != nil {
+		fmt.Println("ERROR:", err)
+		os.Exit(2)
+	}
 	defer netout.Flush()
 
 	// prepare variables
