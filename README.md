@@ -71,13 +71,12 @@ The included example components cover:
 * Example terminal UI component sending messages into the network
 * Compression and decompression in XZ/LZMA2 and Brotli formats
 * Load balancing with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
-* Zeroconf service publishing and browsing based on mDNS (multicast DNS)
+* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 
 Planned features:
 
 * Runtime protocol for remote control and online network reconfiguration, enabling real-time visual programming
 * Parsing of ```.drw``` network specifications made using [DrawFBP](https://github.com/jpaulm/drawfbp)
-* Network discovery of services using Zeroconf / Bonjour
 * Tracing of data packets as they flow through the network
 * For more, see the issues list!
 
