@@ -140,3 +140,10 @@ After the change:
 
 * Networks use 53 percent the real time = 1.87 as fast.
 * Networks use 35 percent the CPU time (user+sys) = 2.65 times as fast.
+
+
+## Removal of unused framing format tests
+
+Removed the directory ```unused/2016-05-09 framingformat/``` in commit 82ddf433b4051d9e29c0ae82ea76da6c82a5d96f which included several comparative tests and feature comparisons of different framing format candidates (dotencoding, json and mime-multipart). These were used to decide upon the version 1 framing format (strict MIME header).
+
+These files were obsolete and thus removed after over 2 years but are preserved in the Git history for reference.
