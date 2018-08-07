@@ -46,6 +46,8 @@ Currently present features:
 * Delivery of *initial information packets* (IIPs)
 * Delivery of program parameters to components
 * Connections between components in framed or raw way
+* Basic array ports
+* Broadcasting to multiple output ports, serializing only once
 
 The included example components cover:
 
