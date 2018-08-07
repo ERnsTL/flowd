@@ -1,0 +1,12 @@
+RunForLong(bin/sleep) OUT -> IN Publisher(bin/mdns-publish)
+
+'-delay 10s' -> ARGS RunForLong
+'closenow' -> IN RunForLong
+#'-debug' -> ARGS Publisher
+
+
+DelaySome(bin/sleep) OUT -> IN Browser(bin/mdns-browse) OUT -> IN Display(bin/display)
+
+'-delay 3s' -> ARGS DelaySome
+'_flowd._tcp' -> IN DelaySome
+'-ipv4 -n 1' -> ARGS Browser
