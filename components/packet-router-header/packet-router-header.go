@@ -10,6 +10,13 @@ import (
 	"github.com/ERnsTL/flowd/libunixfbp"
 )
 
+/*
+TODO from Github issue #91:
+- With array ports, then output port does not have to be specified, but is always OUT, but on different array indices.
+- IIP format could be -field MyHeaderField A B C, meaning =A IPs go to OUT[0], =B go to OUT[1] and =C go to OUT[2].
+- What is the advantage of that? Does it have one? Simpler flag parsing. Anything else?
+*/
+
 // rule keeps a rule entry; used during flag parsing
 type rule struct {
 	isEquals    bool //TODO this does not scale; refactor to const type if more condition types are added
