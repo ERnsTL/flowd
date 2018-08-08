@@ -78,6 +78,7 @@ Planned features:
 * Runtime protocol for remote control and online network reconfiguration, enabling real-time visual programming
 * Parsing of ```.drw``` network specifications made using [DrawFBP](https://github.com/jpaulm/drawfbp)
 * Tracing of data packets as they flow through the network
+* Integration with other FBP runtimes
 * For more, see the issues list!
 
 
