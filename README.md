@@ -29,8 +29,8 @@ You can find out more about this paradigm on J. Paul Morrison's website linked a
 
 Currently present features:
 
-* Parsing of ```.fbp``` network specifications [[1]](https://github.com/jpaulm/parsefbp) [[2]](https://noflojs.org/documentation/graphs/#fbp) [[3]](https://github.com/flowbased/fbp#readme)
-* Parsing of ```.drw``` network specifications made using [DrawFBP](http://www.jpaulmorrison.com/fbp/software.html#DrawFBP) [[1]](https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd)
+* Parsing of ```.fbp``` network specifications
+* Parsing of ```.drw``` network specifications made using [DrawFBP](http://www.jpaulmorrison.com/fbp/software.html#DrawFBP)
 * Starting a network of the specified components
 * Simple and easy to implement framing format
 * Multi-core use resp. parallel processing
@@ -163,6 +163,7 @@ You can find out more about the ```.fbp``` network description grammar here:
 
 * [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
 * [his .fbp parser source](https://github.com/jpaulm/parsefbp)
+* [format explanation by NoFlo](https://noflojs.org/documentation/graphs/#fbp)
 * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
 * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
 
