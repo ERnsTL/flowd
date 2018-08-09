@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 
@@ -59,57 +60,84 @@ func main() {
 		os.Exit(1)
 	}
 
-	// get network definition
-	nwBytes := getNetworkDefinition()
-
-	// parse and validate network
-	nw := parseNetworkDefinition(nwBytes)
-	if olc != "" && (len(nw.Inports) > 0 || len(nw.Outports) > 0) {
-		fmt.Println("ERROR: NETIN and NETOUT require -olc, otherwise use TCP/UDP/SSH/UNIX/etc. components")
-		os.Exit(1)
-	}
-
-	// display all data
-	if debug {
-		displayNetworkDefinition(nw)
-	}
-
-	// network definition sanity checks
-	//TODO check for multiple connections to same component's port
-	//TODO decide if this should be allowed - no not usually, because then frames might be interleaved - bad if ordering is important
-
-	// output graph visualization
-	// NOTE: originally intended to output the parsed graph (fbp.Fbp type), but that does not have Inports and Outports process names nicely available and IIP special cases
-	if graph {
-		if err := exportNetworkGraph(nw); err != nil {
-			fmt.Println("ERROR: generating graph visualization: ", err)
+	//TODO integrate .drw network definitions into the .fbp structure
+	//TODO enable -graph and -deps for them and also piping the network definition in for .drw networks
+	var procs Network
+	var nw *fbp.Fbp // TODO improve flowd.Network structure -> is currently missing network inports and outports -> startInstance() needs nw passed to know about these
+	if flag.NArg() == 1 && strings.HasSuffix(flag.Arg(0), ".drw") {
+		// checks
+		if graph || dependencies {
+			fmt.Println("ERROR: flags -deps and -graph currently unimplemented for .drw network definitions, only for .fbp format")
 			os.Exit(1)
-		} else {
-			return
 		}
-	}
+		// load from file
+		if debug {
+			fmt.Println("reading .drw network definition from file", flag.Arg(0))
+		}
+		var err error
+		if procs, err = drw2Processes(flag.Arg(0)); err != nil {
+			fmt.Println("ERROR: parsing .drw network definition:", err)
+			os.Exit(1)
+		}
+		//TODO to keep startInstance() happy
+		nw = &fbp.Fbp{}
+		//TODO directly initializing Inports gives error "unknown field in struct literal -> some inner structure"
+		nw.Inports = map[string]*fbp.Endpoint{}
+		nw.Outports = map[string]*fbp.Endpoint{}
+	} else {
 
-	// output required components for this network
-	if dependencies {
-		dependencies := map[string]bool{} // use map to ignore duplicates (uniq)
-		for _, proc := range nw.Processes {
-			dependencies[proc.Component] = true
-			for key, value := range proc.Metadata {
-				//TODO not full solution: cannot give multiple dep= keys (last one counts); need to put that into single deps= key using separator
-				//TODO not full solution: parser does not allow common characters in file names: .
-				if key == "dep" {
-					dependencies[value] = true
-				}
+		// get network definition
+		nwBytes := getNetworkDefinition()
+
+		// parse and validate network
+		nw = parseNetworkDefinition(nwBytes)
+		if olc != "" && (len(nw.Inports) > 0 || len(nw.Outports) > 0) {
+			fmt.Println("ERROR: NETIN and NETOUT require -olc, otherwise use TCP/UDP/SSH/UNIX/etc. components")
+			os.Exit(1)
+		}
+
+		// display all data
+		if debug {
+			displayNetworkDefinition(nw)
+		}
+
+		// network definition sanity checks
+		//TODO check for multiple connections to same component's port
+		//TODO decide if this should be allowed - no not usually, because then frames might be interleaved - bad if ordering is important
+
+		// output graph visualization
+		// NOTE: originally intended to output the parsed graph (fbp.Fbp type), but that does not have Inports and Outports process names nicely available and IIP special cases
+		if graph {
+			if err := exportNetworkGraph(nw); err != nil {
+				fmt.Println("ERROR: generating graph visualization: ", err)
+				os.Exit(1)
+			} else {
+				return
 			}
 		}
-		for component := range dependencies {
-			fmt.Println(component)
-		}
-		return
-	}
 
-	// generate network data structures
-	procs := networkDefinition2Processes(nw)
+		// output required components for this network
+		if dependencies {
+			dependencies := map[string]bool{} // use map to ignore duplicates (uniq)
+			for _, proc := range nw.Processes {
+				dependencies[proc.Component] = true
+				for key, value := range proc.Metadata {
+					//TODO not full solution: cannot give multiple dep= keys (last one counts); need to put that into single deps= key using separator
+					//TODO not full solution: parser does not allow common characters in file names: .
+					if key == "dep" {
+						dependencies[value] = true
+					}
+				}
+			}
+			for component := range dependencies {
+				fmt.Println(component)
+			}
+			return
+		}
+
+		// generate network data structures
+		procs = networkDefinition2Processes(nw)
+	}
 
 	// subscribe to ctrl+c to do graceful shutdown
 	//TODO

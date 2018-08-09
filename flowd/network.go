@@ -6,7 +6,9 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 
+	"github.com/ERnsTL/flowd/flowd/drawfbp"
 	termutil "github.com/andrew-d/go-termutil"
 	"github.com/oleksandr/fbp"
 )
@@ -307,4 +309,184 @@ func generatePortName(endpoint *fbp.Endpoint) string {
 		return endpoint.Port
 	}
 	return fmt.Sprintf("%s[%d]", endpoint.Port, *endpoint.Index)
+}
+
+// Parses and converts .drw network definition into internal Network data structure
+func drw2Processes(filepath string) (netflowd Network, err error) {
+	// load and parse
+	netDRW, err := drawfbp.ParseNetwork(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("parsing network: %s", err)
+	}
+
+	// convert to network
+
+	// map .drw ID to component name
+	id2name := map[int]string{}
+	iips := map[int]string{}
+	enclosures := map[int][]drawfbp.SubnetPort{}
+	var procName string
+	netflowd = Network{}
+	for _, block := range netDRW.Blocks {
+		// only use components, subnetworks, IIPs and enclosures
+		if block.Type == drawfbp.TypeBlock {
+			if block.IsSubnet {
+				if debug {
+					fmt.Printf("subnet: ID=%d Description=%s DiagramFilename=%s\n", block.ID, block.Description, block.DiagramFileName)
+				}
+				// generate block name
+				procName = drwBlockDesc2ProcessName(block.Description)
+				// map block ID -> flowd process name
+				id2name[block.ID] = procName
+				// convert .drw block to flowd process
+				//TODO put this into own function drwNewProcess(block drawfbp.Block)
+				//TODO add checks if a process by that name already exists (flowd currently uses the process name as the unique key/ID)
+				//TODO add Name/Description to error messages
+				if block.DiagramFileName == "" {
+					return nil, fmt.Errorf("subnet ID=%d: property DiagramFileName empty", block.ID)
+				}
+				netflowd[procName] = &Process{
+					Path:     "bin/flowd",
+					Name:     procName,
+					InPorts:  []Port{},
+					OutPorts: []Port{},
+					IIPs: []IIP{
+						IIP{
+							Port: "ARGS",
+							Data: block.DiagramFileName,
+						},
+					},
+				}
+			} else {
+				if debug {
+					fmt.Printf("component: ID=%d Description=%s CodeFilename=%s BlockClassName=%s\n", block.ID, block.Description, block.CodeFilename, block.BlockClassName)
+				}
+				//TODO optimize - repetetive
+				// generate block name
+				procName = drwBlockDesc2ProcessName(block.Description)
+				// map block ID -> flowd process name
+				id2name[block.ID] = procName
+				// convert .drw block to flowd process
+				//TODO put this into own function drwNewProcess(block drawfbp.Block)
+				//TODO add component name/description to error messages
+				if block.CodeFilename == "" && block.BlockClassName == "" {
+					return nil, fmt.Errorf("component ID=%d: both properties CodeFilename and BlockClassname empty; one needs to contain component executable path", block.ID)
+				}
+				netflowd[procName] = &Process{
+					Path:     drwOr(block.CodeFilename, block.BlockClassName), // either can be used with preference for CodeFilename
+					Name:     procName,
+					InPorts:  []Port{},
+					OutPorts: []Port{},
+					IIPs:     []IIP{},
+				}
+			}
+		} else if block.Type == drawfbp.TypeIIP {
+			if debug {
+				fmt.Printf("IIP: ID=%d Data=%s\n", block.ID, block.Description)
+			}
+			// save IIP for now; data will be put into the according flowd process struct during the connections phase
+			iips[block.ID] = block.Description
+		} else if block.Type == drawfbp.TypeEnclosure {
+			if debug {
+				fmt.Printf("enclosure: ID=%d Description=%s SubnetPorts=%v\n", block.ID, block.Description, block.SubnetPorts)
+			}
+			// enclosure inports and outports are just connection forwards; save these
+			enclosures[block.ID] = block.SubnetPorts
+		} else {
+			//fmt.Printf("(ignored) block: ID=%d Type=%s Description=%s\n", block.ID, block.Type, block.Description)
+		}
+	}
+
+	// add connections incl. enclosure port forwards and IIPs
+	// TODO think about removing the enclosures variable - since all connections go through the enclosure border directly into the process, the enclosure port is irrelevant
+	var proc *Process
+	for _, connection := range netDRW.Connections {
+		if debug {
+			fmt.Printf("connection: ID %d port %s -> ID %d port %s\n", connection.FromID, connection.UpstreamPort, connection.ToID, connection.DownstreamPort)
+		}
+		// find source block ID by block type; component, IIP or enclosure is allowed as source
+		if fromProcName, fromProcess := id2name[connection.FromID]; fromProcess {
+			// find destination block ID by block type; component to either component or enclosure is allowed
+			//TODO optimize code - repetetive between the three possibilities
+			if toProcName, toProcess := id2name[connection.ToID]; toProcess {
+				// connection process -> process
+
+				// create outport at source process
+				proc = netflowd[fromProcName]
+				proc.OutPorts = append(proc.OutPorts, Port{
+					LocalPort:  connection.UpstreamPort,
+					RemotePort: connection.DownstreamPort,
+					RemoteProc: toProcName,
+				})
+				// create inport at destination process
+				proc = netflowd[toProcName]
+				proc.InPorts = append(proc.InPorts, Port{
+					LocalPort:  connection.DownstreamPort,
+					RemotePort: connection.UpstreamPort,
+					RemoteProc: fromProcName,
+				})
+
+				//} else if toEncl, toEnclosure := enclosures[connection.ToID]; toEnclosure {
+			} else if _, toEnclosure := enclosures[connection.ToID]; toEnclosure {
+				// connection process -> enclosure; into or out of enclosure possible
+
+				// NOTE: would have to resolve the process going inside; difficult to differentiate between encl -> proc as being out of enclosure or into it
+				// would need preparatory pass over all connections involving enclosures for hop resolution
+
+				// NOTE: special case: double hop, eg. process inside an enclosure -> enclosure outport -> enclosure inport -> process inside other enclosure
+
+				return nil, fmt.Errorf("connection ID=%d: the destination ID=%d in an enclosure - unimplemented; make connection directly to inside process and set subnet port", connection.ID, connection.ToID)
+			} else {
+				return nil, fmt.Errorf("connection ID=%d: the destination ID=%d is neither component nor enclosure - or does not even exist", connection.ID, connection.ToID)
+			}
+
+		} else if iipData, fromIIP := iips[connection.FromID]; fromIIP {
+			// find destination block ID by block type; IIP to either component or enclosure is allowed
+			if toProcName, toProcess := id2name[connection.ToID]; toProcess {
+				// create inport at destination process
+				proc = netflowd[toProcName]
+				proc.IIPs = append(proc.IIPs, IIP{connection.DownstreamPort, iipData})
+				//} else if toEncl, toEnclosure := enclosures[connection.ToID]; toEnclosure {
+			} else if _, toEnclosure := enclosures[connection.ToID]; toEnclosure {
+				// NOTE: unimplemented
+				return nil, fmt.Errorf("connection ID=%d: the destination ID=%d is an enclosure - unimplemented; make connection directly to inside process and set subnet port", connection.ID, connection.ToID)
+			} else {
+				return nil, fmt.Errorf("connection ID=%d: the destination ID=%d is neither component nor enclosure - or does not even exist", connection.ID, connection.ToID)
+			}
+
+			//} else if fromEncl, fromEnclosure := enclosures[connection.FromID]; fromEnclosure {
+		} else if _, fromEnclosure := enclosures[connection.FromID]; fromEnclosure {
+			// NOTE: unimplemented
+			return nil, fmt.Errorf("connection ID=%d: the source ID=%d is an enclosure - unimplemented; make connection directly from inside process and set subnet port", connection.ID, connection.FromID)
+			/*
+				// find destination block ID by block type; enclosure to either component or enclosure is allowed
+				if toProcName, toProcess := id2name[connection.ToID]; toProcess {
+					// NOTE: do nothing - tracing of the enclosure hop is being done in forward manner, thus if the destination block is an enclosure; would otherwise generate duplicate connections
+					fmt.Println("ignore:", toProcName, toProcess)
+				} else if toEncl, toEnclosure := enclosures[connection.ToID]; toEnclosure {
+					// NOTE: do nothing - see comment above
+					fmt.Println("ignore:", toEncl, toEnclosure)
+				} else {
+					return nil, fmt.Errorf("connection ID=%d: the destination ID=%d is neither component nor enclosure - or does not even exist", connection.ID, connection.ToID)
+				}
+			*/
+
+		} else {
+			return nil, fmt.Errorf("connection %d: the source ID=%d is neither component, IIP nor enclosure - or does not even exist", connection.ID, connection.FromID)
+		}
+	}
+
+	return
+}
+
+// sanitize description
+func drwBlockDesc2ProcessName(desc string) string {
+	return strings.Replace(strings.TrimSpace(desc), " ", "_", -1)
+}
+
+func drwOr(str1 string, str2 string) string {
+	if str1 != "" {
+		return str1
+	}
+	return str2
 }
