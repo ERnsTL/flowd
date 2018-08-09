@@ -1,0 +1,35 @@
+<?xml version="1.0"?> 
+ <drawfbp_file xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd"><net> <desc> </desc> <complang>Java</complang> <clicktogrid>true</clicktogrid> 
+<blocks><block> <x> 123 </x> <y> 54 </y> <id> 16 </id> <type>I</type> <width>187</width> <height>17</height> <description>-quiet /var/log/syslog</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 370 </x> <y> 151 </y> <id> 1 </id> <type>O</type> <width>266</width> <height>220</height> <description>TestingEnclosure1</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+
+<subnetports><subnetport> <y>183</y> <name>ENCL1IN</name> <side>L</side><substreamsensitive>false</substreamsensitive></subnetport> 
+<subnetport> <y>181</y> <name>ENCL1OUT</name> <side>R</side><substreamsensitive>false</substreamsensitive></subnetport> 
+</subnetports></block> 
+<block> <x> 346 </x> <y> 90 </y> <id> 17 </id> <type>I</type> <width>53</width> <height>17</height> <description>-quiet</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 51 </x> <y> 183 </y> <id> 2 </id> <type>B</type> <width>92</width> <height>64</height> <description>Reader</description> <codefilename>bin/file-read</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 830 </x> <y> 84 </y> <id> 18 </id> <type>I</type> <width>289</width> <height>17</height> <description>-quiet -pass -or cron network sudo</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 357 </x> <y> 183 </y> <id> 3 </id> <type>B</type> <width>92</width> <height>64</height> <description>Splitter</description> <codefilename>bin/split-lines</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 836 </x> <y> 157 </y> <id> 5 </id> <type>O</type> <width>329</width> <height>215</height> <description>TestingEnclosure2</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+
+<subnetports><subnetport> <y>181</y> <name>ENCL2IN</name> <side>L</side><substreamsensitive>false</substreamsensitive></subnetport> 
+<subnetport> <y>181</y> <name>ENCL2OUT</name> <side>R</side><substreamsensitive>false</substreamsensitive></subnetport> 
+</subnetports></block> 
+<block> <x> 790 </x> <y> 183 </y> <id> 8 </id> <type>B</type> <width>92</width> <height>64</height> <description>Filter</description> <codefilename>bin/packet-filter-string</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 1193 </x> <y> 183 </y> <id> 10 </id> <type>B</type> <width>92</width> <height>64</height> <description>Display</description> <codefilename>bin/display</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+</blocks> <connections>
+<connection> <fromx>97</fromx> <fromy>183</fromy> <tox>311</tox> <toy>183</toy> <fromid>2</fromid> <toid>3</toid> <id>3</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
+<connection> <fromx>403</fromx> <fromy>181</fromy> <tox>746</tox> <toy>181</toy> <fromid>3</fromid> <toid>8</toid> <id>4</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
+<connection> <fromx>836</fromx> <fromy>181</fromy> <tox>1148</tox> <toy>181</toy> <fromid>8</fromid> <toid>10</toid> <id>5</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
+<connection> <fromx>127</fromx> <fromy>62</fromy> <tox>50</tox> <toy>152</toy> <fromid>16</fromid> <toid>2</toid> <id>7</id> <endsatline>false</endsatline><downstreamport>ARGS</downstreamport></connection> 
+<connection> <fromx>355</fromx> <fromy>98</fromy> <tox>358</tox> <toy>152</toy> <fromid>17</fromid> <toid>3</toid> <id>8</id> <endsatline>false</endsatline><downstreamport>ARGS</downstreamport></connection> 
+<connection> <fromx>813</fromx> <fromy>92</fromy> <tox>793</tox> <toy>152</toy> <fromid>18</fromid> <toid>8</toid> <id>9</id> <endsatline>false</endsatline><downstreamport>ARGS</downstreamport></connection> 
+</connections> </net> </drawfbp_file>
