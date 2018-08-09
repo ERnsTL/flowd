@@ -29,7 +29,8 @@ You can find out more about this paradigm on J. Paul Morrison's website linked a
 
 Currently present features:
 
-* Parsing of ```.fbp``` network specifications
+* Parsing of ```.fbp``` network specifications [[1]](https://github.com/jpaulm/parsefbp) [[2]](https://noflojs.org/documentation/graphs/#fbp) [[3]](https://github.com/flowbased/fbp#readme)
+* Parsing of ```.drw``` network specifications made using [DrawFBP](http://www.jpaulmorrison.com/fbp/software.html#DrawFBP) [[1]](https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd)
 * Starting a network of the specified components
 * Simple and easy to implement framing format
 * Multi-core use resp. parallel processing
@@ -76,7 +77,7 @@ The included example components cover:
 Planned features:
 
 * Runtime protocol for remote control and online network reconfiguration, enabling real-time visual programming
-* Parsing of ```.drw``` network specifications made using [DrawFBP](https://github.com/jpaulm/drawfbp)
+* Parsing of JSON-FBP network specifications [[1]](https://noflojs.org/documentation/graphs/#json) from [NoFlo](https://noflojs.org/)
 * Tracing of data packets as they flow through the network
 * Integration with other FBP runtimes
 * For more, see the issues list!
