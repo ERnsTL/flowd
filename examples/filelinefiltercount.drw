@@ -1,6 +1,6 @@
 <?xml version="1.0"?> 
  <drawfbp_file xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
-xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd"><net> <desc> </desc> <complang>Java</complang> <clicktogrid>true</clicktogrid> 
+xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd"><net><desc> </desc> <complang>Java</complang> <clicktogrid>true</clicktogrid> 
 <blocks><block> <x> 123 </x> <y> 54 </y> <id> 16 </id> <type>I</type> <width>187</width> <height>17</height> <description>-quiet /var/log/syslog</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
 <block> <x> 370 </x> <y> 151 </y> <id> 1 </id> <type>O</type> <width>266</width> <height>220</height> <description>TestingEnclosure1</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 

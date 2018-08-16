@@ -1,22 +1,17 @@
 <?xml version="1.0"?> 
  <drawfbp_file xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
-xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd"><net> <desc> </desc> <complang>Java</complang> <clicktogrid>true</clicktogrid> 
-<blocks><block> <x> 399 </x> <y> 273 </y> <id> 1 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyProcess</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib/drawfbp_file.xsd"><net><desc> </desc> <complang>Java</complang> <clicktogrid>true</clicktogrid> 
+<blocks><block> <x> 399 </x> <y> 273 </y> <id> 1 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyProcess</description> <codefilename>bin/counter</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
 <block> <x> 333 </x> <y> 199 </y> <id> 2 </id> <type>I</type> <width>44</width> <height>17</height> <description>MyIIP</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
 <block> <x> 542 </x> <y> 262 </y> <id> 3 </id> <type>O</type> <width>540</width> <height>182</height> <description>MyEnclosure</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 
-<subnetports><subnetport> <y>277</y> <name>ENCLIN</name> <side>L</side><substreamsensitive>false</substreamsensitive></subnetport> 
+<subnetports>
 <subnetport> <y>275</y> <name>ENCLOUT</name> <side>R</side><substreamsensitive>false</substreamsensitive></subnetport> 
+<subnetport> <y>270</y> <name>ENCLIN</name> <side>L</side><substreamsensitive>false</substreamsensitive></subnetport> 
 </subnetports></block> 
-<block> <x> 292 </x> <y> 485 </y> <id> 5 </id> <type>B</type> <width>92</width> <height>64</height> <description>MySubnet</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>true</issubnet> 
-</block> 
-<block> <x> 109 </x> <y> 274 </y> <id> 6 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyExtPortIn</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
-</block> 
-<block> <x> 997 </x> <y> 273 </y> <id> 7 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyExtPortOut</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
-</block> 
-<block> <x> 163 </x> <y> 485 </y> <id> 8 </id> <type>B</type> <width>92</width> <height>64</height> <description>ExtPortOI</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+<block> <x> 292 </x> <y> 485 </y> <id> 5 </id> <type>B</type> <width>92</width> <height>64</height> <description>MySubnet</description> <diagramfilename>/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/examples/filelinefiltercount.drw</diagramfilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>true</issubnet> 
 </block> 
 <block> <x> 777 </x> <y> 483 </y> <id> 9 </id> <type>L</type> <width>111</width> <height>37</height> <description>MyLegend</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
@@ -26,11 +21,17 @@ xsi:noNamespaceSchemaLocation="https://github.com/jpaulm/drawfbp/blob/master/lib
 </block> 
 <block> <x> 546 </x> <y> 487 </y> <id> 13 </id> <type>R</type> <width>92</width> <height>64</height> <description>MyReport</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
-<block> <x> 662 </x> <y> 273 </y> <id> 15 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyProcess2</description> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+<block> <x> 662 </x> <y> 273 </y> <id> 15 </id> <type>B</type> <width>92</width> <height>64</height> <description>MyProcess2</description> <codefilename>bin/display</codefilename> <multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 91 </x> <y> 264 </y> <id> 17 </id> <type>C</type> <width>36</width> <height>28</height> <description>MyExtPortIn</description> <substreamsensitive>false</substreamsensitive><multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 156 </x> <y> 479 </y> <id> 18 </id> <type>E</type> <width>36</width> <height>28</height> <description>MyExtPortOutIn</description> <substreamsensitive>false</substreamsensitive><multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
+</block> 
+<block> <x> 982 </x> <y> 268 </y> <id> 19 </id> <type>D</type> <width>36</width> <height>28</height> <description>MyExtPortOut</description> <substreamsensitive>false</substreamsensitive><multiplex>false</multiplex><invisible>false</invisible><issubnet>false</issubnet> 
 </block> 
 </blocks> <connections>
-<connection> <fromx>710</fromx> <fromy>276</fromy> <tox>951</tox> <toy>274</toy> <fromid>15</fromid> <toid>7</toid> <id>16</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
 <connection> <fromx>445</fromx> <fromy>272</fromy> <tox>619</tox> <toy>272</toy> <fromid>1</fromid> <toid>15</toid> <id>4</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
+<connection> <fromx>109</fromx> <fromy>266</fromy> <tox>352</tox> <toy>268</toy> <fromid>17</fromid> <toid>1</toid> <id>20</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
+<connection> <fromx>708</fromx> <fromy>274</fromy> <tox>969</tox> <toy>273</toy> <fromid>15</fromid> <toid>19</toid> <id>21</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
 <connection> <fromx>355</fromx> <fromy>201</fromy> <tox>395</tox> <toy>239</toy> <fromid>2</fromid> <toid>1</toid> <id>12</id> <endsatline>false</endsatline><downstreamport>IN</downstreamport></connection> 
-<connection> <fromx>155</fromx> <fromy>277</fromy> <tox>350</tox> <toy>275</toy> <fromid>6</fromid> <toid>1</toid> <id>15</id> <endsatline>false</endsatline><upstreamport>OUT</upstreamport><downstreamport>IN</downstreamport></connection> 
 </connections> </net> </drawfbp_file>
