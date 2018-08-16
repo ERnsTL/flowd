@@ -42,13 +42,14 @@ type Block struct {
 }
 
 // types for Block.Type
+// Source: https://github.com/jpaulm/drawfbp/blob/master/src/main/java/com/jpaulmorrison/graphics/Block.java
 const TypeBlock = "B" // normal component
 const TypeIIP = "I"
-const TypeEnclosure = "O"  // just for presentation purposes, has .IsSubnet = false
-const TypeSubnet = "B"     // has .IsSubnet = true
-const TypeExtPortIn = "B"  //TODO type "B" gets reused here...how to discern these? corresponds to INPORT = network inport in .fbp
-const TypeExtPortOut = "B" //TODO type "B" gets reused here...how to discern these? corresponds to OUTPORT = network outport in .fbp
-const TypeExtPortOI = "B"  //TODO type "B" gets reused here...how to discern these?
+const TypeEnclosure = "O"  // subnet just for presentation purposes, has .IsSubnet = false
+const TypeSubnet = "B"     // actual subnet with diagram path reference; has .IsSubnet = true
+const TypeExtPortIn = "C"  // external resp. network port in
+const TypeExtPortOut = "D" // external resp. network port out
+const TypeExtPortOI = "E"  // external resp. network port in/out
 const TypeLegend = "L"
 const TypeFile = "F"
 const TypePerson = "P"
