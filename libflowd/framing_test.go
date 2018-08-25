@@ -33,7 +33,7 @@ func TestHasStructFrame(t *testing.T) {
 
 func TestFrameHasRequiredMethods(t *testing.T) {
 	type IWantThisMethod interface {
-		Serialize(*bufio.Writer) error
+		Serialize(flowd.StringByteWriter) error
 	}
 	var _ IWantThisMethod = &flowd.Frame{}
 }
