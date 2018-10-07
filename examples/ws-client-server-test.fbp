@@ -1,0 +1,25 @@
+# testdata -> ws-client -> ws-server -> display
+
+# WS server with listen address and display what comes in
+WSSrv(bin/ws-server) OUT -> IN Display(bin/display)
+'tcp://localhost:4000/' -> ARGS WSSrv
+
+### set up echo
+delayData1(bin/sleep) OUT -> IN WSSrv
+'-delay 60s' -> ARGS delayData1
+'TESTDATEN' -> IN delayData1
+
+# WS client and send some data to WS server
+#TODO doesnt work anymore because ARGS is special-cased into the program arguments
+#delayConn(bin/sleep) OUT -> ARGS WSClt(bin/ws-client)
+WSClt(bin/ws-client) OUT -> IN Discard(bin/discard)
+
+# allow WS server to start, then send it its remote address to ARGS
+#'-delay 3s' -> ARGS delayConn
+#'ws://localhost:4000/' -> IN delayConn
+'ws://localhost:4000/' -> ARGS WSClt
+
+# send some data with delay
+delayData2(bin/sleep) OUT -> IN WSClt
+'-delay 5s' -> ARGS delayData2
+'some testdata from WS client!' -> IN delayData2
