@@ -243,6 +243,19 @@ Downsides of the approach taken by ```flowd```:
 If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow). Also check out the FBP runtimes and systems by J. Paul Morrison and *NoFlo* and their compatible runtimes.
 
 
+## Integration with other FBP Runtimes
+
+One feature of FBP is the ability to freely transform data. Thus as a general solution, common IPC mechanisms like TCP, WebSocket or Unix domain sockets can be used to bridge FBP networks running in different FBP runtimes. flowd can also start other runtimes as subprocesses using the ```cmd``` component.
+
+For more optimal and tighter integration, there are gateway components and protocols as follows:
+
+* with JavaFBP: gateway component planned, [Java parser of framing format planned](https://github.com/ERnsTL/flowd/issues/130)
+* with NoFlo: implementation of JSON FBP protocol [planned, partway started](https://github.com/ERnsTL/flowd/issues/55)
+* with plumber: [gateway component planned](https://github.com/ERnsTL/flowd/issues/124)
+* with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
+* others: Fractalide? ...?
+
+
 ## Development aka Hacking on ```flowd```
 
 Running tests:
