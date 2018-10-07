@@ -35,7 +35,7 @@ func main() {
 	flag.StringVar(&keyPath, "key", "./key.pem", "server key path in PEM format")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
+		fmt.Fprintln(os.Stderr, "ERROR: missing listen address - exiting.")
 		printUsage()
 		flag.PrintDefaults()
 		os.Exit(2)

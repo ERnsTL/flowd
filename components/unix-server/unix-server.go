@@ -29,7 +29,7 @@ func main() {
 	flag.IntVar(&maxconn, "maxconn", 0, "maximum number of connections to accept, 0 = unlimited")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
+		fmt.Fprintln(os.Stderr, "ERROR: missing listen path - exiting.")
 		printUsage()
 		flag.PrintDefaults()
 		os.Exit(2)

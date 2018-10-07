@@ -27,7 +27,7 @@ func main() {
 	flag.BoolVar(&retry, "retry", false, "retry connection and try to reconnect")
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "ERROR: missing remote address - exiting.")
+		fmt.Fprintln(os.Stderr, "ERROR: missing remote path - exiting.")
 		printUsage()
 		flag.PrintDefaults()
 		os.Exit(2)
