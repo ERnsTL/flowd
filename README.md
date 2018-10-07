@@ -211,7 +211,7 @@ Three stages usually:
 2. filter and transform
 3. assemble packets and output
 
-TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which resuts should be produced (see JPM book).
+TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which results should be produced (see JPM book).
 
 TODO no conceptual dissonance between design and implementation stages.
 
