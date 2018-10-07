@@ -104,6 +104,8 @@ The framing format is a simple text-based format very similar to an HTTP/1.x hea
 * The frame body is a free-form byte array, so you can put in whatever you want.
 * Header fields are extensible to convey application-specific meta data and most fields are optional, using no bandwidth.
 
+For more information on the framing format see [the Go implementation source code](https://github.com/ERnsTL/flowd/blob/master/libflowd/framing.go) and the [prose format spec](doc/framing_format.md).
+
 Using several components, a network can be built. It is like a graph of components or like workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
 
 
@@ -270,6 +272,7 @@ GNU LGPLv3+
 ## Further documentation
 
 * [Design history and rationale](doc/design_history.md)
+* [Framing format specification](doc/framing_format.md)
 
 
 ## Community
