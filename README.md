@@ -191,6 +191,17 @@ If wrapped, you can decide for the program to be called for each incoming frame 
 Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open the named pipes given and will then be connected with the neighbor components. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration. Port closing detection is done using regular EOF on the named pipe; this is usually the signal that all data has arrived from the preceding component and that it shut down; it can also be re-opened if that is the use-case. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact; packet tracing is also implemented using marker values in the header. Output frames, if any, are then to be sent to the output named pipes. That way, the frames from your component are sent directly to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
 
 
+## Programming Language Support
+
+There is not much needed except the ability to open named pipes and parsing command-line arguments. Regarding the implementation of the framing format used, there are a few known implementations of framing format parsers:
+
+* Go is included (```libflowd```)
+* Rust is in prototype phase, but not yet in Github
+* Java is planned
+
+There is [a tracking issue](https://github.com/ERnsTL/flowd/issues/130) for this.
+
+
 ## Writing Applications
 
 TODO
