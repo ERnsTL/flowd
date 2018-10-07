@@ -52,12 +52,10 @@ func main() {
 			errout.WriteString("<nil>")
 			//os.Stdout.Write([]byte("<nil>"))
 		}
-		/*
-			if netin.Buffered() == 0 {
-				if err = errout.Flush(); err != nil {
-					fmt.Fprintln(os.Stderr, "ERROR: flushing errout:", err)
-				}
+		if netin.Buffered() == 0 {
+			if err = errout.Flush(); err != nil {
+				fmt.Fprintln(os.Stderr, "ERROR: flushing errout:", err)
 			}
-		*/
+		}
 	}
 }
