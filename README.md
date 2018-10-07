@@ -73,6 +73,7 @@ The included example components cover:
 * Compression and decompression in XZ/LZMA2 and Brotli formats
 * Load balancing with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
+* WebSocket server and client
 
 Planned features:
 
