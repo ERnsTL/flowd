@@ -10,7 +10,7 @@ Build a *data factory* in which components transform the passed data frames arou
 
 Components naturally make use of all available processor cores.
 
-A component network can span multiple machines, lending itself for use in distributed systems. Routing is available and load balancing is a planned feature.
+A component network can span multiple machines, lending itself for use in distributed systems. Routing is available and a load-balancing component exists.
 
 Use available off-the-shelf components where you can. Grow a collection of specialized components and *reuse* them for the next and next project of yours.
 
@@ -73,7 +73,7 @@ The included example components cover:
 * Compression and decompression in XZ/LZMA2 and Brotli formats
 * Load balancing with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
-* WebSocket server and client
+* WebSocket server and client with retry on connection establishment
 
 Planned features:
 
