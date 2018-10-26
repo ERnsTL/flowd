@@ -216,6 +216,8 @@ func main() {
 			// flush buffers = send frames
 			if err := netout.Flush(); err != nil {
 				fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+			} else if !unixfbp.Quiet {
+				fmt.Fprintf(os.Stderr, "%d: sent close notification\n", id)
 			}
 		}
 	}()
@@ -241,6 +243,8 @@ func main() {
 		// flush buffer = send frame
 		if err = netout.Flush(); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+		} else if !unixfbp.Quiet {
+			fmt.Fprintf(os.Stderr, "%d: sent open notification\n", id)
 		}
 		// handle connection
 		go handleConnection(conn, id, closeChan)
@@ -319,6 +323,8 @@ func handleConnection(conn *net.TCPConn, id int, closeChan chan int) {
 		// send it now (flush)
 		if err = netout.Flush(); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR: flushing netout:", err)
+		} else if !unixfbp.Quiet {
+			fmt.Fprintf(os.Stderr, "frame out with %d bytes body\n", bytesRead)
 		}
 	}
 }
