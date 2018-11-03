@@ -169,6 +169,7 @@ You can find out more about the ```.fbp``` network description grammar here:
 * [format explanation by NoFlo](https://noflojs.org/documentation/graphs/#fbp)
 * [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
 * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
+* [FBP DSL syntax](https://github.com/flowbased/flowbased.org/wiki/FBP-DSL)
 
 
 ## Visualization Example
