@@ -12,13 +12,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/ERnsTL/flowd/libunixfbp"
 
-	xz "github.com/solus-project/xzed"
+	xz "github.com/danielrh/go-xz"
 )
 
 func main() {
@@ -27,7 +26,7 @@ func main() {
 	var level int
 	unixfbp.DefFlags()
 	flag.BoolVar(&bridge, "bridge", false, "bridge mode, true = compress frames from/to FBP network, false = compress frame body")
-	flag.IntVar(&level, "level", 6, "compression level (1=fast to 9=best)")
+	flag.IntVar(&level, "level", 9, "compression level (0=fast to 9=best)")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "ERROR: unexpected free arguments")
@@ -35,8 +34,8 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(2)
 	}
-	if level < 1 || level > 9 {
-		fmt.Fprintln(os.Stderr, "ERROR: compression level out of range [1;9]")
+	if level < 0 || level > 9 {
+		fmt.Fprintln(os.Stderr, "ERROR: compression level out of range [0;9]")
 		printUsage()
 		flag.PrintDefaults()
 		os.Exit(2)
@@ -56,17 +55,14 @@ func main() {
 	defer netout.Flush()
 
 	// initialize xz/lzma2 writer
-	xzWriter, err := xz.NewWriterLevel(netout, xz.CompressionLevel(level))
-	if err != nil {
-		log.Fatal("Failed to open xz/lzma2 writer")
-	}
+	xzWriter := xz.NewCompressionWriterPreset(netout, level)
 	defer xzWriter.Close()
 
 	// main loop
 	if bridge {
 		fmt.Fprintln(os.Stderr, "forwarding frames")
 		// copy IN to compressing writer
-		if _, err = io.Copy(xzWriter, netin); err != nil {
+		if _, err = io.Copy(&xzWriter, netin); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR on FBP->LZMA:", err)
 			return
 		}
@@ -112,5 +108,5 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprintln(os.Stderr, "Arguments: [-debug] [-quiet] [-bridge] [-level <1-9>]")
+	fmt.Fprintln(os.Stderr, "Arguments: [-debug] [-quiet] [-bridge] [-level <0-9>]")
 }

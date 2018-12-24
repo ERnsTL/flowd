@@ -12,13 +12,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/ERnsTL/flowd/libunixfbp"
 
-	xz "github.com/solus-project/xzed"
+	xz "github.com/danielrh/go-xz"
 )
 
 const bufSize = 65536
@@ -50,16 +49,13 @@ func main() {
 	defer netout.Flush()
 
 	// initialize xz/lzma2 writer
-	xzReader, err := xz.NewReader(netin)
-	if err != nil {
-		log.Fatal("Failed to open xz/lzma2 reader")
-	}
+	xzReader := xz.NewDecompressionReader(netin)
 
 	// main loop
 	if bridge {
 		fmt.Fprintln(os.Stderr, "forwarding frames")
 		// copy decompressing reader into OUT
-		if _, err = io.Copy(netout, xzReader); err != nil {
+		if _, err = io.Copy(netout, &xzReader); err != nil {
 			fmt.Fprintln(os.Stderr, "ERROR on FBP->LZMA:", err)
 			return
 		}
