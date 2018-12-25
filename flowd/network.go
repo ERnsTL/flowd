@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ERnsTL/flowd/flowd/drawfbp"
+	"github.com/ERnsTL/flowd/flowd/noflo"
 	termutil "github.com/andrew-d/go-termutil"
 	"github.com/oleksandr/fbp"
 )
@@ -489,4 +490,23 @@ func drwOr(str1 string, str2 string) string {
 		return str1
 	}
 	return str2
+}
+
+// Parses and converts JSON network definition into internal Network data structure
+func json2Processes(filepath string) (netflowd Network, err error) {
+	// load and parse
+	netJSON, err := noflo.ParseNetwork(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("parsing network: %s", err)
+	}
+
+	// convert to network
+
+	// convert inports, outports, processes, components and connections
+	for _ = range netJSON.Connections {
+		//TODO
+	}
+
+	// TODO
+	return nil, fmt.Errorf("unimplemented yet")
 }
