@@ -94,7 +94,7 @@ func ParseNetwork(drwPath string) (net *Network, err error) {
 	}
 	defer xmlFile.Close()
 
-	// read the file conents into a byte array
+	// read the file contents into a byte array
 	xmlBytes, err := ioutil.ReadAll(xmlFile)
 	if err != nil {
 		return nil, err
