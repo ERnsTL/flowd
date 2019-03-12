@@ -408,6 +408,7 @@ func startInstance(proc *Process, procs Network, nw *fbp.Fbp, exitChan chan stri
 		fmt.Printf("ERROR waiting for exit of component %s: %v\n", proc.Name, err)
 	}
 	// check exit status
+	// TODO in Go 1.12 there is now ProcessState.ExitCode() -- useful?
 	if !cmd.ProcessState.Success() {
 		//TODO warning or error?
 		fmt.Println("ERROR: Processs", proc.Name, "exited unsuccessfully.")
