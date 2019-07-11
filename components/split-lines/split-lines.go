@@ -24,12 +24,12 @@ func main() {
 	var err error
 	netin, _, err := unixfbp.OpenInPort("IN")
 	if err != nil {
-		fmt.Println("ERROR:", err)
+		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
 	}
 	netout, _, err := unixfbp.OpenOutPort("OUT")
 	if err != nil {
-		fmt.Println("ERROR:", err)
+		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(2)
 	}
 	defer netout.Flush()
@@ -77,7 +77,7 @@ func main() {
 
 	// read data from FBP network, hand it over to scanner buffer
 	if !unixfbp.Quiet {
-		fmt.Println("splitting")
+		fmt.Fprintln(os.Stderr, "splitting")
 	}
 	for {
 		// read frame
@@ -133,5 +133,7 @@ func main() {
 
 	// wait for scanner Goroutine to finish
 	<-scannerDone
-	fmt.Fprintln(os.Stderr, "exiting.")
+	if !unixfbp.Quiet {
+		fmt.Fprintln(os.Stderr, "exiting.")
+	}
 }
