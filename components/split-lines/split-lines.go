@@ -84,7 +84,9 @@ func main() {
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("EOF on input - finishing up.")
+				if !unixfbp.Quiet {
+					fmt.Fprintln(os.Stderr, "EOF on input - finishing up.")
+				}
 				pipew.Close()
 				break
 			}
@@ -96,7 +98,9 @@ func main() {
 		//TODO not neccessary any more
 		if frame.Type == "control" && frame.BodyType == "PortClose" && frame.Port == "IN" {
 			// shut down operations
-			fmt.Fprintln(os.Stderr, "input port closed - finishing up.")
+			if !unixfbp.Quiet {
+				fmt.Fprintln(os.Stderr, "input port closed - finishing up.")
+			}
 			pipew.Close()
 			break
 		}
