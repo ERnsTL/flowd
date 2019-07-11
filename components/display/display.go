@@ -12,8 +12,13 @@ import (
 func main() {
 	// check arguments
 	//TODO
-	// 1st argument = FIFO path
+	// 4th argument = FIFO path
 	inPipePath := os.Args[3+1] // [prog-name] -inport IN -inpath [fifo-path]
+	// 5th argument could be -debug; do it here because display is usually at the end of an output-producing line of processes
+	var quiet bool
+	if len(os.Args) == 6 && os.Args[5] == "-quiet" {
+		quiet = true
+	}
 	// open FIFOs
 	inPipe, err := os.OpenFile(inPipePath, os.O_RDONLY, os.ModeNamedPipe)
 	if err != nil {
@@ -32,7 +37,10 @@ func main() {
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				if !quiet {
+				//if !unixfbp.Quiet {	// TODO will probably have to change to unixfbp package sometime
+					fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				}
 				break
 			}
 			fmt.Fprintln(os.Stderr, "ERROR:", err, "- exiting.")

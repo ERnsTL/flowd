@@ -112,7 +112,9 @@ nextframe:
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				if !unixfbp.Quiet {
+					fmt.Fprintln(os.Stderr, "EOF - exiting.")
+				}
 				break
 			}
 			fmt.Fprintln(os.Stderr, err)
