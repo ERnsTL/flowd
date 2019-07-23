@@ -96,7 +96,9 @@ func main() {
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
 			if err == io.EOF {
-				fmt.Println("got EOF - finishing up.")
+				if !unixfbp.Quiet {
+					fmt.Println("got EOF - finishing up.")
+				}
 				counter.Report()
 				return
 			}
