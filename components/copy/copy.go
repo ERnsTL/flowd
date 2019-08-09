@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"io"
 
 	"github.com/ERnsTL/flowd/libflowd"
 	"github.com/ERnsTL/flowd/libunixfbp"
@@ -33,7 +34,8 @@ func main() {
 	}
 	// NOTE: is backed by an array internally for small number of entries
 	for portName, outPort := range unixfbp.OutPorts {
-		_, _, err = unixfbp.OpenOutPort(portName)
+		// NOTE: re-assigning to avoid nil pointer access on defer (TODO optimize)
+		outPort.Writer, _, err = unixfbp.OpenOutPort(portName)
 		if err != nil {
 			fmt.Println("ERROR:", err)
 			os.Exit(2)
@@ -50,7 +52,14 @@ func main() {
 		// read frame
 		frame, err = flowd.Deserialize(netin)
 		if err != nil {
+			if err == io.EOF {
+				if !unixfbp.Quiet {
+					fmt.Fprintln(os.Stderr, "EOF - exiting")
+				}
+				break
+			}
 			fmt.Fprintln(os.Stderr, err)
+			break
 		}
 
 		// send it to given output ports
