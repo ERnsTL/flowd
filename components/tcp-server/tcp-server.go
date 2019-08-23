@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ERnsTL/flowd/libflowd"
-	"github.com/ERnsTL/flowd/libunixfbp"
+	flowd "github.com/ERnsTL/flowd/libflowd"
+	unixfbp "github.com/ERnsTL/flowd/libunixfbp"
 )
 
 const bufSize = 65536
@@ -169,8 +169,9 @@ func main() {
 							os.Exit(1)
 						} else {
 							// success
-							//TODO if !quiet - add that flag
-							fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connID, bytesWritten, conn.RemoteAddr())
+							if !unixfbp.Quiet {
+								fmt.Fprintf(os.Stderr, "%d: wrote %d bytes to %s\n", connID, bytesWritten, conn.RemoteAddr())
+							}
 						}
 						if frame.BodyType == "CloseConnection" {
 							fmt.Fprintf(os.Stderr, "%d: got close command, closing connection.\n", connID)
