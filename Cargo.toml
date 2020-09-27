@@ -1,0 +1,14 @@
+[workspace]
+
+members = [
+    "flowd-rs",
+]
+
+[profile.release]
+lto = true
+opt-level = 3
+debug = true
+panic = 'unwind'
+
+[profile.dev]
+opt-level = 1

@@ -1,0 +1,13 @@
+[package]
+name = "flowd-rs"
+version = "0.0.1"
+authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
+repository = "https://github.com/ERnsTL/flowd"
+license = "GNU/LGPL-3.0+"
+description = "inter-language runtime for Flow-based Programming (FBP)"
+edition = "2018"
+
+[dependencies]
+
+[[bin]]
+name = "flowd-rs"
