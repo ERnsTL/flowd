@@ -8,6 +8,9 @@ description = "inter-language runtime for Flow-based Programming (FBP)"
 edition = "2018"
 
 [dependencies]
+log = "0.4"
+pretty_env_logger = "0.4"
+tungstenite = "0.11.1"
 
 [[bin]]
 name = "flowd-rs"
