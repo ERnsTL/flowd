@@ -37,10 +37,12 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
         // Let's add an additional header to our response to the client.
         let headers = response.headers_mut();
-        //TODO check for noflo on Request
+        //TODO check for noflo on Request -- yes, noflo-ui sends websocket sub-protocol request "noflo"
+        //TODO it seems that the sec-websocket-protocol does not get sent when setting it this way
+        //TODO "sent non-empty 'Sec-WebSocket-Protocol' header but no response was received" -> server should choose if non-empty
         headers.insert("sec-websocket-protocol", "noflo".parse().unwrap()); // not required by noflo-ui
         headers.append("MyCustomHeader", ":)".parse().unwrap());
-        headers.append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
+        headers.append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap()); //TODO remove these
 
         Ok(response)
     };
