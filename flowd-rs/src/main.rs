@@ -1,4 +1,5 @@
 #![feature(duration_constants)]
+
 use std::net::{TcpListener, TcpStream};
 use std::thread::spawn;
 use std::time::Duration;
@@ -11,6 +12,8 @@ extern crate pretty_env_logger;
 #[macro_use]
 extern crate log;
 
+use serde::{Deserialize, Serialize};
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -22,7 +25,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
     stream
         .set_write_timeout(Some(Duration::SECOND))
         .expect("set_write_timeout call failed");
-    stream.set_nodelay(true).expect("set_nodelay call failed");
+    //stream.set_nodelay(true).expect("set_nodelay call failed");
 
     let callback = |req: &Request, mut response: Response| {
         debug!("Received a new ws handshake");
@@ -35,7 +38,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
         // Let's add an additional header to our response to the client.
         let headers = response.headers_mut();
         //TODO check for noflo on Request
-        headers.insert("sec-websocket-protocol", "noflo".parse().unwrap());
+        headers.insert("sec-websocket-protocol", "noflo".parse().unwrap()); // not required by noflo-ui
         headers.append("MyCustomHeader", ":)".parse().unwrap());
         headers.append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
 
@@ -54,70 +57,22 @@ fn handle_client(stream: TcpStream) -> Result<()> {
             msg @ Message::Text(_) | msg @ Message::Binary(_) => {
                 info!("got a text|binary message");
                 debug!("message data: {}", msg.into_text().unwrap());
+
                 info!("sending back runtime/runtime message");
                 websocket
                     .write_message(Message::text(
-                        "{
-                      \"protocol\": \"runtime\",
-                      \"command\": \"runtime\",
-                      \"payload\": {
-                        \"id\": \"f18a4924-9d4f-414d-a37c-deadbeef0000\",
-                        \"label\": \"human-readable description of the runtime\",
-                        \"version\": \"0.7\",
-                        \"allCapabilities\": [
-                            \"protocol:runtime\",
-                            \"protocol:network\",
-                            \"graph:readonly\",
-                            \"protocol:component\",
-                            \"network:status\",
-                            \"network:persist\"
-                        ],
-                        \"capabilities\": [
-                            \"protocol:runtime\",
-                            \"protocol:network\",
-                            \"graph:readonly\",
-                            \"protocol:component\",
-                            \"network:status\"
-                        ],
-                        \"graph\": \"service-main\",
-                        \"type\": \"flowd\",
-                        \"namespace\": \"my-project-foo\",
-                        \"repository\": \"https://github.com/flowbased/fbp-protocol.git\",
-                        \"repositoryVersion\": \"0.6.3-8-g90edcfc\"
-                      }
-                    }",
+                        serde_json::to_string(&RuntimeRuntimeMessage::default())
+                            .expect("failed to serialize runtime/runtime message"),
                     ))
                     .expect("failed to write message into websocket");
+
                 info!("sending back runtime/ports message");
                 websocket
                     .write_message(Message::text(
-                        "{
-                  \"protocol\": \"runtime\",
-                  \"command\": \"ports\",
-                  \"payload\": {
-                    \"graph\": \"service-main\",
-                    \"inPorts\": [],
-                    \"outPorts\": []
-                  }
-                }",
+                        serde_json::to_string(&RuntimePortsMessage::default())
+                            .expect("failed to serialize runtime/ports message"),
                     ))
                     .expect("failed to write message into websocket");
-                /*
-                info!("sending clear graph message");
-                websocket
-                    .write_message(Message::text(
-                        "{\"protocol\": \"graph\",\"command\": \"clear\",\"payload\": {
-                                \"idstring\":\"f18a4924-9d4f-414d-a37c-deadbeef0001\",
-                                \"namestring\":\"service-main\",
-                                \"librarystring\":\"main\",
-                                \"main\":true,
-                                \"icon\":\"circle\",
-                                \"description\":\"tolle Beschreibung!\",
-                                \"secret\":\"soso\"
-                            }}",
-                    ))
-                    .expect("failed to write message into websocket");
-                    */
                 //websocket.write_message(msg)?;
             }
             Message::Ping(_) | Message::Pong(_) => {
@@ -137,7 +92,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 fn main() {
     pretty_env_logger::init();
 
-    let server = TcpListener::bind("localhost:3000").unwrap();
+    let server = TcpListener::bind("localhost:3569").unwrap();
 
     info!("listening");
     for stream in server.incoming() {
@@ -153,5 +108,125 @@ fn main() {
             }
             Err(e) => error!("Error accepting stream: {}", e),
         });
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "camelCase", tag = "command", content = "payload")]
+enum FBPMessage {
+    RuntimeRuntimeMessage,
+    RuntimePortsMessage,
+}
+
+#[derive(Serialize, Debug)]
+struct RuntimeRuntimeMessage {
+    protocol: String, // group of messages (and capabities)
+    command: String,  // name of message within group
+    payload: RuntimeRuntimePayload,
+}
+
+impl Default for RuntimeRuntimeMessage {
+    fn default() -> Self {
+        RuntimeRuntimeMessage {
+            protocol: String::from("runtime"),
+            command: String::from("runtime"),
+            payload: RuntimeRuntimePayload::default(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeRuntimePayload {
+    id: String,                        // UUID of this runtime instance
+    label: String,                     // human-readable description of the runtime
+    version: String,                   // supported protocol version
+    all_capabilities: Vec<Capability>, // capabilities supported by runtime
+    capabilities: Vec<Capability>, // capabities for you //TODO implement privilege level restrictions
+    graph: String,                 // currently active graph
+    #[serde(rename = "type")]
+    runtime: String, // name of the runtime software, "flowd"
+    namespace: String,             // namespace of components for this project of top-level graph
+    repository: String,            // source code repository of this runtime software
+    repository_version: String,    // repository version of this software build
+}
+
+impl Default for RuntimeRuntimePayload {
+    fn default() -> Self {
+        RuntimeRuntimePayload {
+            id: String::from("f18a4924-9d4f-414d-a37c-deadbeef0000"),
+            label: String::from("human-readable description of the runtime"),
+            version: String::from("0.7"),
+            all_capabilities: vec![
+                Capability::ProtocolRuntime,
+                Capability::ProtocolNetwork,
+                Capability::GraphReadonly,
+                Capability::ProtocolComponent,
+                Capability::NetworkStatus,
+                Capability::NetworkPersist,
+            ],
+            capabilities: vec![
+                Capability::ProtocolRuntime,
+                Capability::GraphReadonly,
+                Capability::ProtocolComponent,
+                Capability::NetworkStatus,
+            ],
+            graph: String::from("default_graph"),
+            runtime: String::from("flowd"),
+            namespace: String::from("main"),
+            repository: String::from("https://github.com/ERnsTL/flowd.git"),
+            repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and acutal version
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+enum Capability {
+    #[serde(rename = "protocol:runtime")]
+    ProtocolRuntime,
+    #[serde(rename = "protocol:network")]
+    ProtocolNetwork,
+    #[serde(rename = "graph:readonly")]
+    GraphReadonly,
+    #[serde(rename = "protocol:component")]
+    ProtocolComponent,
+    #[serde(rename = "network:status")]
+    NetworkStatus,
+    #[serde(rename = "network:persist")]
+    NetworkPersist,
+}
+
+#[derive(Serialize, Debug)]
+struct RuntimePortsMessage {
+    protocol: String,
+    command: String,
+    payload: RuntimePortsPayload,
+}
+
+impl Default for RuntimePortsMessage {
+    fn default() -> Self {
+        RuntimePortsMessage {
+            protocol: String::from("runtime"),
+            command: String::from("ports"),
+            payload: RuntimePortsPayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct RuntimePortsPayload {
+    graph: String,
+    in_ports: Vec<String>,
+    out_ports: Vec<String>,
+}
+
+impl Default for RuntimePortsPayload {
+    fn default() -> Self {
+        RuntimePortsPayload {
+            graph: String::from("default_graph"),
+            in_ports: vec![],
+            out_ports: vec![],
+        }
     }
 }
