@@ -58,23 +58,61 @@ fn handle_client(stream: TcpStream) -> Result<()> {
         match websocket.read_message()? {
             msg @ Message::Text(_) | msg @ Message::Binary(_) => {
                 info!("got a text|binary message");
-                debug!("message data: {}", msg.into_text().unwrap());
+                //debug!("message data: {}", msg.clone().into_text().unwrap());
 
-                info!("sending back runtime/runtime message");
-                websocket
-                    .write_message(Message::text(
-                        serde_json::to_string(&RuntimeRuntimeMessage::default())
-                            .expect("failed to serialize runtime/runtime message"),
-                    ))
-                    .expect("failed to write message into websocket");
+                let fbpmsg: FBPMessage = serde_json::from_slice(msg.into_data().as_slice())
+                    .expect("failed to decode JSON message"); //TODO data handover optimizable?
 
-                info!("sending back runtime/ports message");
-                websocket
-                    .write_message(Message::text(
-                        serde_json::to_string(&RuntimePortsMessage::default())
-                            .expect("failed to serialize runtime/ports message"),
-                    ))
-                    .expect("failed to write message into websocket");
+                match fbpmsg {
+                    FBPMessage::RuntimeGetruntimeMessage(payload) => {
+                        info!(
+                            "got runtime/getruntime message with secret {}",
+                            payload.secret
+                        );
+                        // send response = runtime/runtime message
+                        info!("response: sending runtime/runtime message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&RuntimeRuntimeMessage::default())
+                                    .expect("failed to serialize runtime/runtime message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                        // (specification) "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
+                        info!("response: sending runtime/ports message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&RuntimePortsMessage::default())
+                                    .expect("failed to serialize runtime/ports message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
+                    FBPMessage::ComponentListMessage(payload) => {
+                        info!("got component/list message");
+                        info!("response: sending component/component message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&ComponentComponentMessage::default())
+                                    .expect("failed to serialize component/component message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                        info!("response: sending component/componentsready message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&ComponentComponentsreadyMessage::default())
+                                    .expect(
+                                        "failed to serialize component/componentsready message",
+                                    ),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
+                    _ => {
+                        info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
+                        websocket.close(None).expect("could not close websocket");
+                    }
+                }
+
                 //websocket.write_message(msg)?;
             }
             Message::Ping(_) | Message::Pong(_) => {
@@ -113,11 +151,27 @@ fn main() {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-#[serde(rename_all = "camelCase", tag = "command", content = "payload")]
+//TODO currently panicks if unknown variant
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
 enum FBPMessage {
+    #[serde(rename = "getruntime")]
+    RuntimeGetruntimeMessage(RuntimeGetruntimePayload),
+    //#[serde(rename = "runtime")]
     RuntimeRuntimeMessage,
+    //#[serde(rename = "ports")]
     RuntimePortsMessage,
+    #[serde(rename = "list")]
+    ComponentListMessage(ComponentListPayload),
+    //#[serde(rename = "component")]
+    ComponentComponentMessage,
+    //#[serde(rename = "componentsready")]
+    ComponentComponentsreadyMessage,
+}
+
+#[derive(Deserialize, Debug)]
+struct RuntimeGetruntimePayload {
+    secret: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -230,5 +284,80 @@ impl Default for RuntimePortsPayload {
             in_ports: vec![],
             out_ports: vec![],
         }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentComponentMessage {
+    protocol: String,
+    command: String,
+    payload: ComponentComponentPayload,
+}
+
+impl Default for ComponentComponentMessage {
+    fn default() -> Self {
+        ComponentComponentMessage {
+            protocol: String::from("component"),
+            command: String::from("component"),
+            payload: ComponentComponentPayload::default(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ComponentListPayload {
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ComponentComponentPayload {
+    name: String, // spec: component name in format that can be used in graphs. Should contain the component library prefix.
+    description: String,
+    icon: String, // spec: visual icon for the component, matching icon names in Font Awesome
+    subgraph: bool, // spec: is the component a subgraph?
+    in_ports: Vec<String>, //TODO create classes
+    out_ports: Vec<String>, //TODO create classes
+}
+
+impl Default for ComponentComponentPayload {
+    fn default() -> Self {
+        ComponentComponentPayload {
+            name: String::from("main/Repeat"), //TODO Repeat, Drop, Output
+            description: String::from("description of the Repeat component"),
+            icon: String::from("usd"), //TODO with fa- prefix?
+            subgraph: false,
+            in_ports: vec![],
+            out_ports: vec![],
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentComponentsreadyMessage {
+    protocol: String,
+    command: String,
+    payload: ComponentComponentsreadyPayload,
+}
+
+impl Default for ComponentComponentsreadyMessage {
+    fn default() -> Self {
+        ComponentComponentsreadyMessage {
+            protocol: String::from("component"),
+            command: String::from("componentsready"),
+            payload: ComponentComponentsreadyPayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentComponentsreadyPayload {
+    // no playload fields; spec: indication that a component listing has finished
+}
+
+impl Default for ComponentComponentsreadyPayload {
+    fn default() -> Self {
+        ComponentComponentsreadyPayload {}
     }
 }
