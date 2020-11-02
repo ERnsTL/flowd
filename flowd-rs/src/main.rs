@@ -355,7 +355,7 @@ struct ComponentComponentPayload {
 impl Default for ComponentComponentPayload {
     fn default() -> Self {
         ComponentComponentPayload {
-            name: String::from("main/Repeat"), //TODO Repeat, Drop, Output
+            name: String::from("main/Repeat"), //TODO Repeat, Drop, Output required for tests
             description: String::from("description of the Repeat component"),
             icon: String::from("usd"), //TODO with fa- prefix?
             subgraph: false,
