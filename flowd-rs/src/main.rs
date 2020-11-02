@@ -67,54 +67,54 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                 match fbpmsg {
                     FBPMessage::RuntimeGetruntimeMessage(payload) => {
                         info!(
-                            "got runtime/getruntime message with secret {}",
+                            "got runtime:getruntime message with secret {}",
                             payload.secret
                         );
-                        // send response = runtime/runtime message
-                        info!("response: sending runtime/runtime message");
+                        // send response = runtime:runtime message
+                        info!("response: sending runtime:runtime message");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&RuntimeRuntimeMessage::default())
-                                    .expect("failed to serialize runtime/runtime message"),
+                                    .expect("failed to serialize runtime:runtime message"),
                             ))
                             .expect("failed to write message into websocket");
                         // (specification) "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
-                        info!("response: sending runtime/ports message");
+                        info!("response: sending runtime:ports message");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&RuntimePortsMessage::default())
-                                    .expect("failed to serialize runtime/ports message"),
+                                    .expect("failed to serialize runtime:ports message"),
                             ))
                             .expect("failed to write message into websocket");
                     }
 
                     FBPMessage::ComponentListMessage(payload) => {
-                        info!("got component/list message");
-                        info!("response: sending component/component message");
+                        info!("got component:list message");
+                        info!("response: sending component:component message");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&ComponentComponentMessage::default())
-                                    .expect("failed to serialize component/component message"),
+                                    .expect("failed to serialize component:component message"),
                             ))
                             .expect("failed to write message into websocket");
-                        info!("response: sending component/componentsready message");
+                        info!("response: sending component:componentsready message");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&ComponentComponentsreadyMessage::default())
                                     .expect(
-                                        "failed to serialize component/componentsready message",
+                                        "failed to serialize component:componentsready message",
                                     ),
                             ))
                             .expect("failed to write message into websocket");
                     }
 
                     FBPMessage::NetworkGetstatusMessage(payload) => {
-                        info!("got network/getstatus message");
-                        info!("response: sending network/status message");
+                        info!("got network:getstatus message");
+                        info!("response: sending network:status message");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&NetworkStatusMessage::default())
-                                    .expect("failed to serialize network/status message"),
+                                    .expect("failed to serialize network:status message"),
                             ))
                             .expect("failed to write message into websocket");
                     }
