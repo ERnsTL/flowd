@@ -164,22 +164,29 @@ fn main() {
 }
 
 //TODO currently panicks if unknown variant
+//TODO currently panicks if field is missing during decoding
 #[derive(Deserialize, Debug)]
 #[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
 enum FBPMessage {
     #[serde(rename = "getruntime")]
-    RuntimeGetruntimeMessage(RuntimeGetruntimePayload),
-    //#[serde(rename = "runtime")]
+    RuntimeGetruntimeMessage(RuntimeGetruntimePayload), //NOTE: tag+content -> tuple variant not struct variant
+    #[serde(rename = "runtime")]
     RuntimeRuntimeMessage,
-    //#[serde(rename = "ports")]
+    #[serde(rename = "ports")]
     RuntimePortsMessage,
     #[serde(rename = "list")]
     ComponentListMessage(ComponentListPayload),
-    //#[serde(rename = "component")]
+    #[serde(rename = "component")]
     ComponentComponentMessage,
-    //#[serde(rename = "componentsready")]
+    #[serde(rename = "componentsready")]
     ComponentComponentsreadyMessage,
+    #[serde(rename = "getstatus")]
+    NetworkGetstatusMessage(NetworkGetstatusPayload),
+    #[serde(rename = "status")]
+    NetworkStatusMessage,
 }
+
+// ----------
 
 #[derive(Deserialize, Debug)]
 struct RuntimeGetruntimePayload {
