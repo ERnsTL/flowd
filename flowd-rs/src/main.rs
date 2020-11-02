@@ -184,6 +184,10 @@ enum FBPMessage {
     NetworkGetstatusMessage(NetworkGetstatusPayload),
     #[serde(rename = "status")]
     NetworkStatusMessage,
+    #[serde(rename = "getsource")]
+    ComponentGetsourceMessage(ComponentGetsourcePayload),
+    #[serde(rename = "source")]
+    ComponentSourceMessage,
 }
 
 // ----------
@@ -237,14 +241,16 @@ impl Default for RuntimeRuntimePayload {
                 Capability::ProtocolNetwork,
                 Capability::GraphReadonly,
                 Capability::ProtocolComponent,
+                Capability::ComponentGetsource,
                 Capability::NetworkStatus,
                 Capability::NetworkPersist,
             ],
             capabilities: vec![
                 Capability::ProtocolRuntime,
-                Capability::GraphReadonly,
-                Capability::ProtocolComponent,
                 Capability::NetworkStatus,
+                Capability::ProtocolComponent,
+                Capability::ComponentGetsource,
+                Capability::GraphReadonly,
             ],
             graph: String::from("default_graph"), // currently active graph
             runtime: String::from("flowd"),
@@ -265,6 +271,8 @@ enum Capability {
     GraphReadonly,
     #[serde(rename = "protocol:component")]
     ProtocolComponent,
+    #[serde(rename = "component:getsource")]
+    ComponentGetsource,
     #[serde(rename = "network:status")]
     NetworkStatus,
     #[serde(rename = "network:persist")]
@@ -440,4 +448,19 @@ impl Default for NetworkStatusPayload {
             debug: false,
         }
     }
+}
+
+// ----------
+
+#[derive(Deserialize, Debug)]
+struct ComponentGetsourceMessage {
+    protocol: String,
+    command: String,
+    payload: ComponentGetsourcePayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct ComponentGetsourcePayload {
+    name: String, //Name of the component to for which to get source code. Should contain the library prefix, eg. "my-project/SomeComponent"
+    secret: String,
 }
