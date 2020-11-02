@@ -119,6 +119,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::ComponentGetsourceMessage(payload) => {
+                        info!("got component:getsource message");
+                        info!("response: sending component:source message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&ComponentSourceMessage::default())
+                                    .expect("failed to serialize component:source message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -461,6 +472,46 @@ struct ComponentGetsourceMessage {
 
 #[derive(Deserialize, Debug)]
 struct ComponentGetsourcePayload {
-    name: String, //Name of the component to for which to get source code. Should contain the library prefix, eg. "my-project/SomeComponent"
+    name: String, // spec: Name of the component to for which to get source code. Should contain the library prefix, eg. "my-project/SomeComponent"
     secret: String,
+}
+
+// ----------
+
+#[derive(Serialize, Debug)]
+struct ComponentSourceMessage {
+    protocol: String,
+    command: String,
+    payload: ComponentSourcePayload,
+}
+
+impl Default for ComponentSourceMessage {
+    fn default() -> Self {
+        ComponentSourceMessage {
+            protocol: String::from("component"),
+            command: String::from("source"),
+            payload: ComponentSourcePayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentSourcePayload {
+    name: String, // spec: Name of the component. Must not contain library prefix
+    language: String,
+    library: String, // spec: Component library identifier, eg. "components-common"
+    code: String,    // spec: component source code
+    tests: String,   // spec: unit tests for the component
+}
+
+impl Default for ComponentSourcePayload {
+    fn default() -> Self {
+        ComponentSourcePayload {
+            name: String::from("Repeat"),
+            language: String::from("Rust"),
+            library: String::from("main"),
+            code: String::from("// source code for component Repeat"),
+            tests: String::from("// unit tests for component Repeat"),
+        }
+    }
 }
