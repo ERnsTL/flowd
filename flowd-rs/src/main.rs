@@ -62,6 +62,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
                 let fbpmsg: FBPMessage = serde_json::from_slice(msg.into_data().as_slice())
                     .expect("failed to decode JSON message"); //TODO data handover optimizable?
+                                                              //TODO handle panic because of decoding error here
 
                 match fbpmsg {
                     FBPMessage::RuntimeGetruntimeMessage(payload) => {
@@ -134,7 +135,7 @@ fn main() {
 
     let server = TcpListener::bind("localhost:3569").unwrap();
 
-    info!("listening");
+    info!("listening on localhost:3569");
     for stream in server.incoming() {
         spawn(move || match stream {
             Ok(stream) => {
@@ -210,9 +211,9 @@ struct RuntimeRuntimePayload {
 impl Default for RuntimeRuntimePayload {
     fn default() -> Self {
         RuntimeRuntimePayload {
-            id: String::from("f18a4924-9d4f-414d-a37c-deadbeef0000"),
-            label: String::from("human-readable description of the runtime"),
-            version: String::from("0.7"),
+            id: String::from("f18a4924-9d4f-414d-a37c-deadbeef0000"), //TODO actually random UUID
+            label: String::from("human-readable description of the runtime"), //TODO useful text
+            version: String::from("0.7"),                             //TODO actually implement that
             all_capabilities: vec![
                 Capability::ProtocolRuntime,
                 Capability::ProtocolNetwork,
@@ -227,9 +228,9 @@ impl Default for RuntimeRuntimePayload {
                 Capability::ProtocolComponent,
                 Capability::NetworkStatus,
             ],
-            graph: String::from("default_graph"),
+            graph: String::from("default_graph"), // currently active graph
             runtime: String::from("flowd"),
-            namespace: String::from("main"),
+            namespace: String::from("main"), // namespace of components
             repository: String::from("https://github.com/ERnsTL/flowd.git"),
             repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and acutal version
         }
@@ -251,6 +252,8 @@ enum Capability {
     #[serde(rename = "network:persist")]
     NetworkPersist,
 }
+
+// ----------
 
 #[derive(Serialize, Debug)]
 struct RuntimePortsMessage {
@@ -286,6 +289,8 @@ impl Default for RuntimePortsPayload {
         }
     }
 }
+
+// ----------
 
 #[derive(Serialize, Debug)]
 struct ComponentComponentMessage {
@@ -333,6 +338,8 @@ impl Default for ComponentComponentPayload {
         }
     }
 }
+
+// ----------
 
 #[derive(Serialize, Debug)]
 struct ComponentComponentsreadyMessage {
