@@ -108,6 +108,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::NetworkGetstatusMessage(payload) => {
+                        info!("got network/getstatus message");
+                        info!("response: sending network/status message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkStatusMessage::default())
+                                    .expect("failed to serialize network/status message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -366,5 +377,60 @@ struct ComponentComponentsreadyPayload {
 impl Default for ComponentComponentsreadyPayload {
     fn default() -> Self {
         ComponentComponentsreadyPayload {}
+    }
+}
+
+// ----------
+
+#[derive(Deserialize, Debug)]
+struct NetworkGetstatusMessage {
+    protocol: String,
+    command: String,
+    payload: NetworkGetstatusPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct NetworkGetstatusPayload {
+    graph: String,
+    secret: String,
+}
+
+// ----------
+
+#[derive(Serialize, Debug)]
+struct NetworkStatusMessage {
+    protocol: String,
+    command: String,
+    payload: NetworkStatusPayload,
+}
+
+impl Default for NetworkStatusMessage {
+    fn default() -> Self {
+        NetworkStatusMessage {
+            protocol: String::from("network"),
+            command: String::from("status"),
+            payload: NetworkStatusPayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStatusPayload {
+    graph: String,
+    uptime: u32, // spec: time the network has been running, in seconds -- TODO uptime of the runtime or the network or time the network has been active?
+    started: bool, // spec: whether or not network has started running -- TODO difference between started and running?
+    running: bool, // spec: boolean tells whether the network is running or not
+    debug: bool,   // spec: whether or not network is in debug mode
+}
+
+impl Default for NetworkStatusPayload {
+    fn default() -> Self {
+        NetworkStatusPayload {
+            graph: String::from("default_graph"),
+            uptime: 256,
+            started: true,
+            running: false,
+            debug: false,
+        }
     }
 }
