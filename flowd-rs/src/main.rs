@@ -444,7 +444,7 @@ impl Default for NetworkStatusPayload {
             graph: String::from("default_graph"),
             uptime: 256,
             started: true,
-            running: false,
+            running: true,
             debug: false,
         }
     }
