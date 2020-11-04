@@ -7,7 +7,7 @@ Re-implementation of the flowd runtime in Rust.
 3. Finally, add support for persistence -- .fbp file format from DrawFBP as well as the JSON graph format from noflo.
 4. Transition all Go components.
 5. Fade out the Go version (or use it as an "executor" resp. execution layer).
-6. More features and real-life applications? CBOR in addition to JSON? Other FBP UIs for online FBP programming?
+6. More features and real-life applications? Add registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))? CBOR in addition to JSON? Other FBP UIs for online FBP programming?
 
 Run it with:
 
