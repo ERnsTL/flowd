@@ -121,13 +121,23 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
                     FBPMessage::ComponentGetsourceMessage(payload) => {
                         info!("got component:getsource message");
-                        info!("response: sending component:source message");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&ComponentSourceMessage::default())
-                                    .expect("failed to serialize component:source message"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        if payload.name == "default_graph" {
+                            info!("response: sending component:source message for graph");
+                            websocket
+                                .write_message(Message::text(
+                                    serde_json::to_string(&ComponentSourceMessage::default_graph())
+                                        .expect("failed to serialize component:source message"),
+                                ))
+                                .expect("failed to write message into websocket");
+                        } else {
+                            info!("response: sending component:source message for component");
+                            websocket
+                                .write_message(Message::text(
+                                    serde_json::to_string(&ComponentSourceMessage::default())
+                                        .expect("failed to serialize component:source message"),
+                                ))
+                                .expect("failed to write message into websocket");
+                        }
                     }
 
                     _ => {
@@ -495,6 +505,16 @@ impl Default for ComponentSourceMessage {
     }
 }
 
+impl ComponentSourceMessage {
+    fn default_graph() -> Self {
+        ComponentSourceMessage {
+            protocol: String::from("component"),
+            command: String::from("source"),
+            payload: ComponentSourcePayload::default_graph(),
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 struct ComponentSourcePayload {
     name: String, // spec: Name of the component. Must not contain library prefix
@@ -512,6 +532,52 @@ impl Default for ComponentSourcePayload {
             library: String::from("main"),
             code: String::from("// source code for component Repeat"),
             tests: String::from("// unit tests for component Repeat"),
+        }
+    }
+}
+
+impl ComponentSourcePayload {
+    fn default_graph() -> Self {
+        ComponentSourcePayload {
+            name: String::from("default_graph"),
+            language: String::from("json"),
+            library: String::from("main"),
+            code: String::from(
+                r#"{
+                "caseSensitive": true,
+                "properties": {
+                    "name": "default_graph",
+                    "environment": {
+                        "type": "flowd",
+                        "content": ""
+                    },
+                    "description": "description for default_graph",
+                    "icon": "usd"
+                },
+                "inports": {},
+                "outports": {},
+                "groups": [
+                    {
+                        "name": "process_group1",
+                        "nodes": ["Repeater"],
+                        "metadata": {
+                            "description": "description of process_group1"
+                        }
+                    }
+                ],
+                "processes": {
+                    "Repeater": {
+                        "component": "Repeat",
+                        "metadata": {
+                            "x": 100,
+                            "y": 100
+                        }
+                    }
+                },
+                "connections": []
+        }"#,
+            ),
+            tests: String::from("// tests for graph default_graph"),
         }
     }
 }
