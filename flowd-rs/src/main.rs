@@ -453,9 +453,10 @@ impl Default for NetworkStatusMessage {
 #[derive(Serialize, Debug)]
 struct NetworkStatusPayload {
     graph: String,
-    uptime: u32, // spec: time the network has been running, in seconds -- TODO uptime of the runtime or the network or time the network has been active?
-    started: bool, // spec: whether or not network has started running -- TODO difference between started and running?
-    running: bool, // spec: boolean tells whether the network is running or not
+    uptime: u32, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network
+    // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started.
+    started: bool, // spec: whether or not network has been started
+    running: bool, // spec: boolean tells whether the network is running at the moment or not
     debug: bool,   // spec: whether or not network is in debug mode
 }
 
