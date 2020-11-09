@@ -88,7 +88,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
-                    FBPMessage::ComponentListMessage(payload) => {
+                    FBPMessage::ComponentListMessage(_payload) => {
                         info!("got component:list message");
                         info!("response: sending component:component message");
                         websocket
@@ -108,7 +108,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
-                    FBPMessage::NetworkGetstatusMessage(payload) => {
+                    FBPMessage::NetworkGetstatusMessage(_payload) => {
                         info!("got network:getstatus message");
                         info!("response: sending network:status message");
                         websocket
