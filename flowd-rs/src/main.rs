@@ -543,6 +543,7 @@ impl ComponentSourcePayload {
             name: String::from("default_graph"),
             language: String::from("json"),
             library: String::from("main"),
+            //TODO validate against schema @ https://github.com/flowbased/fbp/blob/master/schema/graph.json
             code: String::from(
                 r#"{
                 "caseSensitive": true,
