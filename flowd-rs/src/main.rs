@@ -284,20 +284,45 @@ impl Default for RuntimeRuntimePayload {
 
 #[derive(Serialize, Debug)]
 enum Capability {
-    #[serde(rename = "protocol:runtime")]
-    ProtocolRuntime,
+    // spec: deprecated. Implies capabilities network:status, network:data, network:control. Does not imply capability network:persist.
     #[serde(rename = "protocol:network")]
     ProtocolNetwork,
-    #[serde(rename = "graph:readonly")]
-    GraphReadonly,
+    //TODO implement, implied messages
+    #[serde(rename = "network:persist")]
+    NetworkPersist,
+    //TODO implement, implied messages
+    #[serde(rename = "network:status")]
+    NetworkStatus,
+    //TODO implement, implied messages
+    #[serde(rename = "network:data")]
+    NetworkData,
+    //TODO implement, implied messages
+    #[serde(rename = "network:control")]
+    NetworkControl,
+
+    // spec: can list components of the runtime using the component:list message.
     #[serde(rename = "protocol:component")]
     ProtocolComponent,
     #[serde(rename = "component:getsource")]
     ComponentGetsource,
-    #[serde(rename = "network:status")]
-    NetworkStatus,
-    #[serde(rename = "network:persist")]
-    NetworkPersist,
+    #[serde(rename = "component:setsource")]
+    ComponentSetsource,
+
+    // spec: can expose ports of main graph and transmit packet information to/from them
+    // input messages: runtime:packet
+    #[serde(rename = "protocol:runtime")]
+    ProtocolRuntime,
+
+    // spec: read and follow changes to runtime graphs (but not modify)
+    #[serde(rename = "graph:readonly")]
+    GraphReadonly,
+    // spec: read & modify runtime graphs using the Graph protocol.
+    #[serde(rename = "protocol:graph")]
+    ProtocolGraph,
+
+    // spec: runtime is able to record and send over flowtraces, used for retroactive debugging
+    #[serde(rename = "protocol:trace")]
+    ProtocolTrace,
 }
 
 // ----------
