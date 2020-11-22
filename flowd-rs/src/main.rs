@@ -140,6 +140,20 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                         }
                     }
 
+                    FBPMessage::GraphChangenodeMessage(payload) => {
+                        info!("got graph:changenode message");
+                        info!("response: sending graph:changenode message");
+                        let mut msg = GraphChangenodeMessage::default();
+                        msg.payload = payload;
+                        msg.payload.secret = String::new();
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&msg)
+                                    .expect("failed to serialize graph:changenode message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -209,6 +223,10 @@ enum FBPMessage {
     ComponentGetsourceMessage(ComponentGetsourcePayload),
     #[serde(rename = "source")]
     ComponentSourceMessage,
+
+    // protocol:graph
+    #[serde(rename = "changenode")]
+    GraphChangenodeMessage(GraphChangenodePayload),
 }
 
 // ----------
@@ -620,3 +638,105 @@ impl ComponentSourcePayload {
         }
     }
 }
+
+// ----------
+// protocol:graph
+// ----------
+
+// graph:clear -> graph:clear | graph:error
+
+// graph:addnode -> graph:addnode | graph:error
+
+// graph:removenode -> graph:removenode | graph:error
+
+// graph:renamenode -> graph:renamenode | graph:error
+
+// graph:changenode -> graph:changenode | graph:error
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphChangenodeMessage {
+    protocol: String,
+    command: String,
+    payload: GraphChangenodePayload, //TODO key-value pairs
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphChangenodePayload {
+    id: String,
+    metadata: GraphChangenodeMetadata,
+    graph: String,
+    secret: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphChangenodeMetadata {
+    x: i32,
+    y: i32,
+    height: u32,   // non-specified
+    width: u32,    // non-specified
+    label: String, // non-specified
+}
+
+impl Default for GraphChangenodeMessage {
+    fn default() -> Self {
+        GraphChangenodeMessage {
+            protocol: String::from("graph"),
+            command: String::from("changenode"),
+            payload: GraphChangenodePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphChangenodePayload {
+    fn default() -> Self {
+        GraphChangenodePayload {
+            id: String::from("Repeater"),
+            metadata: GraphChangenodeMetadata::default(),
+            graph: String::from("default_graph"),
+            secret: String::from(""), // TODO empty for repsonse -- should actually not be there
+        }
+    }
+}
+
+impl Default for GraphChangenodeMetadata {
+    fn default() -> Self {
+        GraphChangenodeMetadata {
+            x: 0,
+            y: 0,
+            height: 50,
+            width: 50,
+            label: String::from("Repeater"),
+        }
+    }
+}
+
+// graph:addedge -> graph:addedge | graph:error
+
+// graph:removeedge -> graph:removeedge | graph:error
+
+// graph:changeedge -> graph:changeedge | graph:error
+
+// graph:addinitial -> graph:addinitial | graph:error
+
+// graph:removeinitial -> graph:removeinitial | graph:error
+
+// graph:addinport -> graph:addinport | graph:error
+
+// graph:removeinport -> graph:removeinport | graph:error
+
+// graph:renameinport -> graph:renameinport | graph:error
+
+// graph:addoutport -> graph:addoutport | graph:error
+
+// graph:removeoutport -> graph:removeoutport | graph:error
+
+// graph:renameoutport -> graph:renameoutport | graph:error
+
+// graph:addgroup -> graph:addgroup | graph:error
+
+// graph:removegroup -> graph:removegroup | graph:error
+
+// graph:renamegroup -> graph:renamegroup | graph:error
+
+// graph:changegroup -> graph:changegroup | graph:error
+
+// graph:error response
