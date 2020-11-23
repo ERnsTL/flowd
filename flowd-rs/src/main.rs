@@ -140,16 +140,13 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                         }
                     }
 
-                    FBPMessage::GraphChangenodeMessage(payload) => {
+                    FBPMessage::GraphChangenodeRequest(_payload) => {
                         info!("got graph:changenode message");
-                        info!("response: sending graph:changenode message");
-                        let mut msg = GraphChangenodeMessage::default();
-                        msg.payload = payload;
-                        msg.payload.secret = String::new();
+                        info!("response: sending graph:changenode response");
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&msg)
-                                    .expect("failed to serialize graph:changenode message"),
+                                serde_json::to_string(&GraphChangenodeResponse::default())
+                                    .expect("failed to serialize graph:changenode response"),
                             ))
                             .expect("failed to write message into websocket");
                     }
@@ -226,7 +223,7 @@ enum FBPMessage {
 
     // protocol:graph
     #[serde(rename = "changenode")]
-    GraphChangenodeMessage(GraphChangenodePayload),
+    GraphChangenodeRequest(GraphChangenodeRequestPayload),
 }
 
 // ----------
@@ -652,19 +649,19 @@ impl ComponentSourcePayload {
 // graph:renamenode -> graph:renamenode | graph:error
 
 // graph:changenode -> graph:changenode | graph:error
-#[derive(Deserialize, Serialize, Debug)]
-struct GraphChangenodeMessage {
+#[derive(Deserialize, Debug)]
+struct GraphChangenodeRequest {
     protocol: String,
     command: String,
-    payload: GraphChangenodePayload, //TODO key-value pairs
+    payload: GraphChangenodeRequestPayload, //TODO spec: key-value pairs (with some well-known values)
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-struct GraphChangenodePayload {
+#[derive(Deserialize, Debug)]
+struct GraphChangenodeRequestPayload {
     id: String,
     metadata: GraphChangenodeMetadata,
     graph: String,
-    secret: String,
+    secret: String, // if using a single GraphChangenodeMessage struct, this field would be sent in response message
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -676,23 +673,36 @@ struct GraphChangenodeMetadata {
     label: String, // non-specified
 }
 
-impl Default for GraphChangenodeMessage {
+#[derive(Serialize, Debug)]
+struct GraphChangenodeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphChangenodeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphChangenodeResponsePayload {
+    id: String,
+    metadata: GraphChangenodeMetadata,
+    graph: String,
+}
+
+impl Default for GraphChangenodeResponse {
     fn default() -> Self {
-        GraphChangenodeMessage {
+        GraphChangenodeResponse {
             protocol: String::from("graph"),
             command: String::from("changenode"),
-            payload: GraphChangenodePayload::default(),
+            payload: GraphChangenodeResponsePayload::default(),
         }
     }
 }
 
-impl Default for GraphChangenodePayload {
+impl Default for GraphChangenodeResponsePayload {
     fn default() -> Self {
-        GraphChangenodePayload {
+        GraphChangenodeResponsePayload {
             id: String::from("Repeater"),
             metadata: GraphChangenodeMetadata::default(),
             graph: String::from("default_graph"),
-            secret: String::from(""), // TODO empty for repsonse -- should actually not be there
         }
     }
 }
