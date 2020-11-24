@@ -444,7 +444,7 @@ impl Default for ComponentComponentPayload {
 struct ComponentComponentsreadyMessage {
     protocol: String,
     command: String,
-    payload: ComponentComponentsreadyPayload,
+    payload: u32, // noflo-ui expects payload to be integer -> TODO number of component:component messages before the component:componentsready message?
 }
 
 impl Default for ComponentComponentsreadyMessage {
@@ -452,19 +452,8 @@ impl Default for ComponentComponentsreadyMessage {
         ComponentComponentsreadyMessage {
             protocol: String::from("component"),
             command: String::from("componentsready"),
-            payload: ComponentComponentsreadyPayload::default(),
+            payload: 1,
         }
-    }
-}
-
-#[derive(Serialize, Debug)]
-struct ComponentComponentsreadyPayload {
-    // no playload fields; spec: indication that a component listing has finished
-}
-
-impl Default for ComponentComponentsreadyPayload {
-    fn default() -> Self {
-        ComponentComponentsreadyPayload {}
     }
 }
 
