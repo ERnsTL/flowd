@@ -140,6 +140,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                         }
                     }
 
+                    FBPMessage::GraphClearRequest(_payload) => {
+                        info!("got graph:clear message");
+                        info!("response: sending graph:clear response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphClearResponse::default())
+                                    .expect("failed to serialize graph:clear response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::GraphChangenodeRequest(_payload) => {
                         info!("got graph:changenode message");
                         info!("response: sending graph:changenode response");
@@ -222,6 +233,8 @@ enum FBPMessage {
     ComponentSourceMessage,
 
     // protocol:graph
+    #[serde(rename = "clear")]
+    GraphClearRequest(GraphClearRequestPayload),
     #[serde(rename = "changenode")]
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
 }
@@ -630,6 +643,63 @@ impl ComponentSourcePayload {
 // ----------
 
 // graph:clear -> graph:clear | graph:error
+#[derive(Deserialize, Debug)]
+struct GraphClearRequest {
+    protocol: String,
+    command: String,
+    payload: GraphClearRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphClearRequestPayload {
+    id: String,   // name of the graph
+    name: String, // human-readable label of the graph
+    library: String,
+    main: bool, // main graph?
+    icon: String,
+    description: String,
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphClearResponse {
+    protocol: String,
+    command: String,
+    payload: GraphClearResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphClearResponsePayload {
+    id: String,   // name of the graph
+    name: String, // human-readable label of the graph
+    library: String,
+    main: bool, // main graph?
+    icon: String,
+    description: String,
+}
+
+impl Default for GraphClearResponse {
+    fn default() -> Self {
+        GraphClearResponse {
+            protocol: String::from("graph"),
+            command: String::from("clear"),
+            payload: GraphClearResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphClearResponsePayload {
+    fn default() -> Self {
+        GraphClearResponsePayload {
+            id: String::from("001"),
+            name: String::from("main_graph"),
+            library: String::from("main_library"),
+            main: true,
+            icon: String::from("fa-gbp"),
+            description: String::from("the main graph"),
+        }
+    }
+}
 
 // graph:addnode -> graph:addnode | graph:error
 
