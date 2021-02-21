@@ -172,6 +172,18 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             ))
                             .expect("failed to write message into websocket");
                     }
+
+                    FBPMessage::GraphRemoveedgeRequest(_payload) => {
+                        info!("got graph:removeedge message");
+                        info!("response: sending graph:removeedge response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemoveedgeResponse::default())
+                                    .expect("failed to serialize graph:removeedge response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -249,6 +261,8 @@ enum FBPMessage {
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
     #[serde(rename = "addedge")]
     GraphAddedgeRequest(GraphAddedgeRequestPayload),
+    #[serde(rename = "removeedge")]
+    GraphRemoveedgeRequest(GraphRemoveedgeRequestPayload),
 }
 
 // ----------
@@ -848,6 +862,46 @@ impl Default for GraphAddedgeResponsePayload {
 }
 
 // graph:removeedge -> graph:removeedge | graph:error
+#[derive(Deserialize, Debug)]
+struct GraphRemoveedgeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveedgeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRemoveedgeRequestPayload {
+    graph: String, //TODO spec: for graph:addedge the graph attricbute is after src,tgt but for removeedge it is first
+    src: GraphNodeSpec,
+    tgt: GraphNodeSpec,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveedgeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveedgeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough?
+
+impl Default for GraphRemoveedgeResponse {
+    fn default() -> Self {
+        GraphRemoveedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("addedge"),
+            payload: GraphRemoveedgeResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRemoveedgeResponsePayload {
+    fn default() -> Self {
+        GraphRemoveedgeResponsePayload {}
+    }
+}
 
 // graph:changeedge -> graph:changeedge | graph:error
 
