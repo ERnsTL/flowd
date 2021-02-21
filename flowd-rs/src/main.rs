@@ -584,7 +584,7 @@ impl Default for ComponentSourcePayload {
         ComponentSourcePayload {
             name: String::from("Repeat"),
             language: String::from("Rust"),
-            library: String::from("main"),
+            library: String::from("main_library"),
             code: String::from("// source code for component Repeat"),
             tests: String::from("// unit tests for component Repeat"),
         }
@@ -596,7 +596,7 @@ impl ComponentSourcePayload {
         ComponentSourcePayload {
             name: String::from("default_graph"),
             language: String::from("json"),
-            library: String::from("main"),
+            library: String::from("main_library"),
             //TODO validate against schema @ https://github.com/flowbased/fbp/blob/master/schema/graph.json
             code: String::from(
                 r#"{
