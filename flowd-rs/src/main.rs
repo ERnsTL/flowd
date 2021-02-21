@@ -800,18 +800,18 @@ struct GraphAddedgeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphAddedgeRequestPayload {
-    src: GraphAddedgeNode,
-    tgt: GraphAddedgeNode,
+    src: GraphNodeSpec,
+    tgt: GraphNodeSpec,
     metadata: GraphAddedgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     graph: String,
     secret: String, // only present in the request payload
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct GraphAddedgeNode {
+struct GraphNodeSpec {
     node: String,
     port: String,
-    index: String, //TODO spec: string or number -- how to handle
+    index: String, //TODO spec: string or number -- how to handle in Rust?
 }
 
 #[derive(Deserialize, Serialize, Debug)]
