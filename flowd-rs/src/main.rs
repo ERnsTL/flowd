@@ -829,7 +829,7 @@ struct GraphAddedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddedgeResponsePayload {}
+struct GraphAddedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough?
 
 impl Default for GraphAddedgeResponse {
     fn default() -> Self {
