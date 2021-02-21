@@ -162,6 +162,16 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphAddedgeRequest(_payload) => {
+                        info!("got graph:addedge message");
+                        info!("response: sending graph:addedge response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphAddedgeResponse::default())
+                                    .expect("failed to serialize graph:addedge response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -237,6 +247,8 @@ enum FBPMessage {
     GraphClearRequest(GraphClearRequestPayload),
     #[serde(rename = "changenode")]
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
+    #[serde(rename = "addedge")]
+    GraphAddedgeRequest(GraphAddedgeRequestPayload),
 }
 
 // ----------
@@ -779,6 +791,61 @@ impl Default for GraphChangenodeMetadata {
 }
 
 // graph:addedge -> graph:addedge | graph:error
+#[derive(Deserialize, Debug)]
+struct GraphAddedgeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphAddedgeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddedgeRequestPayload {
+    src: GraphAddedgeNode,
+    tgt: GraphAddedgeNode,
+    metadata: GraphAddedgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    graph: String,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphAddedgeNode {
+    node: String,
+    port: String,
+    index: String, //TODO spec: string or number -- how to handle
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphAddedgeMetadata {
+    route: i32,
+    schema: String,
+    secure: bool,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddedgeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphAddedgeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddedgeResponsePayload {}
+
+impl Default for GraphAddedgeResponse {
+    fn default() -> Self {
+        GraphAddedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("addedge"),
+            payload: GraphAddedgeResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphAddedgeResponsePayload {
+    fn default() -> Self {
+        GraphAddedgeResponsePayload {}
+    }
+}
 
 // graph:removeedge -> graph:removeedge | graph:error
 
