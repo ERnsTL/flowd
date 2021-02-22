@@ -728,10 +728,13 @@ impl Default for GraphClearResponsePayload {
 }
 
 // graph:addnode -> graph:addnode | graph:error
+//TODO
 
 // graph:removenode -> graph:removenode | graph:error
+//TODO
 
 // graph:renamenode -> graph:renamenode | graph:error
+//TODO
 
 // graph:changenode -> graph:changenode | graph:error
 #[derive(Deserialize, Debug)]
