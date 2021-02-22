@@ -184,6 +184,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphChangeedgeRequest(_payload) => {
+                        info!("got graph:changeedge message");
+                        info!("response: sending graph:changeedge response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphChangeedgeResponse::default())
+                                    .expect("failed to serialize graph:changeedge response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -263,6 +274,8 @@ enum FBPMessage {
     GraphAddedgeRequest(GraphAddedgeRequestPayload),
     #[serde(rename = "removeedge")]
     GraphRemoveedgeRequest(GraphRemoveedgeRequestPayload),
+    #[serde(rename = "changeedge")]
+    GraphChangeedgeRequest(GraphChangeedgeRequestPayload),
 }
 
 // ----------
@@ -819,7 +832,7 @@ struct GraphAddedgeRequest {
 struct GraphAddedgeRequestPayload {
     src: GraphNodeSpec,
     tgt: GraphNodeSpec,
-    metadata: GraphAddedgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     graph: String,
     secret: String, // only present in the request payload
 }
@@ -832,7 +845,7 @@ struct GraphNodeSpec {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
-struct GraphAddedgeMetadata {
+struct GraphEdgeMetadata {
     route: i32,
     schema: String,
     secure: bool,
@@ -907,6 +920,47 @@ impl Default for GraphRemoveedgeResponsePayload {
 }
 
 // graph:changeedge -> graph:changeedge | graph:error
+#[derive(Deserialize, Debug)]
+struct GraphChangeedgeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphChangeedgeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphChangeedgeRequestPayload {
+    graph: String,
+    metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    src: GraphNodeSpec,
+    tgt: GraphNodeSpec,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphChangeedgeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphChangeedgeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphChangeedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough?
+
+impl Default for GraphChangeedgeResponse {
+    fn default() -> Self {
+        GraphChangeedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("changeedge"),
+            payload: GraphChangeedgeResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphChangeedgeResponsePayload {
+    fn default() -> Self {
+        GraphChangeedgeResponsePayload {}
+    }
+}
 
 // graph:addinitial -> graph:addinitial | graph:error
 
