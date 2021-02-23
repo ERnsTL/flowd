@@ -151,6 +151,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphAddnodeRequest(_payload) => {
+                        info!("got graph:addnode message");
+                        info!("response: sending graph:addnode response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphAddnodeResponse::default())
+                                    .expect("failed to serialize graph:addnode response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::GraphChangenodeRequest(_payload) => {
                         info!("got graph:changenode message");
                         info!("response: sending graph:changenode response");
@@ -268,6 +279,8 @@ enum FBPMessage {
     // protocol:graph
     #[serde(rename = "clear")]
     GraphClearRequest(GraphClearRequestPayload),
+    #[serde(rename = "addnode")]
+    GraphAddnodeRequest(GraphAddnodeRequestPayload),
     #[serde(rename = "changenode")]
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
     #[serde(rename = "addedge")]
@@ -741,7 +754,53 @@ impl Default for GraphClearResponsePayload {
 }
 
 // graph:addnode -> graph:addnode | graph:error
-//TODO
+#[derive(Deserialize, Debug)]
+struct GraphAddnodeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphAddnodeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddnodeRequestPayload {
+    id: String,                            // name of the node/process
+    component: String,                     // component name to be used for this node/process
+    metadata: GraphAddnodeRequestMetadata, //TODO spec: key-value pairs (with some well-known values)
+    graph: bool,                           // name of the graph
+    secret: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddnodeRequestMetadata {
+    x: i32, // TODO check spec: can x be negative? -> i32 or u32
+    y: i32,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddnodeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphAddnodeResponsePayload,
+}
+
+impl Default for GraphAddnodeResponse {
+    fn default() -> Self {
+        GraphAddnodeResponse {
+            protocol: String::from("graph"),
+            command: String::from("addgraph"),
+            payload: GraphAddnodeResponsePayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddnodeResponsePayload {} // TODO check spec: should the sent values be echoed back as confirmation or is empty graph:addnode vs. a graph:error enough?
+
+impl Default for GraphAddnodeResponsePayload {
+    fn default() -> Self {
+        GraphAddnodeResponsePayload {}
+    }
+}
 
 // graph:removenode -> graph:removenode | graph:error
 //TODO
