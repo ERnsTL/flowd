@@ -173,6 +173,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphRemovenodeRequest(_payload) => {
+                        info!("got graph:removenode message");
+                        info!("response: sending graph:removenode response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemovenodeResponse::default())
+                                    .expect("failed to serialize graph:removenode response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::GraphAddedgeRequest(_payload) => {
                         info!("got graph:addedge message");
                         info!("response: sending graph:addedge response");
@@ -283,6 +294,8 @@ enum FBPMessage {
     GraphAddnodeRequest(GraphAddnodeRequestPayload),
     #[serde(rename = "changenode")]
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
+    #[serde(rename = "removenode")]
+    GraphRemovenodeRequest(GraphRemovenodeRequestPayload),
     #[serde(rename = "addedge")]
     GraphAddedgeRequest(GraphAddedgeRequestPayload),
     #[serde(rename = "removeedge")]
@@ -803,7 +816,45 @@ impl Default for GraphAddnodeResponsePayload {
 }
 
 // graph:removenode -> graph:removenode | graph:error
-//TODO
+#[derive(Deserialize, Debug)]
+struct GraphRemovenodeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphChangenodeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRemovenodeRequestPayload {
+    id: String,
+    graph: String,
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemovenodeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRemovenodeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemovenodeResponsePayload {} // TODO should we echo back the graph:removenode message values or is empty graph:removenode OK?
+
+impl Default for GraphRemovenodeResponse {
+    fn default() -> Self {
+        GraphRemovenodeResponse {
+            protocol: String::from("graph"),
+            command: String::from("changenode"),
+            payload: GraphRemovenodeResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRemovenodeResponsePayload {
+    fn default() -> Self {
+        GraphRemovenodeResponsePayload {}
+    }
+}
 
 // graph:renamenode -> graph:renamenode | graph:error
 //TODO
