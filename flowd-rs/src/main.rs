@@ -813,7 +813,7 @@ impl Default for GraphAddnodeResponse {
     fn default() -> Self {
         GraphAddnodeResponse {
             protocol: String::from("graph"),
-            command: String::from("addgraph"),
+            command: String::from("addnode"),
             payload: GraphAddnodeResponsePayload::default(),
         }
     }
@@ -857,7 +857,7 @@ impl Default for GraphRemovenodeResponse {
     fn default() -> Self {
         GraphRemovenodeResponse {
             protocol: String::from("graph"),
-            command: String::from("changenode"),
+            command: String::from("removenode"),
             payload: GraphRemovenodeResponsePayload::default(),
         }
     }
@@ -1068,7 +1068,7 @@ impl Default for GraphRemoveedgeResponse {
     fn default() -> Self {
         GraphRemoveedgeResponse {
             protocol: String::from("graph"),
-            command: String::from("addedge"),
+            command: String::from("removeedge"),
             payload: GraphRemoveedgeResponsePayload::default(),
         }
     }
