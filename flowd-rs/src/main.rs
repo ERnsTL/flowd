@@ -162,6 +162,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphRenamenodeRequest(_payload) => {
+                        info!("got graph:renamenode message");
+                        info!("response: sending graph:renamenode response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRenamenodeResponse::default())
+                                    .expect("failed to serialize graph:renamenode response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::GraphChangenodeRequest(_payload) => {
                         info!("got graph:changenode message");
                         info!("response: sending graph:changenode response");
@@ -294,6 +305,8 @@ enum FBPMessage {
     GraphAddnodeRequest(GraphAddnodeRequestPayload),
     #[serde(rename = "changenode")]
     GraphChangenodeRequest(GraphChangenodeRequestPayload),
+    #[serde(rename = "renamenode")]
+    GraphRenamenodeRequest(GraphRenamenodeRequestPayload),
     #[serde(rename = "removenode")]
     GraphRemovenodeRequest(GraphRemovenodeRequestPayload),
     #[serde(rename = "addedge")]
@@ -857,7 +870,45 @@ impl Default for GraphRemovenodeResponsePayload {
 }
 
 // graph:renamenode -> graph:renamenode | graph:error
-//TODO
+#[derive(Deserialize, Debug)]
+struct GraphRernamenodeRequest {
+    protocol: String,
+    command: String,
+    payload: GraphRenamenodeRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRenamenodeRequestPayload {
+    id: String,
+    graph: String,
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRenamenodeResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRenamenodeResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRenamenodeResponsePayload {} // TODO should we echo back the graph:renamenode message values or is empty graph:renamenode OK?
+
+impl Default for GraphRenamenodeResponse {
+    fn default() -> Self {
+        GraphRenamenodeResponse {
+            protocol: String::from("graph"),
+            command: String::from("renamenode"),
+            payload: GraphRenamenodeResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRenamenodeResponsePayload {
+    fn default() -> Self {
+        GraphRenamenodeResponsePayload {}
+    }
+}
 
 // graph:changenode -> graph:changenode | graph:error
 #[derive(Deserialize, Debug)]
