@@ -228,6 +228,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphAddinitialRequest(_payload) => {
+                        info!("got graph:addinitial message");
+                        info!("response: sending graph:addinitial response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphAddinitialResponse::default())
+                                    .expect("failed to serialize graph:addinitial response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -315,6 +326,8 @@ enum FBPMessage {
     GraphRemoveedgeRequest(GraphRemoveedgeRequestPayload),
     #[serde(rename = "changeedge")]
     GraphChangeedgeRequest(GraphChangeedgeRequestPayload),
+    #[serde(rename = "addinitial")]
+    GraphAddinitialRequest(GraphAddinitialRequestPayload),
 }
 
 // ----------
@@ -1124,27 +1137,85 @@ impl Default for GraphChangeedgeResponsePayload {
 }
 
 // graph:addinitial -> graph:addinitial | graph:error
+#[derive(Deserialize, Debug)]
+struct GraphAddinitialRequest {
+    protocol: String,
+    command: String,
+    payload: GraphAddinitialRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddinitialRequestPayload {
+    graph: String,
+    metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    src: GraphIIPSpec,           //TODO spec: object,array,string,number,integer,boolean,null
+    tgt: GraphNodeSpec,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddinitialResponse {
+    protocol: String,
+    command: String,
+    payload: GraphAddinitialResponsePayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphIIPSpec {
+    data: String, // can put JSON object, array, string, number, integer, boolean, null in there
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough?
+
+impl Default for GraphAddinitialResponse {
+    fn default() -> Self {
+        GraphAddinitialResponse {
+            protocol: String::from("graph"),
+            command: String::from("addinitial"),
+            payload: GraphAddinitialResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphAddinitialResponsePayload {
+    fn default() -> Self {
+        GraphAddinitialResponsePayload {}
+    }
+}
 
 // graph:removeinitial -> graph:removeinitial | graph:error
+//TODO implement
 
 // graph:addinport -> graph:addinport | graph:error
+//TODO implement
 
 // graph:removeinport -> graph:removeinport | graph:error
+//TODO implement
 
 // graph:renameinport -> graph:renameinport | graph:error
+//TODO implement
 
 // graph:addoutport -> graph:addoutport | graph:error
+//TODO implement
 
 // graph:removeoutport -> graph:removeoutport | graph:error
+//TODO implement
 
 // graph:renameoutport -> graph:renameoutport | graph:error
+//TODO implement
 
 // graph:addgroup -> graph:addgroup | graph:error
+//TODO implement
 
 // graph:removegroup -> graph:removegroup | graph:error
+//TODO implement
 
 // graph:renamegroup -> graph:renamegroup | graph:error
+//TODO implement
 
 // graph:changegroup -> graph:changegroup | graph:error
+//TODO implement
 
 // graph:error response
+//TODO implement
