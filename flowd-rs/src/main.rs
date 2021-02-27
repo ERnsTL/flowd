@@ -473,6 +473,8 @@ enum FBPMessage {
     GraphChangegroupRequest(GraphChangegroupRequestPayload),
 }
 
+//TODO implement all remaining response and status messages -- like network:processerror, network:icon etc.
+
 // ----------
 // runtime base -- no capabilities required
 // ----------
