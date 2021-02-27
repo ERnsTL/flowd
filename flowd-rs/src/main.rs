@@ -294,6 +294,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphRemoveoutportRequest(_payload) => {
+                        info!("got graph:removeoutport message");
+                        info!("response: sending graph:removeoutport response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemoveoutportResponse::default())
+                                    .expect("failed to serialize graph:removeoutport response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -393,6 +404,8 @@ enum FBPMessage {
     GraphRenameinportRequest(GraphRenameinportRequestPayload),
     #[serde(rename = "addoutport")]
     GraphAddoutportRequest(GraphAddoutportRequestPayload),
+    #[serde(rename = "removeoutport")]
+    GraphRemoveoutportRequest(GraphRemoveoutportRequestPayload),
 }
 
 // ----------
@@ -1463,7 +1476,45 @@ impl Default for GraphAddoutportResponsePayload {
 }
 
 // graph:removeoutport -> graph:removeoutport | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphRemoveoutportRequest {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveoutportRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRemoveoutportRequestPayload {
+    graph: String,
+    public: String, // public name of the exported port
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveoutportResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveoutportResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveoutportResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:removeoutport instead of graph:error enough?
+
+impl Default for GraphRemoveoutportResponse {
+    fn default() -> Self {
+        GraphRemoveoutportResponse {
+            protocol: String::from("graph"),
+            command: String::from("removeoutport"),
+            payload: GraphRemoveoutportResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRemoveoutportResponsePayload {
+    fn default() -> Self {
+        GraphRemoveoutportResponsePayload {}
+    }
+}
 
 // graph:renameoutport -> graph:renameoutport | graph:error
 //TODO implement
