@@ -250,6 +250,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphAddinportRequest(_payload) => {
+                        info!("got graph:addinport message");
+                        info!("response: sending graph:addinport response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphAddinportResponse::default())
+                                    .expect("failed to serialize graph:addinport response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -341,6 +352,8 @@ enum FBPMessage {
     GraphAddinitialRequest(GraphAddinitialRequestPayload),
     #[serde(rename = "removeinitial")]
     GraphRemoveinitialRequest(GraphRemoveinitialRequestPayload),
+    #[serde(rename = "addinport")]
+    GraphAddinportRequest(GraphAddinportRequestPayload),
 }
 
 // ----------
@@ -815,15 +828,15 @@ struct GraphAddnodeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphAddnodeRequestPayload {
-    id: String,                            // name of the node/process
-    component: String,                     // component name to be used for this node/process
-    metadata: GraphAddnodeRequestMetadata, //TODO spec: key-value pairs (with some well-known values)
-    graph: bool,                           // name of the graph
+    id: String,                  // name of the node/process
+    component: String,           // component name to be used for this node/process
+    metadata: GraphNodeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    graph: bool,                 // name of the graph
     secret: String,
 }
 
 #[derive(Deserialize, Debug)]
-struct GraphAddnodeRequestMetadata {
+struct GraphNodeMetadata {
     x: i32, // TODO check spec: can x be negative? -> i32 or u32
     y: i32,
 }
@@ -1240,7 +1253,48 @@ impl Default for GraphRemoveinitialResponsePayload {
 }
 
 // graph:addinport -> graph:addinport | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphAddinportRequest {
+    protocol: String,
+    command: String,
+    payload: GraphAddinportRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddinportRequestPayload {
+    graph: String,
+    public: String, // public name of the exported port
+    node: String,
+    port: String,
+    metadata: GraphNodeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    secret: String,              // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddinportResponse {
+    protocol: String,
+    command: String,
+    payload: GraphAddinportResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddinportResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addinport instead of graph:error enough?
+
+impl Default for GraphAddinportResponse {
+    fn default() -> Self {
+        GraphAddinportResponse {
+            protocol: String::from("graph"),
+            command: String::from("addinport"),
+            payload: GraphAddinportResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphAddinportResponsePayload {
+    fn default() -> Self {
+        GraphAddinportResponsePayload {}
+    }
+}
 
 // graph:removeinport -> graph:removeinport | graph:error
 //TODO implement
