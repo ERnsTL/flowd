@@ -474,7 +474,10 @@ enum FBPMessage {
 }
 
 // ----------
+// runtime base -- no capabilities required
+// ----------
 
+// runtime:getruntime -> runtime:runtime | runtime:error
 #[derive(Deserialize, Debug)]
 struct RuntimeGetruntimePayload {
     secret: String,
@@ -599,7 +602,61 @@ enum Capability {
     ProtocolTrace,
 }
 
+//TODO implement runtime:error
+
+// graph:error response
+#[derive(Serialize, Debug)]
+struct GraphErrorResponse {
+    //TODO spec: graph:error response message is not defined in spec!
+    protocol: String,
+    command: String,
+    payload: GraphErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphErrorResponsePayload {
+    //TODO spec: graph:error response message payload is not defined in spec!
+    message: String,
+}
+
+impl Default for GraphErrorResponse {
+    fn default() -> Self {
+        GraphErrorResponse {
+            protocol: String::from("graph"),
+            command: String::from("error"),
+            payload: GraphErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphErrorResponsePayload {
+    fn default() -> Self {
+        GraphErrorResponsePayload {
+            message: String::from("default error message"),
+        }
+    }
+}
+
+//TODO implement runtime:error
+
+//TODO implement component:error
+
 // ----------
+// protcol:runtime
+// ----------
+
+//TODO implement
+
+/*
+an expose ports of main graph and transmit packet information to/from them
+input messages
+
+    runtime:packet
+
+output messages
+
+    runtime:ports runtime:packetsent runtime:packet runtime:error
+*/
 
 #[derive(Serialize, Debug)]
 struct RuntimePortsMessage {
@@ -635,6 +692,132 @@ impl Default for RuntimePortsPayload {
         }
     }
 }
+
+// ----------
+// protcol:network
+// ----------
+
+// spec: Implies capabilities network:status, network:data, network:control. Does not imply capability network:persist.
+
+// ----------
+// network:persist
+// ----------
+
+//TODO implement
+
+/*
+input messages
+
+    network:persist
+
+output messages
+
+    network:persist network:error
+*/
+
+// ----------
+// network:status
+// ----------
+
+//TODO implement
+
+/*
+input messages
+
+    network:getstatus
+
+output messages
+
+    network:status network:started network:stopped network:error
+*/
+
+// ----------
+// network:data
+// ----------
+
+//TODO implement
+
+/*
+input messages
+
+    network:edges
+
+output messages
+
+    network:edges network:output network:error network:data network:begingroup network:endgroup network:connect network:disconnect network:icon network:processerror network:error
+*/
+
+// ----------
+// network:control
+// ----------
+
+// network:start -> TODO network:started | network:error
+//TODO implement
+
+// network:stop -> TODO network:stopped | network:error
+//TODO implement
+
+// network:getstatus -> TODO network:status | network:error
+#[derive(Deserialize, Debug)]
+struct NetworkGetstatusMessage {
+    protocol: String,
+    command: String,
+    payload: NetworkGetstatusPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct NetworkGetstatusPayload {
+    graph: String,
+    secret: String,
+}
+
+// ----------
+
+#[derive(Serialize, Debug)]
+struct NetworkStatusMessage {
+    protocol: String,
+    command: String,
+    payload: NetworkStatusPayload,
+}
+
+impl Default for NetworkStatusMessage {
+    fn default() -> Self {
+        NetworkStatusMessage {
+            protocol: String::from("network"),
+            command: String::from("status"),
+            payload: NetworkStatusPayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStatusPayload {
+    graph: String,
+    uptime: u32, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network
+    // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started.
+    started: bool, // spec: whether or not network has been started
+    running: bool, // spec: boolean tells whether the network is running at the moment or not
+    debug: bool,   // spec: whether or not network is in debug mode
+}
+
+impl Default for NetworkStatusPayload {
+    fn default() -> Self {
+        NetworkStatusPayload {
+            graph: String::from("default_graph"),
+            uptime: 256,
+            started: true,
+            running: true,
+            debug: false,
+        }
+    }
+}
+
+// ----------
+// protocol:component
+// ----------
+
+// component:list -> component:component, component:componentsready | component:error
+//TODO implement component:list
 
 // ----------
 
@@ -705,61 +888,7 @@ impl Default for ComponentComponentsreadyMessage {
 }
 
 // ----------
-
-#[derive(Deserialize, Debug)]
-struct NetworkGetstatusMessage {
-    protocol: String,
-    command: String,
-    payload: NetworkGetstatusPayload,
-}
-
-#[derive(Deserialize, Debug)]
-struct NetworkGetstatusPayload {
-    graph: String,
-    secret: String,
-}
-
-// ----------
-
-#[derive(Serialize, Debug)]
-struct NetworkStatusMessage {
-    protocol: String,
-    command: String,
-    payload: NetworkStatusPayload,
-}
-
-impl Default for NetworkStatusMessage {
-    fn default() -> Self {
-        NetworkStatusMessage {
-            protocol: String::from("network"),
-            command: String::from("status"),
-            payload: NetworkStatusPayload::default(),
-        }
-    }
-}
-
-#[derive(Serialize, Debug)]
-struct NetworkStatusPayload {
-    graph: String,
-    uptime: u32, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network
-    // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started.
-    started: bool, // spec: whether or not network has been started
-    running: bool, // spec: boolean tells whether the network is running at the moment or not
-    debug: bool,   // spec: whether or not network is in debug mode
-}
-
-impl Default for NetworkStatusPayload {
-    fn default() -> Self {
-        NetworkStatusPayload {
-            graph: String::from("default_graph"),
-            uptime: 256,
-            started: true,
-            running: true,
-            debug: false,
-        }
-    }
-}
-
+// component:getsource
 // ----------
 
 #[derive(Deserialize, Debug)]
@@ -871,6 +1000,19 @@ impl ComponentSourcePayload {
         }
     }
 }
+
+// ----------
+// component:setsource
+// ----------
+
+//TODO implement
+
+// ----------
+// graph:readonly
+// ----------
+
+// spec: read and follow changes to runtime graphs (but not modify)
+// output messages: graph:clear graph:addnode graph:removenode graph:renamenode graph:changenode graph:addedge graph:removeedge graph:changeedge graph:addinitial graph:removeinitial graph:addinport graph:removeinport graph:renameinport graph:addoutport graph:removeoutport graph:renameoutport graph:addgroup graph:removegroup graph:renamegroup graph:changegroup
 
 // ----------
 // protocol:graph
@@ -1801,35 +1943,19 @@ impl Default for GraphChangegroupResponsePayload {
     }
 }
 
-// graph:error response
-#[derive(Serialize, Debug)]
-struct GraphErrorResponse {
-    //TODO spec: graph:error response message is not defined in spec!
-    protocol: String,
-    command: String,
-    payload: GraphErrorResponsePayload,
-}
+// ----------
+// protocol:trace
+// ----------
 
-#[derive(Serialize, Debug)]
-struct GraphErrorResponsePayload {
-    //TODO spec: graph:error response message payload is not defined in spec!
-    message: String,
-}
+//TODO implement
 
-impl Default for GraphErrorResponse {
-    fn default() -> Self {
-        GraphErrorResponse {
-            protocol: String::from("graph"),
-            command: String::from("error"),
-            payload: GraphErrorResponsePayload::default(),
-        }
-    }
-}
+/*
+runtime is able to record and send over flowtraces, used for retroactive debugging.
+input messages
 
-impl Default for GraphErrorResponsePayload {
-    fn default() -> Self {
-        GraphErrorResponsePayload {
-            message: String::from("default error message"),
-        }
-    }
-}
+    trace:start trace:stop trace:clear trace:dump
+
+output messages
+
+    trace:start trace:stop trace:clear trace:dump trace:error
+*/
