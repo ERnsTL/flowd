@@ -703,7 +703,36 @@ impl Default for NetworkErrorResponsePayload {
     }
 }
 
-//TODO implement component:error
+// component:error response
+#[derive(Serialize, Debug)]
+struct ComponentErrorResponse {
+    protocol: String,
+    command: String,
+    payload: ComponentErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentErrorResponsePayload {
+    message: String,
+}
+
+impl Default for ComponentErrorResponse {
+    fn default() -> Self {
+        ComponentErrorResponse {
+            protocol: String::from("component"),
+            command: String::from("error"),
+            payload: ComponentErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for ComponentErrorResponsePayload {
+    fn default() -> Self {
+        ComponentErrorResponsePayload {
+            message: String::from("default component error message"),
+        }
+    }
+}
 
 // ----------
 // protcol:runtime
