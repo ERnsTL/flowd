@@ -316,6 +316,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphAddgroupRequest(_payload) => {
+                        info!("got graph:addgroup message");
+                        info!("response: sending graph:addgroup response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphAddgroupResponse::default())
+                                    .expect("failed to serialize graph:addgroup response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -419,6 +430,8 @@ enum FBPMessage {
     GraphRemoveoutportRequest(GraphRemoveoutportRequestPayload),
     #[serde(rename = "renameoutport")]
     GraphRenameoutportRequest(GraphRenameoutportRequestPayload),
+    #[serde(rename = "addgroup")]
+    GraphAddgroupRequest(GraphAddgroupRequestPayload),
 }
 
 // ----------
@@ -1572,7 +1585,52 @@ impl Default for GraphRenameoutportResponsePayload {
 }
 
 // graph:addgroup -> graph:addgroup | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphAddgroupRequest {
+    protocol: String,
+    command: String,
+    payload: GraphAddgroupRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphAddgroupRequestPayload {
+    name: String,
+    graph: String,
+    nodes: Vec<String>,           // array of node IDs
+    metadata: GraphGroupMetadata, //TODO spec: key-value pairs (with some well-known values)
+    secret: String,               // only present in the request payload
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphGroupMetadata {
+    description: String,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddgroupResponse {
+    protocol: String,
+    command: String,
+    payload: GraphAddgroupResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphAddgroupResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addgroup instead of graph:error enough?
+
+impl Default for GraphAddgroupResponse {
+    fn default() -> Self {
+        GraphAddgroupResponse {
+            protocol: String::from("graph"),
+            command: String::from("addgroup"),
+            payload: GraphAddgroupResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphAddgroupResponsePayload {
+    fn default() -> Self {
+        GraphAddgroupResponsePayload {}
+    }
+}
 
 // graph:removegroup -> graph:removegroup | graph:error
 //TODO implement
