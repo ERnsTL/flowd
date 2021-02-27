@@ -239,6 +239,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphRemoveinitialRequest(_payload) => {
+                        info!("got graph:removeinitial message");
+                        info!("response: sending graph:removeinitial response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemoveinitialResponse::default())
+                                    .expect("failed to serialize graph:removeinitial response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -328,6 +339,8 @@ enum FBPMessage {
     GraphChangeedgeRequest(GraphChangeedgeRequestPayload),
     #[serde(rename = "addinitial")]
     GraphAddinitialRequest(GraphAddinitialRequestPayload),
+    #[serde(rename = "removeinitial")]
+    GraphRemoveinitialRequest(GraphRemoveinitialRequestPayload),
 }
 
 // ----------
@@ -1166,7 +1179,7 @@ struct GraphIIPSpec {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough?
+struct GraphAddinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addinitial instead of graph:error enough?
 
 impl Default for GraphAddinitialResponse {
     fn default() -> Self {
@@ -1185,7 +1198,46 @@ impl Default for GraphAddinitialResponsePayload {
 }
 
 // graph:removeinitial -> graph:removeinitial | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphRemoveinitialRequest {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveinitialRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRemoveinitialRequestPayload {
+    graph: String,
+    src: GraphIIPSpec, //TODO spec: object,array,string,number,integer,boolean,null
+    tgt: GraphNodeSpec,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveinitialResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveinitialResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:removeinitial instead of graph:error enough?
+
+impl Default for GraphRemoveinitialResponse {
+    fn default() -> Self {
+        GraphRemoveinitialResponse {
+            protocol: String::from("graph"),
+            command: String::from("removeinitial"),
+            payload: GraphRemoveinitialResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRemoveinitialResponsePayload {
+    fn default() -> Self {
+        GraphRemoveinitialResponsePayload {}
+    }
+}
 
 // graph:addinport -> graph:addinport | graph:error
 //TODO implement
