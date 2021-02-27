@@ -392,7 +392,7 @@ enum FBPMessage {
     #[serde(rename = "renameinport")]
     GraphRenameinportRequest(GraphRenameinportRequestPayload),
     #[serde(rename = "addoutport")]
-    GraphAddoutportRequest(GraphRenameoutportRequestPayload),
+    GraphAddoutportRequest(GraphAddoutportRequestPayload),
 }
 
 // ----------
