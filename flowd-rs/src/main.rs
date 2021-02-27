@@ -261,6 +261,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphRemoveinportRequest(_payload) => {
+                        info!("got graph:removeinport message");
+                        info!("response: sending graph:removeinport response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemoveinportResponse::default())
+                                    .expect("failed to serialize graph:removeinport response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -354,6 +365,8 @@ enum FBPMessage {
     GraphRemoveinitialRequest(GraphRemoveinitialRequestPayload),
     #[serde(rename = "addinport")]
     GraphAddinportRequest(GraphAddinportRequestPayload),
+    #[serde(rename = "removeinport")]
+    GraphRemoveinportRequest(GraphRemoveinportRequestPayload),
 }
 
 // ----------
@@ -1297,7 +1310,45 @@ impl Default for GraphAddinportResponsePayload {
 }
 
 // graph:removeinport -> graph:removeinport | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphRemoveinportRequest {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveinportRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphRemoveinportRequestPayload {
+    graph: String,
+    public: String, // public name of the exported port
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveinportResponse {
+    protocol: String,
+    command: String,
+    payload: GraphRemoveinportResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphRemoveinportResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:removeinport instead of graph:error enough?
+
+impl Default for GraphRemoveinportResponse {
+    fn default() -> Self {
+        GraphRemoveinportResponse {
+            protocol: String::from("graph"),
+            command: String::from("removeinport"),
+            payload: GraphRemoveinportResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphRemoveinportResponsePayload {
+    fn default() -> Self {
+        GraphRemoveinportResponsePayload {}
+    }
+}
 
 // graph:renameinport -> graph:renameinport | graph:error
 //TODO implement
