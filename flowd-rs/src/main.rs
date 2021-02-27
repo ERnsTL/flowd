@@ -602,7 +602,36 @@ enum Capability {
     ProtocolTrace,
 }
 
-//TODO implement runtime:error
+// runtime:error response
+#[derive(Serialize, Debug)]
+struct RuntimeErrorResponse {
+    protocol: String,
+    command: String,
+    payload: RuntimeErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct RuntimeErrorResponsePayload {
+    message: String,
+}
+
+impl Default for RuntimeErrorResponse {
+    fn default() -> Self {
+        RuntimeErrorResponse {
+            protocol: String::from("runtime"),
+            command: String::from("error"),
+            payload: RuntimeErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for RuntimeErrorResponsePayload {
+    fn default() -> Self {
+        RuntimeErrorResponsePayload {
+            message: String::from("default runtime error message"),
+        }
+    }
+}
 
 // graph:error response
 #[derive(Serialize, Debug)]
@@ -632,12 +661,12 @@ impl Default for GraphErrorResponse {
 impl Default for GraphErrorResponsePayload {
     fn default() -> Self {
         GraphErrorResponsePayload {
-            message: String::from("default error message"),
+            message: String::from("default graph error message"),
         }
     }
 }
 
-//TODO implement runtime:error
+//TODO implement notwork:error
 
 //TODO implement component:error
 
