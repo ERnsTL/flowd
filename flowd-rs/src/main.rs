@@ -1802,4 +1802,34 @@ impl Default for GraphChangegroupResponsePayload {
 }
 
 // graph:error response
-//TODO implement
+#[derive(Serialize, Debug)]
+struct GraphErrorResponse {
+    //TODO spec: graph:error response message is not defined in spec!
+    protocol: String,
+    command: String,
+    payload: GraphErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphErrorResponsePayload {
+    //TODO spec: graph:error response message payload is not defined in spec!
+    message: String,
+}
+
+impl Default for GraphErrorResponse {
+    fn default() -> Self {
+        GraphErrorResponse {
+            protocol: String::from("graph"),
+            command: String::from("error"),
+            payload: GraphErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphErrorResponsePayload {
+    fn default() -> Self {
+        GraphErrorResponsePayload {
+            message: String::from("default error message"),
+        }
+    }
+}
