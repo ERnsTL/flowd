@@ -349,6 +349,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::GraphChangegroupRequest(_payload) => {
+                        info!("got graph:changegroup message");
+                        info!("response: sending graph:changegroup response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphChangegroupResponse::default())
+                                    .expect("failed to serialize graph:changegroup response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -458,6 +469,8 @@ enum FBPMessage {
     GraphRemovegroupRequest(GraphRemovegroupRequestPayload),
     #[serde(rename = "renamegroup")]
     GraphRenamegroupRequest(GraphRenamegroupRequestPayload),
+    #[serde(rename = "changegroup")]
+    GraphChangegroupRequest(GraphChangegroupRequestPayload),
 }
 
 // ----------
@@ -1742,7 +1755,51 @@ impl Default for GraphRenamegroupResponsePayload {
 }
 
 // graph:changegroup -> graph:changegroup | graph:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct GraphChangegroupRequest {
+    protocol: String,
+    command: String,
+    payload: GraphChangegroupRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphChangegroupRequestPayload {
+    graph: String,
+    name: String,
+    metadata: GraphChangegroupMetadata,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphChangegroupMetadata {
+    description: String,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphChangegroupResponse {
+    protocol: String,
+    command: String,
+    payload: GraphChangegroupResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct GraphChangegroupResponsePayload {} //TODO spec: should we echo the request values for confirmation or is message type graph:changegroup (and no graph:error) enough?
+
+impl Default for GraphChangegroupResponse {
+    fn default() -> Self {
+        GraphChangegroupResponse {
+            protocol: String::from("graph"),
+            command: String::from("changegroup"),
+            payload: GraphChangegroupResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for GraphChangegroupResponsePayload {
+    fn default() -> Self {
+        GraphChangegroupResponsePayload {}
+    }
+}
 
 // graph:error response
 //TODO implement
