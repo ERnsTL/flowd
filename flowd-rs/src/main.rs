@@ -666,7 +666,36 @@ impl Default for GraphErrorResponsePayload {
     }
 }
 
-//TODO implement notwork:error
+// notwork:error response
+#[derive(Serialize, Debug)]
+struct NetworkErrorResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkErrorResponsePayload {
+    message: String,
+}
+
+impl Default for NetworkErrorResponse {
+    fn default() -> Self {
+        NetworkErrorResponse {
+            protocol: String::from("network"),
+            command: String::from("error"),
+            payload: NetworkErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for NetworkErrorResponsePayload {
+    fn default() -> Self {
+        NetworkErrorResponsePayload {
+            message: String::from("default network error message"),
+        }
+    }
+}
 
 //TODO implement component:error
 
