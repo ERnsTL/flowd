@@ -676,7 +676,9 @@ struct NetworkErrorResponse {
 
 #[derive(Serialize, Debug)]
 struct NetworkErrorResponsePayload {
-    message: String,
+    message: String, // spec: roughly similar to STDERR output of a Unix process, or a line of console.error in JavaScript.
+    stack: String,   // stack trace
+    graph: String,   // spec: graph the action targets
 }
 
 impl Default for NetworkErrorResponse {
@@ -693,6 +695,8 @@ impl Default for NetworkErrorResponsePayload {
     fn default() -> Self {
         NetworkErrorResponsePayload {
             message: String::from("default network error message"),
+            stack: String::from("no stack trace given"),
+            graph: String::from("default_graph"),
         }
     }
 }
