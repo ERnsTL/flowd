@@ -2,7 +2,7 @@
 
 > This is alpha software. It works, is quite optimized, but not all of the planned features are currently present. The API may change unexpectedly.
 
-> NOTE: A re-implementation in Rust, with an improved architecture focused on online (re-)configuration and live programming is in progress -- see [flowd-rs](flowd-rs/README.md)
+> NOTE: A re-implementation in Rust, with an improved architecture focused on online (re-)configuration and live programming is in progress -- see [flowd-rs](flowd-rs/)
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
