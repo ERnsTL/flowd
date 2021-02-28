@@ -668,7 +668,7 @@ impl Default for GraphErrorResponsePayload {
     }
 }
 
-// notwork:error response
+// network:error response
 #[derive(Serialize, Debug)]
 struct NetworkErrorResponse {
     protocol: String,
