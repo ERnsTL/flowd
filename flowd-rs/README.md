@@ -2,12 +2,14 @@ Re-implementation of the flowd runtime in Rust.
 
 (More on flowd [in its Github repository](https://github.com/ERnsTL/flowd).)
 
-1. First implement the FBP network protocol and add dummy components.
-2. Then add real components, most likely based on GStreamer which takes care of loading and unloading of components as well as managing data flow and pipelines. Language interoperability, high performance and access to many existing audio, video and networking components.
-3. Finally, add support for persistence -- .fbp file format from DrawFBP as well as the JSON graph format from noflo.
-4. Transition all Go components.
-5. Fade out the Go version (or use it as an "executor" resp. execution layer).
-6. More features and real-life applications? Add registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))? CBOR in addition to JSON? Other FBP UIs for online FBP programming?
+1. First implement the FBP network protocol.
+2. Implement an executor layer as link between FBP network protocol and the processing network. An executor can manage different kinds of components -- use different ways of passing messages between running FBP processes etc. possibly written in a different language itself.
+3. Create a first executor layer, maybe a dummy in-memory one in Rust. Add dummy components. Pass the complete FBP test suite and verify FBP network protocol implementation conformance.
+4. Add a first real executor with real components, most likely based on GStreamer, which already takes care of loading and unloading of components as well as managing data flow and pipelines. Advantages: Language interoperability, high performance and access to many existing audio, video and networking components.
+5. Finally, add support for persistence -- .fbp file format from DrawFBP as well as the JSON graph format from noflo.
+6. Transition all Go components.
+7. Fade out the Go version (or use it as an "executor" resp. execution layer).
+8. More features and real-life applications? Add registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))? CBOR in addition to JSON? Other FBP UIs for online FBP programming?
 
 Run it with:
 
