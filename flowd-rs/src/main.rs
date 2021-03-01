@@ -119,6 +119,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::NetworkPersistRequest(_payload) => {
+                        info!("got network:persist message");
+                        info!("response: sending network:persist message");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkPersistResponse::default())
+                                    .expect("failed to serialize network:persist message"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::ComponentGetsourceMessage(payload) => {
                         info!("got component:getsource message");
                         if payload.name == "default_graph" {
@@ -409,10 +420,16 @@ fn main() {
 #[derive(Deserialize, Debug)]
 #[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
 enum FBPMessage {
+    // runtime base -- no capabilities required
     #[serde(rename = "getruntime")]
     RuntimeGetruntimeMessage(RuntimeGetruntimePayload), //NOTE: tag+content -> tuple variant not struct variant
     #[serde(rename = "runtime")]
     RuntimeRuntimeMessage,
+
+    // network:persist
+    #[serde(rename = "persist")]
+    NetworkPersistRequest(NetworkPersistRequestPayload),
+
     #[serde(rename = "ports")]
     RuntimePortsMessage,
     #[serde(rename = "list")]
@@ -592,7 +609,7 @@ enum Capability {
 
     // spec: read and follow changes to runtime graphs (but not modify)
     #[serde(rename = "graph:readonly")]
-    GraphReadonly,
+    GraphReadonly, //TODO add access key management (store hashed version not the original) and capabilities management of each access key (see https://security.stackexchange.com/questions/63435/why-use-an-authentication-token-instead-of-the-username-password-per-request)
     // spec: read & modify runtime graphs using the Graph protocol.
     //input messages  graph:clear graph:addnode graph:removenode graph:renamenode graph:changenode graph:addedge graph:removeedge graph:changeedge graph:addinitial graph:removeinitial graph:addinport graph:removeinport graph:renameinport graph:addoutport graph:removeoutport graph:renameoutport graph:addgroup graph:removegroup graph:renamegroup graph:changegroup
     // output messages graph:clear graph:addnode graph:removenode graph:renamenode graph:changenode graph:addedge graph:removeedge graph:changeedge graph:addinitial graph:removeinitial graph:addinport graph:removeinport graph:renameinport graph:addoutport graph:removeoutport graph:renameoutport graph:addgroup graph:removegroup graph:renamegroup graph:changegroup graph:error
@@ -796,17 +813,44 @@ impl Default for RuntimePortsPayload {
 // network:persist
 // ----------
 
-//TODO implement
+// network:persist -> network:persist | network:error
+#[derive(Deserialize, Debug)]
+struct NetworkPersistRequest {
+    protocol: String,
+    command: String,
+    payload: NetworkPersistRequestPayload,
+}
 
-/*
-input messages
+#[derive(Deserialize, Debug)]
+struct NetworkPersistRequestPayload {
+    secret: String,
+}
 
-    network:persist
+#[derive(Serialize, Debug)]
+struct NetworkPersistResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkPersistResponsePayload,
+}
 
-output messages
+impl Default for NetworkPersistResponse {
+    fn default() -> Self {
+        NetworkPersistResponse {
+            protocol: String::from("network"),
+            command: String::from("persist"),
+            payload: NetworkPersistResponsePayload::default(),
+        }
+    }
+}
 
-    network:persist network:error
-*/
+#[derive(Serialize, Debug)]
+struct NetworkPersistResponsePayload {}
+
+impl Default for NetworkPersistResponsePayload {
+    fn default() -> Self {
+        NetworkPersistResponsePayload {}
+    }
+}
 
 // ----------
 // network:status
