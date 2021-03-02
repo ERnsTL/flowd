@@ -856,17 +856,7 @@ impl Default for NetworkPersistResponsePayload {
 // network:status
 // ----------
 
-//TODO implement
-
-/*
-input messages
-
-    network:getstatus
-
-output messages
-
-    network:status network:started network:stopped network:error
-*/
+// spec: is a subset of network:control, implementations are there
 
 // ----------
 // network:data
