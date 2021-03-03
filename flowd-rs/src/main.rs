@@ -752,22 +752,16 @@ impl Default for ComponentErrorResponsePayload {
 }
 
 // ----------
-// protcol:runtime
+// protocol:runtime
 // ----------
 
+// runtime:packet -> runtime:packetsent ? TODO | runtime:error
 //TODO implement
 
-/*
-an expose ports of main graph and transmit packet information to/from them
-input messages
+// runtime:packet response
+//NOTE: find implementation above
 
-    runtime:packet
-
-output messages
-
-    runtime:ports runtime:packetsent runtime:packet runtime:error
-*/
-
+// runtime:ports response
 #[derive(Serialize, Debug)]
 struct RuntimePortsMessage {
     protocol: String,
