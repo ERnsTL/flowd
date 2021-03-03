@@ -856,17 +856,32 @@ impl Default for NetworkPersistResponsePayload {
 // network:data
 // ----------
 
+// network:edges -> network:edges | network:error
 //TODO implement
 
-/*
-input messages
+// network:output
+//TODO implement
 
-    network:edges
+// network:data
+//TODO implement
 
-output messages
+// network:begingroup
+//TODO implement
 
-    network:edges network:output network:error network:data network:begingroup network:endgroup network:connect network:disconnect network:icon network:processerror network:error
-*/
+// network:endgroup
+//TODO implement
+
+// network:connect
+//TODO implement
+
+// network:disconnect
+//TODO implement
+
+// network:icon
+//TODO implement
+
+// network:processerror
+//TODO implement
 
 // ----------
 // network:control
