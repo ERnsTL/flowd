@@ -893,7 +893,7 @@ impl Default for NetworkPersistResponsePayload {
 // network:stop -> TODO network:stopped | network:error
 //TODO implement
 
-// network:getstatus -> TODO network:status | network:error
+// network:getstatus -> network:status | network:error
 #[derive(Deserialize, Debug)]
 struct NetworkGetstatusMessage {
     protocol: String,
@@ -947,6 +947,9 @@ impl Default for NetworkStatusPayload {
         }
     }
 }
+
+// network:debug -> TODO response not specified | network:error
+//TODO implement
 
 // ----------
 // protocol:component
