@@ -1030,6 +1030,7 @@ impl Default for ComponentComponentsreadyMessage {
 // component:getsource
 // ----------
 
+// component:getsource -> component:source | component:error
 #[derive(Deserialize, Debug)]
 struct ComponentGetsourceMessage {
     protocol: String,
@@ -1043,8 +1044,8 @@ struct ComponentGetsourcePayload {
     secret: String,
 }
 
-// ----------
-
+// componennt:source
+//NOTE: is used as request in setsource context and as response in getsource context
 #[derive(Serialize, Debug)]
 struct ComponentSourceMessage {
     protocol: String,
@@ -1144,7 +1145,9 @@ impl ComponentSourcePayload {
 // component:setsource
 // ----------
 
-//TODO implement
+// component:source -> component:component | component:error
+//NOTE: find implementation of component:source above in section component:getsource
+//NOTE: find implementation of component:component below in section protocol:component
 
 // ----------
 // graph:readonly
