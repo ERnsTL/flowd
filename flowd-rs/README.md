@@ -27,3 +27,6 @@ Peculiarities:
 * for graph:changenode messages (and similarly applicable to the other response messages) the same fields as the request should be present. TODO to be useful, it should send back the same values as confirmation that these values are now set -- but if sending back a different x coordinate for example, noflo-ui does not snap back the node but acts if it was set correctly. -> TODO would probably need graph:error message.
 * TODO why does noflo-ui send tens of messages, and if the drag is a long one, a hundred messages or more? (for every mouse-drag+move event -- but all with the same end coordinates
 * TODO spec does not define graph:error response message
+* TODO spec does not define expected response to network:debug request
+* TODO spec what should the response for runtime:packet request be? -- when should a runtime:packetsent be sent? if we receive a runtime:packet response/status message should we also respond with a runtime:packetreceived... or something?
+* TODO spec mentions "a few commands do not require any capabilities: [...] and the error responses (runtime:error, graph:error, network:error, component:error)." but does not mention trace:error -> does it also not require any capabilities or does it?
