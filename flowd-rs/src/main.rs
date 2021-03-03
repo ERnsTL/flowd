@@ -2089,15 +2089,17 @@ impl Default for GraphChangegroupResponsePayload {
 // protocol:trace
 // ----------
 
+// trace:start -> trace:start | trace:error
 //TODO implement
 
-/*
-runtime is able to record and send over flowtraces, used for retroactive debugging.
-input messages
+// trace:stop -> trace:stop | trace:error
+//TODO implement
 
-    trace:start trace:stop trace:clear trace:dump
+// trace:clear -> trace:clear | trace:error
+//TODO implement
 
-output messages
+// trace:dump -> trace:dump | trace:error
 
-    trace:start trace:stop trace:clear trace:dump trace:error
-*/
+// trace:error
+//TODO spec if this does not require any capabilities for this then move up into "base" section
+//TODO implement
