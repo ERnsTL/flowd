@@ -2253,6 +2253,7 @@ impl Default for TraceClearResponsePayload {
 }
 
 // trace:dump -> trace:dump | trace:error
+//TODO implement
 
 // trace:error
 //TODO spec if this does not require any capabilities for this then move up into "base" section
