@@ -2308,6 +2308,34 @@ impl Default for TraceDumpResponsePayload {
     }
 }
 
-// trace:error
+// trace:error response
 //TODO spec if this does not require any capabilities for this then move up into "base" section
-//TODO implement
+#[derive(Serialize, Debug)]
+struct TraceErrorResponse {
+    protocol: String,
+    command: String,
+    payload: TraceErrorResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct TraceErrorResponsePayload {
+    message: String,
+}
+
+impl Default for TraceErrorResponse {
+    fn default() -> Self {
+        TraceErrorResponse {
+            protocol: String::from("trace"),
+            command: String::from("error"),
+            payload: TraceErrorResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for TraceErrorResponsePayload {
+    fn default() -> Self {
+        TraceErrorResponsePayload {
+            message: String::from("default trace error message"),
+        }
+    }
+}
