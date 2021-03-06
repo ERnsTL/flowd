@@ -1531,7 +1531,17 @@ struct GraphAddedgeRequestPayload {
 struct GraphNodeSpec {
     node: String,
     port: String,
-    index: String, //TODO spec: string or number -- how to handle in Rust?
+    index: String, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust?
+}
+
+impl Default for GraphNodeSpec {
+    fn default() -> Self {
+        GraphNodeSpec {
+            node: String::from("Repeater"),
+            port: String::from("IN"),
+            index: String::from("1"),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug)]
