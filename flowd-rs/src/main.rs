@@ -405,6 +405,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::TraceDumpRequest(_payload) => {
+                        info!("got trace:dump message");
+                        info!("response: sending trace:dump response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&TraceDumpResponse::default())
+                                    .expect("failed to serialize trace:dump response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -530,6 +541,8 @@ enum FBPMessage {
     TraceStopRequest(TraceStopRequestPayload),
     #[serde(rename = "clear")]
     TraceClearRequest(TraceClearRequestPayload),
+    #[serde(rename = "dump")]
+    TraceDumpRequest(TraceDumpRequestPayload),
 }
 
 //TODO implement all remaining response and status messages -- like network:processerror, network:icon etc.
@@ -2253,7 +2266,47 @@ impl Default for TraceClearResponsePayload {
 }
 
 // trace:dump -> trace:dump | trace:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct TraceDumpRequest {
+    protocol: String,
+    command: String,
+    payload: TraceDumpRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct TraceDumpRequestPayload {
+    graph: String,
+    #[serde(rename = "type")] //TODO is this correct?
+    typ: String, //TODO spec which types are possible? // spec calls this field "type"
+    flowtrace: String, // spec: a Flowtrace file of the type given in attribute "type" -- TODO format defined there:  https://github.com/flowbased/flowtrace
+    secret: String,    // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct TraceDumpResponse {
+    protocol: String,
+    command: String,
+    payload: TraceDumpResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct TraceDumpResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:dump instead of trace:error enough?
+
+impl Default for TraceDumpResponse {
+    fn default() -> Self {
+        TraceDumpResponse {
+            protocol: String::from("trace"),
+            command: String::from("dump"),
+            payload: TraceDumpResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for TraceDumpResponsePayload {
+    fn default() -> Self {
+        TraceDumpResponsePayload {}
+    }
+}
 
 // trace:error
 //TODO spec if this does not require any capabilities for this then move up into "base" section
