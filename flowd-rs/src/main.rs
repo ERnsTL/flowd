@@ -371,6 +371,18 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    // protocol:trace
+                    FBPMessage::TraceStartRequest(_payload) => {
+                        info!("got trace:start message");
+                        info!("response: sending trace:start response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&TraceStartResponse::default())
+                                    .expect("failed to serialize trace:start response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -488,6 +500,9 @@ enum FBPMessage {
     GraphRenamegroupRequest(GraphRenamegroupRequestPayload),
     #[serde(rename = "changegroup")]
     GraphChangegroupRequest(GraphChangegroupRequestPayload),
+
+    // protocol:trace
+    TraceStartRequest(TraceStartRequestPayload),
 }
 
 //TODO implement all remaining response and status messages -- like network:processerror, network:icon etc.
@@ -2090,7 +2105,45 @@ impl Default for GraphChangegroupResponsePayload {
 // ----------
 
 // trace:start -> trace:start | trace:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct TraceStartRequest {
+    protocol: String,
+    command: String,
+    payload: TraceStartRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct TraceStartRequestPayload {
+    graph: String,
+    buffersize: u32, // spec: size of tracing buffer to keep in bytes
+    secret: String,  // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct TraceStartResponse {
+    protocol: String,
+    command: String,
+    payload: TraceStartResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct TraceStartResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:start instead of trace:error enough?
+
+impl Default for TraceStartResponse {
+    fn default() -> Self {
+        TraceStartResponse {
+            protocol: String::from("trace"),
+            command: String::from("start"),
+            payload: TraceStartResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for TraceStartResponsePayload {
+    fn default() -> Self {
+        TraceStartResponsePayload {}
+    }
+}
 
 // trace:stop -> trace:stop | trace:error
 //TODO implement
