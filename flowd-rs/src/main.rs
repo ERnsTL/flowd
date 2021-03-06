@@ -383,6 +383,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::TraceStopRequest(_payload) => {
+                        info!("got trace:stop message");
+                        info!("response: sending trace:stop response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&TraceStopResponse::default())
+                                    .expect("failed to serialize trace:stop response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -502,7 +513,10 @@ enum FBPMessage {
     GraphChangegroupRequest(GraphChangegroupRequestPayload),
 
     // protocol:trace
+    #[serde(rename = "start")]
     TraceStartRequest(TraceStartRequestPayload),
+    #[serde(rename = "stop")]
+    TraceStopRequest(TraceStopRequestPayload),
 }
 
 //TODO implement all remaining response and status messages -- like network:processerror, network:icon etc.
@@ -2146,7 +2160,44 @@ impl Default for TraceStartResponsePayload {
 }
 
 // trace:stop -> trace:stop | trace:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct TraceStopRequest {
+    protocol: String,
+    command: String,
+    payload: TraceStopRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct TraceStopRequestPayload {
+    graph: String,
+    secret: String, // only present in the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct TraceStopResponse {
+    protocol: String,
+    command: String,
+    payload: TraceStopResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct TraceStopResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:stop instead of trace:error enough?
+
+impl Default for TraceStopResponse {
+    fn default() -> Self {
+        TraceStopResponse {
+            protocol: String::from("trace"),
+            command: String::from("stop"),
+            payload: TraceStopResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for TraceStopResponsePayload {
+    fn default() -> Self {
+        TraceStopResponsePayload {}
+    }
+}
 
 // trace:clear -> trace:clear | trace:error
 //TODO implement
