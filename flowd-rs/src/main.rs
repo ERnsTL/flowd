@@ -416,6 +416,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    // protocol:runtime
+                    FBPMessage::RuntimePacketRequest(_payload) => {
+                        info!("got runtime:packet message");
+                        //TODO print incoming packet
+                    }
+
+                    FBPMessage::RuntimePacketsentRequest(_payload) => {
+                        info!("got runtime:packetsent message");
+                        //TODO print and confirm/correlate to any previously sent packet to the remote runtime
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -470,6 +481,12 @@ enum FBPMessage {
     RuntimeGetruntimeMessage(RuntimeGetruntimePayload), //NOTE: tag+content -> tuple variant not struct variant
     #[serde(rename = "runtime")]
     RuntimeRuntimeMessage,
+
+    // protocol:runtime
+    #[serde(rename = "packet")]
+    RuntimePacketRequest(RuntimePacketRequestPayload),
+    #[serde(rename = "packetsent")]
+    RuntimePacketsentRequest(RuntimePacketRequestPayload), //TODO should be RuntimePacketsentRequestPayload?
 
     // network:persist
     #[serde(rename = "persist")]
@@ -810,11 +827,78 @@ impl Default for ComponentErrorResponsePayload {
 // protocol:runtime
 // ----------
 
-// runtime:packet -> runtime:packetsent ? TODO | runtime:error
-//TODO implement
+// runtime:packet -> runtime:packetsent | runtime:error
+// spec: 2018-03-21: Added packetsent response for runtime:packet input message
+// spec: use runtime as remote subgraphs when they support protocol:runtime = packet input/output
+// space: also possible as status message without request message
+#[derive(Deserialize, Debug)]
+struct RuntimePacketRequest {
+    protocol: String,
+    command: String,
+    payload: RuntimePacketRequestPayload,
+}
 
-// runtime:packet response
-//NOTE: find implementation above
+#[derive(Deserialize, Debug)]
+struct RuntimePacketRequestPayload {
+    port: String,
+    event: String, //TODO spec what does this do? format?
+    #[serde(rename = "type")]
+    typ: String, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
+    schema: String, // spec: URL to JSON schema describing the format of the data
+    graph: String,
+    payload: String, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
+    secret: String,  // only present on the request payload
+}
+
+#[derive(Serialize, Debug)]
+struct RuntimePacketResponse {
+    protocol: String,
+    command: String,
+    payload: RuntimePacketResponsePayload,
+}
+
+//TODO serde: RuntimePacketRequestPayload is the same as RuntimePacketResponsePayload except the payload -- any possibility to mark this optional for the response?
+#[derive(Serialize, Deserialize, Debug)]
+struct RuntimePacketResponsePayload {
+    port: String,
+    event: String, //TODO spec what does this do? format?
+    #[serde(rename = "type")]
+    typ: String, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
+    schema: String, // spec: URL to JSON schema describing the format of the data
+    graph: String,
+    payload: String, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
+}
+
+impl Default for RuntimePacketResponse {
+    fn default() -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for RuntimePacketResponsePayload {
+    fn default() -> Self {
+        RuntimePacketResponsePayload {
+            port: String::from("IN"),
+            event: String::from("default event"),
+            typ: String::from("string"), //TODO is this correct?
+            schema: String::from(""),
+            graph: String::from(""),
+            payload: String::from("default packet payload"),
+        }
+    }
+}
+
+// runtime:packetsent
+#[derive(Deserialize, Debug)]
+struct RuntimePacketsentRequest {
+    protocol: String,
+    command: String,
+    payload: RuntimePacketRequestPayload, //NOTE: this is structurally the same for runtime:packet and runtime:packetsent //TODO spec: missing payload?
+}
 
 // runtime:ports response
 #[derive(Serialize, Debug)]
