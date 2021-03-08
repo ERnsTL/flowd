@@ -427,6 +427,18 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                         //TODO print and confirm/correlate to any previously sent packet to the remote runtime
                     }
 
+                    // network:data
+                    FBPMessage::NetworkEdgesRequest(_payload) => {
+                        info!("got network:edges message");
+                        info!("response: sending network:edges response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkEdgesResponse::default())
+                                    .expect("failed to serialize network:edges response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -508,6 +520,10 @@ enum FBPMessage {
     ComponentGetsourceMessage(ComponentGetsourcePayload),
     #[serde(rename = "source")]
     ComponentSourceMessage,
+
+    // network:data
+    #[serde(rename = "edges")]
+    NetworkEdgesRequest(NetworkEdgesRequestPayload),
 
     // protocol:graph
     #[serde(rename = "clear")]
@@ -996,9 +1012,53 @@ impl Default for NetworkPersistResponsePayload {
 // ----------
 
 // network:edges -> network:edges | network:error
-//TODO implement
+#[derive(Deserialize, Debug)]
+struct NetworkEdgesRequest {
+    protocol: String,
+    command: String,
+    payload: NetworkEdgesRequestPayload,
+}
 
-// network:output
+#[derive(Deserialize, Debug)]
+struct NetworkEdgesRequestPayload {
+    graph: String,
+    edges: Vec<GraphEdgeSpec>,
+    secret: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GraphEdgeSpec {
+    src: GraphNodeSpec,
+    tgt: GraphNodeSpec,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkEdgesResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkEdgesResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkEdgesResponsePayload {} //TODO spec: is a confirmative response of type network:edges enough or should all values be echoed beck?
+
+impl Default for NetworkEdgesResponse {
+    fn default() -> Self {
+        NetworkEdgesResponse {
+            protocol: String::from("network"),
+            command: String::from("edges"),
+            payload: NetworkEdgesResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for NetworkEdgesResponsePayload {
+    fn default() -> Self {
+        NetworkEdgesResponsePayload {}
+    }
+}
+
+// network:output response
 //NOTE spec: like STDOUT output of a Unix process, or a line of console.log in JavaScript. Can also be used for passing images from the runtime to the UI.
 #[derive(Serialize, Debug)]
 struct NetworkOutputResponse {
