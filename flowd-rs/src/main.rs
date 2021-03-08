@@ -439,6 +439,26 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    // protocol:component
+                    FBPMessage::ComponentListRequest(_payload) => {
+                        info!("got component:list message");
+                        info!("response: sending component:component and component:componentsready response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&ComponentComponentMessage::default())
+                                    .expect("failed to serialize component:component response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&ComponentComponentsreadyMessage::default())
+                                    .expect(
+                                        "failed to serialize component:componentsready response",
+                                    ),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -524,6 +544,10 @@ enum FBPMessage {
     // network:data
     #[serde(rename = "edges")]
     NetworkEdgesRequest(NetworkEdgesRequestPayload),
+
+    // protocol:component
+    #[serde(rename = "list")]
+    ComponentListRequest(ComponentListRequestPayload),
 
     // protocol:graph
     #[serde(rename = "clear")]
@@ -1188,8 +1212,18 @@ impl Default for NetworkStatusPayload {
 // protocol:component
 // ----------
 
-// component:list -> component:component, component:componentsready | component:error
-//TODO implement component:list
+// component:list -> component:component (multiple possible), then a final component:componentsready | component:error
+#[derive(Deserialize, Debug)]
+struct ComponentListRequest {
+    protocol: String,
+    command: String,
+    payload: ComponentListRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct ComponentListRequestPayload {
+    secret: String,
+}
 
 // ----------
 
