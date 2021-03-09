@@ -439,6 +439,18 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    // network:control (?)
+                    FBPMessage::NetworkStartRequest(_payload) => {
+                        info!("got network:start message");
+                        info!("response: sending network:started response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkStartedResponse::default())
+                                    .expect("failed to serialize network:started response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     // protocol:component
                     FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
@@ -544,6 +556,10 @@ enum FBPMessage {
     // network:data
     #[serde(rename = "edges")]
     NetworkEdgesRequest(NetworkEdgesRequestPayload),
+
+    // network:control (?)
+    #[serde(rename = "start")]
+    NetworkStartRequest(NetworkStartRequestPayload),
 
     // protocol:component
     #[serde(rename = "list")]
@@ -1144,8 +1160,57 @@ impl Default for NetworkOutputResponsePayload {
 // network:control
 // ----------
 
-// network:start -> TODO network:started | network:error
-//TODO implement
+// network:start -> network:started | network:error
+#[derive(Deserialize, Debug)]
+struct NetworkStartRequest {
+    protocol: String,
+    command: String,
+    payload: NetworkStartRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct NetworkStartRequestPayload {
+    graph: String,
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStartedResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkStartedResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStartedResponsePayload {
+    time: String, //TODO spec time format?
+    graph: String,
+    started: bool, // spec: see network:status response for meaning of started and running //TODO spec: shouldn't this always be true?
+    running: bool,
+    debug: bool,
+}
+
+impl Default for NetworkStartedResponse {
+    fn default() -> Self {
+        NetworkStartedResponse {
+            protocol: String::from("network"),
+            command: String::from("started"),
+            payload: NetworkStartedResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for NetworkStartedResponsePayload {
+    fn default() -> Self {
+        NetworkStartedResponsePayload {
+            time: String::from("2021-01-01T19:00:00+01:00"), //TODO is this correct?
+            graph: String::from("main_graph"),
+            started: false,
+            running: false,
+            debug: false,
+        }
+    }
+}
 
 // network:stop -> TODO network:stopped | network:error
 //TODO implement
