@@ -451,6 +451,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::NetworkStopRequest(_payload) => {
+                        info!("got network:start message");
+                        info!("response: sending network:start response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkStartedResponse::default())
+                                    .expect("failed to serialize network:started response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     // protocol:component
                     FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
@@ -560,6 +571,8 @@ enum FBPMessage {
     // network:control (?)
     #[serde(rename = "start")]
     NetworkStartRequest(NetworkStartRequestPayload),
+    #[serde(rename = "stop")]
+    NetworkStopRequest(NetworkStopRequestPayload),
 
     // protocol:component
     #[serde(rename = "list")]
@@ -1212,8 +1225,59 @@ impl Default for NetworkStartedResponsePayload {
     }
 }
 
-// network:stop -> TODO network:stopped | network:error
-//TODO implement
+// network:stop -> network:stopped | network:error
+#[derive(Deserialize, Debug)]
+struct NetworkStopRequest {
+    protocol: String,
+    command: String,
+    payload: NetworkStopRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct NetworkStopRequestPayload {
+    graph: String,
+    secret: String,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStoppedResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkStoppedResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkStoppedResponsePayload {
+    time: String, //TODO spec time format?
+    uptime: u32, // spec: time the network was running, in seconds //TODO spec: should the time it was stopped be subtracted from this number? //TODO spec: not "time" but "duration"
+    graph: String,
+    running: bool, //TODO spec: shouldn't this always be false?    //TODO spec: ordering of fields is different between network:started and network:stopped
+    started: bool, // spec: see network:status response for meaning of started and running
+    debug: bool,
+}
+
+impl Default for NetworkStoppedResponse {
+    fn default() -> Self {
+        NetworkStoppedResponse {
+            protocol: String::from("network"),
+            command: String::from("stopped"),
+            payload: NetworkStoppedResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for NetworkStoppedResponsePayload {
+    fn default() -> Self {
+        NetworkStoppedResponsePayload {
+            time: String::from("2021-01-01T19:00:00+01:00"), //TODO is this correct?
+            uptime: 123,
+            graph: String::from("main_graph"),
+            started: false,
+            running: false,
+            debug: false,
+        }
+    }
+}
 
 // network:getstatus -> network:status | network:error
 #[derive(Deserialize, Debug)]
