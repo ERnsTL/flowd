@@ -462,6 +462,17 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    FBPMessage::NetworkDebugRequest(_payload) => {
+                        info!("got network:debug message");
+                        info!("response: sending network:debug response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&NetworkDebugResponse::default())
+                                    .expect("failed to serialize network:debug response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     // protocol:component
                     FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
@@ -573,6 +584,8 @@ enum FBPMessage {
     NetworkStartRequest(NetworkStartRequestPayload),
     #[serde(rename = "stop")]
     NetworkStopRequest(NetworkStopRequestPayload),
+    #[serde(rename = "debug")]
+    NetworkDebugRequest(NetworkDebugRequestPayload),
 
     // protocol:component
     #[serde(rename = "list")]
@@ -1334,8 +1347,47 @@ impl Default for NetworkStatusPayload {
     }
 }
 
-// network:debug -> TODO response not specified | network:error
-//TODO implement
+// network:debug -> TODO spec: response not specified | network:error
+#[derive(Deserialize, Debug)]
+struct NetworkDebugRequest {
+    protocol: String,
+    command: String,
+    payload: NetworkDebugRequestPayload,
+}
+
+#[derive(Deserialize, Debug)]
+struct NetworkDebugRequestPayload {
+    enable: bool,
+    graph: String,
+    secret: String,
+}
+
+//TODO spec: this response is not defined in the spec! What should the response be?
+#[derive(Serialize, Debug)]
+struct NetworkDebugResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkDebugResponsePayload,
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkDebugResponsePayload {}
+
+impl Default for NetworkDebugResponse {
+    fn default() -> Self {
+        NetworkDebugResponse {
+            protocol: String::from("network"),
+            command: String::from("debug"),
+            payload: NetworkDebugResponsePayload::default(),
+        }
+    }
+}
+
+impl Default for NetworkDebugResponsePayload {
+    fn default() -> Self {
+        NetworkDebugResponsePayload {}
+    }
+}
 
 // ----------
 // protocol:component
