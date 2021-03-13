@@ -1307,6 +1307,42 @@ impl Default for NetworkIconResponsePayload {
     }
 }
 
+// network:processerror
+// spec: When in debug mode, a network can signal an error happening inside a process.
+#[derive(Serialize, Debug)]
+struct NetworkProcesserrorResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkProcesserrorResponsePayload,
+}
+
+impl Default for NetworkProcesserrorResponse {
+    fn default() -> Self {
+        NetworkProcesserrorResponse {
+            protocol: String::from("network"),
+            command: String::from("processerror"),
+            payload: NetworkProcesserrorResponsePayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkProcesserrorResponsePayload {
+    id: String, // spec: identifier of the node
+    error: String,
+    graph: String,
+}
+
+impl Default for NetworkProcesserrorResponsePayload {
+    fn default() -> Self {
+        NetworkProcesserrorResponsePayload {
+            id: String::from("Repeater"),
+            error: String::from("default network process error response"),
+            graph: String::from("main_graph"),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
