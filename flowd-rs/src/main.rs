@@ -1161,26 +1161,44 @@ impl Default for NetworkOutputResponsePayload {
     }
 }
 
-// network:data
-//TODO implement
+// network:connect response
+#[derive(Serialize, Debug)]
+struct NetworkConnectResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkTransmissionPayload,
+}
 
-// network:begingroup
-//TODO implement
+impl Default for NetworkConnectResponse {
+    fn default() -> Self {
+        NetworkConnectResponse {
+            protocol: String::from("network"),
+            command: String::from("connect"),
+            payload: NetworkTransmissionPayload::default(),
+        }
+    }
+}
 
-// network:endgroup
-//TODO implement
+#[derive(Serialize, Debug)]
+struct NetworkTransmissionPayload {
+    id: String, // spec: textual edge identifier, usually in form of a FBP language line
+    src: GraphNodeSpec,
+    tgt: GraphNodeSpec,
+    graph: String,
+    subgraph: Vec<String>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
+}
 
-// network:connect
-//TODO implement
-
-// network:disconnect
-//TODO implement
-
-// network:icon
-//TODO implement
-
-// network:processerror
-//TODO implement
+impl Default for NetworkTransmissionPayload {
+    fn default() -> Self {
+        NetworkTransmissionPayload {
+            id: String::from("Repeater.OUT -> Display.IN"), //TODO not sure if this is correct
+            src: GraphNodeSpec::default(),
+            tgt: GraphNodeSpec::default(),
+            graph: String::from("main_graph"),
+            subgraph: vec![String::from("Repeater.OUT -> Display.IN")], //TODO not sure of this is correct, most likely not
+        }
+    }
+}
 
 // ----------
 // network:control
