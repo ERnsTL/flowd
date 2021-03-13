@@ -1254,6 +1254,24 @@ impl Default for NetworkEndgroupResponse {
     }
 }
 
+// network:disconnect
+#[derive(Serialize, Debug)]
+struct NetworkDisconnectResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkTransmissionPayload,
+}
+
+impl Default for NetworkDisconnectResponse {
+    fn default() -> Self {
+        NetworkDisconnectResponse {
+            protocol: String::from("network"),
+            command: String::from("disconnect"),
+            payload: NetworkTransmissionPayload::default(),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
