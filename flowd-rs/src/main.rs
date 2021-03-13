@@ -1236,6 +1236,24 @@ impl Default for NetworkBegingroupResponse {
     }
 }
 
+// network:endgroup
+#[derive(Serialize, Debug)]
+struct NetworkEndgroupResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkTransmissionPayload,
+}
+
+impl Default for NetworkEndgroupResponse {
+    fn default() -> Self {
+        NetworkEndgroupResponse {
+            protocol: String::from("network"),
+            command: String::from("endgroup"),
+            payload: NetworkTransmissionPayload::default(),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
