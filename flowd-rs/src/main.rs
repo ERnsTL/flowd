@@ -1200,6 +1200,24 @@ impl Default for NetworkTransmissionPayload {
     }
 }
 
+// network:data response
+#[derive(Serialize, Debug)]
+struct NetworkDataResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkTransmissionPayload,
+}
+
+impl Default for NetworkDataResponse {
+    fn default() -> Self {
+        NetworkDataResponse {
+            protocol: String::from("network"),
+            command: String::from("data"),
+            payload: NetworkTransmissionPayload::default(),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
