@@ -1218,6 +1218,24 @@ impl Default for NetworkDataResponse {
     }
 }
 
+// network:begingroup response
+#[derive(Serialize, Debug)]
+struct NetworkBegingroupResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkTransmissionPayload,
+}
+
+impl Default for NetworkBegingroupResponse {
+    fn default() -> Self {
+        NetworkBegingroupResponse {
+            protocol: String::from("network"),
+            command: String::from("begingroup"),
+            payload: NetworkTransmissionPayload::default(),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
