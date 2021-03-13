@@ -1272,6 +1272,41 @@ impl Default for NetworkDisconnectResponse {
     }
 }
 
+// network:icon response
+#[derive(Serialize, Debug)]
+struct NetworkIconResponse {
+    protocol: String,
+    command: String,
+    payload: NetworkIconResponsePayload,
+}
+
+impl Default for NetworkIconResponse {
+    fn default() -> Self {
+        NetworkIconResponse {
+            protocol: String::from("network"),
+            command: String::from("icon"),
+            payload: NetworkIconResponsePayload::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct NetworkIconResponsePayload {
+    id: String, // spec: identifier of the node
+    icon: String,
+    graph: String,
+}
+
+impl Default for NetworkIconResponsePayload {
+    fn default() -> Self {
+        NetworkIconResponsePayload {
+            id: String::from("Repeater"),
+            icon: String::from("fa-usd"),
+            graph: String::from("main_graph"),
+        }
+    }
+}
+
 // ----------
 // network:control
 // ----------
