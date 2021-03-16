@@ -493,6 +493,7 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                             .expect("failed to write message into websocket");
                     }
 
+                    //TODO group and order handler blocks by capability
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
                         websocket.close(None).expect("could not close websocket");
@@ -558,6 +559,8 @@ enum FBPMessage {
     #[serde(rename = "persist")]
     NetworkPersistRequest(NetworkPersistRequestPayload),
 
+    //TODO group all request messages by capability
+    //TODO order them correctly like in the spec
     #[serde(rename = "ports")]
     RuntimePortsMessage,
     #[serde(rename = "list")]
