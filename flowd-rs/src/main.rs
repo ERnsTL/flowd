@@ -594,6 +594,7 @@ enum FBPMessage {
     #[serde(rename = "list")]
     ComponentListRequest(ComponentListRequestPayload),
 
+    // graph:readonly
     // protocol:graph
     #[serde(rename = "clear")]
     GraphClearRequest(GraphClearRequestPayload),
@@ -2708,6 +2709,8 @@ impl Default for GraphChangegroupResponsePayload {
 // ----------
 // protocol:trace
 // ----------
+
+// spec: This protocol is utilized for triggering and transmitting Flowtraces, see https://github.com/flowbased/flowtrace
 
 // trace:start -> trace:start | trace:error
 #[derive(Deserialize, Debug)]
