@@ -30,3 +30,20 @@ Peculiarities:
 * TODO spec does not define expected response to network:debug request
 * TODO spec what should the response for runtime:packet request be? -- when should a runtime:packetsent be sent? if we receive a runtime:packet response/status message should we also respond with a runtime:packetreceived... or something?
 * TODO spec mentions "a few commands do not require any capabilities: [...] and the error responses (runtime:error, graph:error, network:error, component:error)." but does not mention trace:error -> does it also not require any capabilities or does it?
+* TODO spec description of trace:dump message is "undefined"
+* TODO spec description of trace:dump message attribute "flowtrace" has backticks in description -- wanted?
+* TODO spec trace:dump attribute "type": which types are possible?
+* TODO spec ordering of trace:dump and trace:clear differs from message list for protocol:trace in capabilities list at top of spec compared to ordering in bottom of spec where listing the actual doc for each message
+* TODO spec trace:dump has no field "secret" but is listed as input message resp. request for capability protocol:trace so it should have the attribute "secret" for request usage
+* TODO doc for trace protocol gives a link to the Flowtrace protocol but the link is written out in literal Markdown, not converted to an HTML link
+* TODO spec network:output and network:error have "'" single quotes at the end of their descriptions.
+* TODO spec for network:output: how to transmit binary data?
+* TODO spec for network:connect, network:begingroup, network:data, network:endgroup, network:disconnect ... how do they fit together, how are they used together, which ones are mandatory, which are optional?
+* TODO spec what is the point resp. use-case of network:edges "the user has selected some edges in the UI"?
+* TODO spec network:debug puts the network into debug mode. But how should it behave differently -- only send additional network:processerror messages, anything else? How to get out ot debug mode? What should the response message to network:debug request be?
+* TODO spec what is the point resp. use-]aso of network:packet field "event"?
+* TODO spec runtime:packet what about port index? or is this not supported on network inports/outports?
+* TODO spec should incoming runtime:packet not be confirmed with some kind of packetreceived response like outgoing runtime:packet -> runtime:packetsent?
+* TODO spec runtime:packetsent is this meant when local runtime sends runtime:packet to remote runtime that remote confirms using runtime:packetsent or the other way around? why is runtime:packetsent missing the attribute "secret"?
+* TODO spec the causal request-response connection between network:start and started and network:stop and stopped should be stated explicitly. Was only indirectly mentioned in a comment in the spec changelog.
+* TODO spec is it possible for network:started to have started=false? If it was false it would be an error and should logically return network:error? What is the point use-case for the attribute "started"?
