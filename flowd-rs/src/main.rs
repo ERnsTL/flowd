@@ -509,6 +509,8 @@ fn handle_client(stream: TcpStream) -> Result<()> {
                 info!("got a close, breaking");
                 break;
             }
+            // From documentation: Raw frame. Note, that you are not going to get this value while reading the message.
+            Message::Frame(_) => todo!()
         }
     }
     //websocket.close().expect("could not close websocket");
