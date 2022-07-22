@@ -14,6 +14,9 @@ extern crate log;
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::HashMap;
+//use dashmap::DashMap;
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -1096,7 +1099,8 @@ struct NetworkEdgesRequestPayload {
     secret: String,
 }
 
-#[derive(Deserialize, Debug)]
+//NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
+#[derive(Serialize, Deserialize, Debug)]
 struct GraphEdgeSpec {
     src: GraphNodeSpec,
     tgt: GraphNodeSpec,
@@ -2547,7 +2551,8 @@ struct GraphAddgroupRequestPayload {
     secret: String,               // only present in the request payload
 }
 
-#[derive(Deserialize, Debug)]
+//NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
+#[derive(Deserialize, Serialize, Debug)]
 struct GraphGroupMetadata {
     description: String,
 }
@@ -2908,4 +2913,54 @@ impl Default for TraceErrorResponsePayload {
             message: String::from("default trace error message"),
         }
     }
+}
+
+// --- graph structs for FBP network protocol and FBP graph import/export
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Graph {
+    #[serde(rename = "caseSensitive")]
+    case_sensitive: bool, // always true
+    properties: GraphProperties,
+    inports: HashMap<String, GraphPort>, //TODO will not be accessed concurrently - this is only an external representation struct
+    outports: HashMap<String, GraphPort>, //TODO will not be accessed concurrently - this is only an external representation struct
+    groups: Vec<GraphGroup>, // TODO for internal representation this should be a hashmap
+    processes: HashMap<String, GraphNodeSpec>,
+    connections: Vec<GraphEdgeSpec>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphProperties {
+    name: String,
+    environment: GraphPropertiesEnvironment,
+    description: String,
+    icon: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphPropertiesEnvironment {
+    #[serde(rename = "type")]
+    typ: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphPort {
+    process: String,
+    port: String,
+    //index: u32, //TODO clarify spec: does not exist in spec here, but for the connections it exists
+    metadata: GraphPortMetadata,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphPortMetadata {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphGroup {
+    name: String,
+    nodes: Vec<GraphNodeSpec>,
+    metadata: GraphGroupMetadata,
 }
