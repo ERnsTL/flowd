@@ -53,4 +53,7 @@ TODO Further FBP network protocol clarifications needed:
 
 Graph spec:
 
-* TODO spec graph: allows for process, port, index = indexed ports in (intra-graph) connections, but not for graph inports and outports -- how to connect an inport or outport to an indexed port of a process?
+* TODO spec allows for process, port, index = indexed ports in (intra-graph) connections, but not for graph inports and outports -- how to connect an inport or outport to an indexed port of a process?
+* TODO spec has connection metadata: what is "route" used for? doc says: "Route identifier of a graph edge"
+* TODO spec has connection metadata: is "schema" used for validating the passing data against a schema, therefore allowing enforcing well-formed data to pass over this edge? Can it also be used to find matching components, which are known to have compatible data schema on this schema, so that the output and input data is compatible like GStreamer does this component matching with MIME types?
+* TODO spec has connection metadata: what is "secure" used for? doc says: "Whether edge data should be treated as secure" what does that mean?
