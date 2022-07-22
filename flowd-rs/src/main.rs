@@ -2070,9 +2070,9 @@ impl Default for GraphNodeSpec {
 
 #[derive(Deserialize, Serialize, Debug)]
 struct GraphEdgeMetadata {
-    route: i32,
-    schema: String,
-    secure: bool,
+    route: i32, //TODO clarify spec: Route identifier of a graph edge
+    schema: String, //TODO clarify spec: JSON schema associated with a graph edge (TODO check schema)
+    secure: bool, //TODO clarify spec: Whether edge data should be treated as secure
 }
 
 #[derive(Serialize, Debug)]
