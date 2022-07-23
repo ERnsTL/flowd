@@ -1607,8 +1607,8 @@ struct ComponentComponentPayload {
     description: String,
     icon: String, // spec: visual icon for the component, matching icon names in Font Awesome
     subgraph: bool, // spec: is the component a subgraph?
-    in_ports: Vec<String>, //TODO create classes
-    out_ports: Vec<String>, //TODO create classes
+    in_ports: Vec<ComponentPort>, // spec: array. TODO could be modelled as a hashmap/object
+    out_ports: Vec<ComponentPort>, // spec: array. TODO clould be modelled as a hashmap/object ... OTOH, tere are usually not so many ports, can just as well iterate over 1/2/3/4 ports.
 }
 
 impl Default for ComponentComponentPayload {
@@ -1621,6 +1621,60 @@ impl Default for ComponentComponentPayload {
             in_ports: vec![],
             out_ports: vec![],
         }
+    }
+}
+
+#[derive(Serialize, Debug)]
+struct ComponentPort {
+    #[serde(rename = "id")]
+    name: String,
+    #[serde(rename = "type")]
+    allowed_type: String, //TODO clarify spec: so if we define a boolean, we can send only booleans? What about struct/object types? How should the runtime verify that? //TODO map JSON types <-> Rust types
+    #[serde(default)]
+    schema: String, // spec: optional
+    #[serde(default)]
+    required: bool, // spec: optional, whether the port needs to be connected for the component to work (TODO add checks for that and notify user (how?) that a vital port is unconnected if required=true)
+    #[serde(default, rename = "addressable")]
+    is_arrayport: bool, // spec: optional
+    #[serde(default)]
+    description: String,  // spec: optional
+    #[serde(default, rename = "values")]
+    values_allowed: Vec<String>,  // spec: optional, can probably be any type, but TODO how to map JSON "any values" to Rust?
+    #[serde(default, rename = "default")]
+    value_default: String,  // spec: optional, datatype any TODO how to map JSON any values in Rust?
+}
+
+impl Default for ComponentPort {
+    fn default() -> Self {
+        ComponentPort {
+            name: String::from("out"),
+            allowed_type: String::from("string"),
+            schema: String::from(""), //TODO unnecessary to allocate a string to say "no schema" -> Option type or something
+            required: true,
+            is_arrayport: false,
+            description: String::from("a default output port"),
+            values_allowed: vec!(), //TODO clarify spec: does empty array mean "no values allowed" or "all values allowed"?
+            value_default: String::from(""),
+        }
+    }
+}
+
+impl ComponentPort {
+    fn default_in() -> Self {
+        ComponentPort {
+            name: String::from("in"),
+            allowed_type: String::from("string"),
+            schema: String::from(""), //TODO unnecessary to allocate a string to say "no schema" -> Option type or something
+            required: true,
+            is_arrayport: false,
+            description: String::from("a default input port"),
+            values_allowed: vec!(), //TODO clarify spec: does empty array mean "no values allowed" or "all values allowed"?
+            value_default: String::from(""),
+        }
+    }
+
+    fn default_out() -> Self {
+        return ComponentPort::default()
     }
 }
 
@@ -1661,7 +1715,7 @@ struct ComponentGetsourcePayload {
     secret: String,
 }
 
-// componennt:source
+// component:source
 //NOTE: is used as request in setsource context and as response in getsource context
 #[derive(Serialize, Debug)]
 struct ComponentSourceMessage {
