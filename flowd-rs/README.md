@@ -50,8 +50,13 @@ TODO Further FBP network protocol clarifications needed:
 * TODO spec runtime:packetsent is this meant when local runtime sends runtime:packet to remote runtime that remote confirms using runtime:packetsent or the other way around? why is runtime:packetsent missing the attribute "secret"?
 * TODO spec the causal request-response connection between network:start and started and network:stop and stopped should be stated explicitly. Was only indirectly mentioned in a comment in the spec changelog.
 * TODO spec is it possible for network:started to have started=false? If it was false it would be an error and should logically return network:error? What is the point use-case for the attribute "started"?
+* TODO spec defines several optional arguments on connection:connection.inports and .outports, but in the FBP graph schema, these are not present! Makes it difficult to do serialization based on schema. Should be in sync with the FBP graph schema.
+  * a graph's port has different attributes than a component's port.
+  * The FBP network protocol has the ports of processes attached to the process (eg. component:component response as an array, side-question why not as a hashmap? TODO) whereas the FBP graph schema has the ports of a process defined in the graph.connections (also as an array).
+* TODO component:component.inports and .outports have a field "type". How is this to be interpreted? So if we define it boolean, we can send only booleans? What about struct/object types? How should the runtime verify that?
+* TODO component:component.inports and .outports have a field "values" = array of allowed values - how to express "all allowed"? With an empty array, is that correct? Or does empty array mean "no values allowed"?
 
-Graph spec:
+Clarifications for Graph schema:
 
 * TODO spec allows for process, port, index = indexed ports in (intra-graph) connections, but not for graph inports and outports -- how to connect an inport or outport to an indexed port of a process?
 * TODO spec has connection metadata: what is "route" used for? doc says: "Route identifier of a graph edge"
