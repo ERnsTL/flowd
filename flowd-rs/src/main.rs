@@ -534,8 +534,8 @@ fn main() {
     info!("graph initialized");
 
     let server = TcpListener::bind("localhost:3569").unwrap();
+    info!("management listening on localhost:3569");
 
-    info!("listening on localhost:3569");
     for stream in server.incoming() {
         spawn(move || match stream {
             Ok(stream) => {
