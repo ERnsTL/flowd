@@ -741,7 +741,7 @@ impl Default for RuntimeRuntimePayload {
             runtime: String::from("flowd"),
             namespace: String::from("main"), // namespace of components
             repository: String::from("https://github.com/ERnsTL/flowd.git"),
-            repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and acutal version
+            repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and actual version
         }
     }
 }
