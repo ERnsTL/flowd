@@ -2981,6 +2981,7 @@ impl Default for TraceErrorResponsePayload {
 // --- graph structs for FBP network protocol and FBP graph import/export
 
 //TODO how to serialize/deserialize as object/hashtable in JSON, but use Vec internally? TODO performance tests Vec <-> HashMap.
+//TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 #[derive(Serialize, Deserialize, Debug)]
 struct Graph {
     #[serde(rename = "caseSensitive")]
@@ -3029,7 +3030,6 @@ struct GraphGroup {
     metadata: GraphGroupMetadata,
 }
 
-//https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 impl Graph {
     fn new(name: String, description: String, icon: String) -> Self {
         Graph {
