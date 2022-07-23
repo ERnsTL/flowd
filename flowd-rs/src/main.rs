@@ -2971,13 +2971,14 @@ impl Default for TraceErrorResponsePayload {
 
 // --- graph structs for FBP network protocol and FBP graph import/export
 
+//TODO how to serialize/deserialize as object/hashtable in JSON, but use Vec internally? TODO performance tests Vec <-> HashMap.
 #[derive(Serialize, Deserialize, Debug)]
 struct Graph {
     #[serde(rename = "caseSensitive")]
     case_sensitive: bool, // always true
     properties: GraphProperties,
-    inports: HashMap<String, GraphPort>, //TODO will not be accessed concurrently - this is only an external representation struct
-    outports: HashMap<String, GraphPort>, //TODO will not be accessed concurrently - this is only an external representation struct
+    inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
+    outports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
     groups: Vec<GraphGroup>, // TODO for internal representation this should be a hashmap
     processes: HashMap<String, GraphNodeSpec>,
     connections: Vec<GraphEdgeSpec>,
@@ -3017,4 +3018,33 @@ struct GraphGroup {
     name: String,
     nodes: Vec<GraphNodeSpec>,
     metadata: GraphGroupMetadata,
+}
+
+//https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
+impl Graph {
+    fn new(name: String, description: String, icon: String) -> Self {
+        Graph {
+            case_sensitive: true, //TODO always true - optimize
+            properties: GraphProperties {
+                name: name,
+                environment: GraphPropertiesEnvironment::default(),
+                description: description,
+                icon: icon,
+            },
+            inports: HashMap::new(),
+            outports: HashMap::new(),
+            groups: vec!(),
+            processes: HashMap::new(),
+            connections: vec!(),
+        }
+    }
+}
+
+impl Default for GraphPropertiesEnvironment {
+    fn default() -> Self {
+        GraphPropertiesEnvironment {
+            typ: String::from("flowd"), //TODO constant value - optimize
+            content: String::from(""), //TODO always empty for flowd - optimize
+        }
+    }
 }
