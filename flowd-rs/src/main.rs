@@ -1,6 +1,7 @@
 #![feature(duration_constants)]
 
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, RwLock};
 use std::thread::spawn;
 use std::time::Duration;
 
@@ -523,6 +524,14 @@ fn handle_client(stream: TcpStream) -> Result<()> {
 
 fn main() {
     pretty_env_logger::init();
+    info!("logging initialized");
+
+    let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
+        String::from("main"),
+        String::from("basic description"),
+        String::from("usd")
+    )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
+    info!("graph initialized");
 
     let server = TcpListener::bind("localhost:3569").unwrap();
 
