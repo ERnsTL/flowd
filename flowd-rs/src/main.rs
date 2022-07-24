@@ -768,6 +768,11 @@ impl RuntimeRuntimePayload {
             ..Default::default()
         }
     }
+
+    fn persist(&self) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
