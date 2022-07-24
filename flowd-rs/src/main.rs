@@ -478,26 +478,6 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .expect("failed to write message into websocket");
                     }
 
-                    // protocol:component
-                    FBPMessage::ComponentListRequest(_payload) => {
-                        info!("got component:list message");
-                        info!("response: sending component:component and component:componentsready response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&ComponentComponentMessage::default())
-                                    .expect("failed to serialize component:component response"),
-                            ))
-                            .expect("failed to write message into websocket");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&ComponentComponentsreadyMessage::default())
-                                    .expect(
-                                        "failed to serialize component:componentsready response",
-                                    ),
-                            ))
-                            .expect("failed to write message into websocket");
-                    }
-
                     //TODO group and order handler blocks by capability
                     _ => {
                         info!("unknown message type received: {:?}", fbpmsg); //TODO wanted Display trait here
