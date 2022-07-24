@@ -130,13 +130,32 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::NetworkPersistRequest(_payload) => {
                         info!("got network:persist message");
-                        info!("response: sending network:persist message");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&NetworkPersistResponse::default())
-                                    .expect("failed to serialize network:persist message"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        // persist and send either network:persist or network:error
+                        match runtime.read().expect("lock poisoned").persist() {
+                            Ok(_) => {
+                                info!("response: sending network:persist message");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkPersistResponse::default())
+                                            .expect("failed to serialize network:persist message"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("persist failed: {}", err);
+                                info!("response: sending network:error message");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            err.to_string(),
+                                            String::from(""),
+                                            runtime.read().expect("lock poisoned").graph.clone()
+                                        ))
+                                        .expect("failed to serialize network:error message"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                     }
 
                     FBPMessage::ComponentGetsourceMessage(payload) => {
