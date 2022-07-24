@@ -805,6 +805,15 @@ impl RuntimeRuntimePayload {
         //TODO implement
         Ok(())
     }
+
+    fn start(&mut self) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        self.status.graph = self.graph.clone();
+        self.status.started = true;
+        self.status.running = true;
+        self.status.uptime = 1; //TODO implement - store start time somewhere and serde: get value using function call to calc the time difference
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -1608,7 +1617,7 @@ impl<'a> NetworkStatusMessage<'a> {
 struct NetworkStatusPayload {
     graph: String,
     uptime: u32, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network
-    // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started.
+    // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started. not started+running=undefined (TODO).
     started: bool, // spec: whether or not network has been started
     running: bool, // spec: boolean tells whether the network is running at the moment or not
     debug: bool,   // spec: whether or not network is in debug mode
