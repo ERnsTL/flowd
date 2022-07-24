@@ -713,17 +713,17 @@ impl<'a> RuntimeRuntimeMessage<'a> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeRuntimePayload {
-    id: String,                        // UUID of this runtime instance
-    label: String,                     // human-readable description of the runtime
-    version: String,                   // supported protocol version
-    all_capabilities: Vec<Capability>, // capabilities supported by runtime
-    capabilities: Vec<Capability>, // capabities for you //TODO implement privilege level restrictions
-    graph: String,                 // currently active graph
+    id: String,                        // spec: UUID of this runtime instance
+    label: String,                     // spec: human-readable description of the runtime
+    version: String,                   // spec: supported protocol version //TODO which versions are there? implement proper
+    all_capabilities: Vec<Capability>, // spec: capabilities supported by runtime
+    capabilities: Vec<Capability>, // spec: capabities for you //TODO implement privilege level restrictions
+    graph: String,                 // spec: currently active graph
     #[serde(rename = "type")]
-    runtime: String, // name of the runtime software, "flowd"
-    namespace: String,             // namespace of components for this project of top-level graph
-    repository: String,            // source code repository of this runtime software
-    repository_version: String,    // repository version of this software build
+    runtime: String,    // spec: name of the runtime software, "flowd"
+    namespace: String,             // spec: namespace of components for this project of top-level graph
+    repository: String,            // spec: source code repository of this runtime software //TODO but it is the repo of the graph, is it?
+    repository_version: String,    // spec: repository version of this software build
 }
 
 impl Default for RuntimeRuntimePayload {
