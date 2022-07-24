@@ -3029,7 +3029,9 @@ impl Default for TraceErrorResponsePayload {
     }
 }
 
-// --- graph structs for FBP network protocol and FBP graph import/export
+// ----------
+// graph structs for FBP network protocol and FBP graph import/export
+// ----------
 
 //TODO how to serialize/deserialize as object/hashtable in JSON, but use Vec internally? TODO performance tests Vec <-> HashMap.
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
