@@ -1046,6 +1046,21 @@ impl Default for RuntimePortsMessage {
     }
 }
 
+impl RuntimePortsMessage {
+    fn new(runtime: &RuntimeRuntimePayload, graph: &Graph) -> Self {
+        RuntimePortsMessage {
+            protocol: String::from("runtime"),
+            command: String::from("ports"),
+            payload:  RuntimePortsPayload {
+                graph: runtime.graph.clone(),
+                in_ports: graph.ports_as_componentportsarray(&graph.inports),
+                out_ports: graph.ports_as_componentportsarray(&graph.outports),
+        }}
+    }
+}
+
+// spec: can request both the inports and outports of a graph and a component with the same message
+// beware the fields for graph inports and outports are different from component inports and outports, also array <-> object/hashmap#[derive(Serialize, Debug)]
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 struct RuntimePortsPayload {
