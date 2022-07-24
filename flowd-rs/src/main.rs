@@ -3077,6 +3077,25 @@ impl Graph {
             connections: vec!(),
         }
     }
+
+    //TODO very lossy conversion
+    fn ports_as_componentportsarray(&self, inports_or_outports: &HashMap<String,GraphPort>) -> Vec<ComponentPort> {
+        let mut out = Vec::with_capacity(inports_or_outports.len());
+        for (name, info) in inports_or_outports.iter() {
+            out.push(ComponentPort {
+                name: name.clone(),
+                allowed_type: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port TODO what happens if we return a empty allowed type (because we dont know from Graph inport)
+                schema: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
+                required: true, //TODO clarify spec: not available from FBP JSON Graph port
+                is_arrayport: false, //TODO clarify spec: not available from FBP JSON Graph port
+                description: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
+                values_allowed: vec!(), //TODO clarify spec: not available from FBP JSON Graph port
+                value_default: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
+                //TODO clarify spec: cannot return Graph inport fields process, port, metadata (x,y)
+            });
+        }
+        return out;
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
