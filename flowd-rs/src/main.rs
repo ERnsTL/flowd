@@ -83,11 +83,11 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 .expect("failed to serialize runtime:runtime message"),
                             ))
                             .expect("failed to write message into websocket");
-                        // (specification) "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
+                        // spec: "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
                         info!("response: sending runtime:ports message");
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&RuntimePortsMessage::default())
+                                serde_json::to_string(&RuntimePortsMessage::new(&runtime.read().expect("lock poisoned"), &graph.read().expect("lock poisoned")))
                                     .expect("failed to serialize runtime:ports message"),
                             ))
                             .expect("failed to write message into websocket");
