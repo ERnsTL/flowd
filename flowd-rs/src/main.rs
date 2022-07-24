@@ -1622,26 +1622,30 @@ struct ComponentListRequestPayload {
 // ----------
 
 #[derive(Serialize, Debug)]
-struct ComponentComponentMessage {
+struct ComponentComponentMessage<'a> {
     protocol: String,
     command: String,
-    payload: ComponentComponentPayload,
+    payload: &'a ComponentComponentPayload,
 }
 
-impl Default for ComponentComponentMessage {
+impl Default for ComponentComponentMessage<'_> {
     fn default() -> Self {
         ComponentComponentMessage {
             protocol: String::from("component"),
             command: String::from("component"),
-            payload: ComponentComponentPayload::default(),
+            ..Default::default()
         }
     }
 }
 
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ComponentListPayload {
-    secret: String,
+impl<'a> ComponentComponentMessage<'a> {
+    fn new(payload: &'a ComponentComponentPayload) -> Self {
+        ComponentComponentMessage {
+            protocol: String::from("component"),
+            command: String::from("component"),
+            payload: payload,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
