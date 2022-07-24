@@ -25,7 +25,7 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     }
 }
 
-fn handle_client(stream: TcpStream) -> Result<()> {
+fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> Result<()> {
     stream
         .set_write_timeout(Some(Duration::SECOND))
         .expect("set_write_timeout call failed");
@@ -526,6 +526,12 @@ fn main() {
     pretty_env_logger::init();
     info!("logging initialized");
 
+    //TODO the runtime should manage the graphs -> add_graph() and also checking that they actually exist and should have a method switch_graph()
+    let runtime: Arc<RwLock<RuntimeRuntimePayload>> = Arc::new(RwLock::new(RuntimeRuntimePayload::new(
+        String::from("main_graph")
+    )));
+    info!("runtime initialized");
+
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
         String::from("main"),
         String::from("basic description"),
@@ -537,10 +543,14 @@ fn main() {
     info!("management listening on localhost:3569");
 
     for stream in server.incoming() {
+        // create Arc pointers for the new thread
+        let graphref = graph.clone();
+        let runtimeref = runtime.clone();
+        // spawn thread
         spawn(move || match stream {
             Ok(stream) => {
                 info!("got a client");
-                if let Err(err) = handle_client(stream) {
+                if let Err(err) = handle_client(stream, graphref, runtimeref) {
                     match err {
                         Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
                         e => error!("test: {}", e),
