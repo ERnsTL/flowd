@@ -93,22 +93,24 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .expect("failed to write message into websocket");
                     }
 
-                    FBPMessage::ComponentListMessage(_payload) => {
+                    // protocol:component
+                    FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
-                        info!("response: sending component:component message");
-                        websocket
+                        info!("response: sending component:component message(s) and closing component:componentsready response");
+                        let mut count: u32 = 0;
+                        for component in components.read().expect("lock poisoned").available.iter() {
+                            websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&ComponentComponentMessage::default())
-                                    .expect("failed to serialize component:component message"),
+                                serde_json::to_string(&ComponentComponentMessage::new(&component))
+                                    .expect("failed to serialize component:component response"),
                             ))
                             .expect("failed to write message into websocket");
-                        info!("response: sending component:componentsready message");
+                            count += 1;
+                        }
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&ComponentComponentsreadyMessage::default())
-                                    .expect(
-                                        "failed to serialize component:componentsready message",
-                                    ),
+                                serde_json::to_string(&ComponentComponentsreadyMessage::new(count))
+                                    .expect("failed to serialize component:componentsready response"),
                             ))
                             .expect("failed to write message into websocket");
                     }
