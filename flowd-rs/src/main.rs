@@ -1,5 +1,6 @@
 #![feature(duration_constants)]
 
+use std::error;
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
@@ -69,6 +70,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                                               //TODO handle panic because of decoding error here
 
                 match fbpmsg {
+                    // runtime base
                     FBPMessage::RuntimeGetruntimeMessage(payload) => {
                         info!(
                             "got runtime:getruntime message with secret {}",
@@ -908,6 +910,20 @@ impl Default for NetworkErrorResponsePayload {
             message: String::from("default network error message"),
             stack: String::from("no stack trace given"),
             graph: String::from("default_graph"),
+        }
+    }
+}
+
+impl NetworkErrorResponse {
+    fn new(err: String, stacktrace: String, graph_name: String) -> Self {
+        NetworkErrorResponse {
+            protocol: String::from("network"),
+            command: String::from("error"),
+            payload: NetworkErrorResponsePayload {
+                message: err,
+                stack: stacktrace,
+                graph: graph_name,
+            },
         }
     }
 }
