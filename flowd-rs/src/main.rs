@@ -683,18 +683,28 @@ struct RuntimeGetruntimePayload {
 }
 
 #[derive(Serialize, Debug)]
-struct RuntimeRuntimeMessage {
+struct RuntimeRuntimeMessage<'a> {
     protocol: String, // group of messages (and capabities)
     command: String,  // name of message within group
-    payload: RuntimeRuntimePayload,
+    payload: &'a RuntimeRuntimePayload,
 }
 
-impl Default for RuntimeRuntimeMessage {
+impl Default for RuntimeRuntimeMessage<'_> {
     fn default() -> Self {
         RuntimeRuntimeMessage {
             protocol: String::from("runtime"),
             command: String::from("runtime"),
-            payload: RuntimeRuntimePayload::default(),
+            ..Default::default()
+        }
+    }
+}
+
+impl<'a> RuntimeRuntimeMessage<'a> {
+    fn new(payload: &'a RuntimeRuntimePayload) -> Self {
+        RuntimeRuntimeMessage {
+            protocol: String::from("runtime"),
+            command: String::from("runtime"),
+            payload: &payload,
         }
     }
 }
