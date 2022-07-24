@@ -1564,18 +1564,29 @@ struct NetworkGetstatusPayload {
 // ----------
 
 #[derive(Serialize, Debug)]
-struct NetworkStatusMessage {
+struct NetworkStatusMessage<'a> {
     protocol: String,
     command: String,
-    payload: NetworkStatusPayload,
+    payload: &'a NetworkStatusPayload,
 }
 
-impl Default for NetworkStatusMessage {
+impl Default for NetworkStatusMessage<'_> {
     fn default() -> Self {
         NetworkStatusMessage {
             protocol: String::from("network"),
             command: String::from("status"),
-            payload: NetworkStatusPayload::default(),
+            ..Default::default()
+        }
+    }
+}
+
+//TODO payload has small size, we could copy it, problem is NetworkStatusPayload cannot automatically derive Copy because of the String does not implement Copy
+impl<'a> NetworkStatusMessage<'a> {
+    fn new(payload: &'a NetworkStatusPayload) -> Self {
+        NetworkStatusMessage {
+            protocol: String::from("network"),
+            command: String::from("status"),
+            payload: payload,
         }
     }
 }
@@ -1597,6 +1608,18 @@ impl Default for NetworkStatusPayload {
             uptime: 256,
             started: true,
             running: true,
+            debug: false,
+        }
+    }
+}
+
+impl NetworkStatusPayload {
+    fn new(current_graph: String) -> Self {
+        NetworkStatusPayload {
+            graph: current_graph,
+            uptime: 0,
+            started: false,
+            running: false,
             debug: false,
         }
     }
