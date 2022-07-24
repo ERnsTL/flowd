@@ -766,6 +766,15 @@ impl Default for RuntimeRuntimePayload {
     }
 }
 
+impl RuntimeRuntimePayload {
+    fn new(active_graph: String) -> RuntimeRuntimePayload {
+        RuntimeRuntimePayload{
+            graph: active_graph,
+            ..Default::default()
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 enum Capability {
     // spec: deprecated. Implies capabilities network:status, network:data, network:control. Does not imply capability network:persist.
