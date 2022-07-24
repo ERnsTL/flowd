@@ -749,7 +749,7 @@ impl Default for RuntimeRuntimePayload {
         RuntimeRuntimePayload {
             id: String::from("f18a4924-9d4f-414d-a37c-deadbeef0000"), //TODO actually random UUID
             label: String::from("human-readable description of the runtime"), //TODO useful text
-            version: String::from("0.7"),                             //TODO actually implement that
+            version: String::from("0.7"),                             //TODO actually implement that - what about features+changes post-0.7?
             all_capabilities: vec![
                 Capability::ProtocolNetwork,
                 Capability::NetworkPersist,

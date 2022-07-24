@@ -25,6 +25,7 @@ Peculiarities:
 * If the runtime:runtime response message states that there is a currently running graph, then noflo-ui uses the component:getsource request message to get the source code of the graph. Language can be json (noflo schema) or fbp (FBP network language from J. Paul Morrison). We return a placeholder for the source code and allow the capability component:getsource, otherwise noflo-ui complains that it is not permitted to send component:getsource request messages, see [this issue](https://github.com/noflo/noflo-ui/issues/1019). Using component:getsource to request the graph source seems to make many graph:* network:* and component:list* requests useless.
 * The FBP network spec calls them messages, but sometimes the same message name is used for both the request and response direction, just with different fields. (TODO spec: either have distinct names for the requests and responses or call them requests and responses). For a strongly-typed programming language this is difficult to model and also for clarity, in flowd-rs, the messages are called requests and responses, also reflected in their struct names. Also these messages are sometimes send as an information or state update to the client, so the communication pattern is also not consistently request-response type nor event-stream type, meaning "who drives the state update"? (TODO ponder this)
 * component:list is not about the running processes nor the list of components used in the current graph, but the list of available components for placement into the graph. Like query the component repository.
+* The network:status, network:started, network:stopped responses are pretty similar. The network:status message can be used as an internal status message and constructors for the rest can read part information from the live network status struct.
 
 TODO Further FBP network protocol clarifications needed:
 
@@ -63,6 +64,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO component:component message: Is it correct that the returned list of components should contain a list of generally available components from a component library, listing all components which are ready to be placed somewhere in the graph? So not just the ones present in the loaded graph? The spec does not clearly say which component should be returned, resp. their criteria.
 * TODO component:component message and component:componentsready message: Should the returned components be one per Websocket message or could the list also be returned in one WebSocket message as multiple FBP network protocol messages? Either way, it should be documented.
 * TODO general: there are features and changes specified, but no no version of the FBP network protocol released. latest version is 0.7 but there are some features which were added after that, but there is no version 0.8 - formally, they do not belong to any version. How to correctly report support for these changes and new features?
+* TODO Possibility to unify network:status, network:started, network:stopped messages?
 
 Clarifications for Graph schema:
 
