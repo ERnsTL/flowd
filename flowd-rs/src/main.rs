@@ -1050,8 +1050,8 @@ impl Default for RuntimePortsMessage {
 #[serde(rename_all = "camelCase")]
 struct RuntimePortsPayload {
     graph: String,
-    in_ports: Vec<String>,
-    out_ports: Vec<String>,
+    in_ports: Vec<ComponentPort>,
+    out_ports: Vec<ComponentPort>,
 }
 
 impl Default for RuntimePortsPayload {
