@@ -551,6 +551,7 @@ fn main() {
 
 //TODO currently panicks if unknown variant
 //TODO currently panicks if field is missing during decoding
+//TODO note messages which are used multiple times
 #[derive(Deserialize, Debug)]
 #[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
 enum FBPMessage {
@@ -561,6 +562,8 @@ enum FBPMessage {
     RuntimeRuntimeMessage,
 
     // protocol:runtime
+    #[serde(rename = "ports")]
+    RuntimePortsMessage,
     #[serde(rename = "packet")]
     RuntimePacketRequest(RuntimePacketRequestPayload),
     #[serde(rename = "packetsent")]
@@ -570,24 +573,12 @@ enum FBPMessage {
     #[serde(rename = "persist")]
     NetworkPersistRequest(NetworkPersistRequestPayload),
 
-    //TODO group all request messages by capability
-    //TODO order them correctly like in the spec
-    #[serde(rename = "ports")]
-    RuntimePortsMessage,
-    #[serde(rename = "list")]
-    ComponentListMessage(ComponentListPayload),
-    #[serde(rename = "component")]
-    ComponentComponentMessage,
-    #[serde(rename = "componentsready")]
-    ComponentComponentsreadyMessage,
+    // network:status
+    // used for several capabilities: protocol:network (deprecated), network:status, network:control
     #[serde(rename = "getstatus")]
     NetworkGetstatusMessage(NetworkGetstatusPayload),
     #[serde(rename = "status")]
     NetworkStatusMessage,
-    #[serde(rename = "getsource")]
-    ComponentGetsourceMessage(ComponentGetsourcePayload),
-    #[serde(rename = "source")]
-    ComponentSourceMessage,
 
     // network:data
     #[serde(rename = "edges")]
@@ -601,9 +592,22 @@ enum FBPMessage {
     #[serde(rename = "debug")]
     NetworkDebugRequest(NetworkDebugRequestPayload),
 
+    // component:getsource
+    #[serde(rename = "getsource")]
+    ComponentGetsourceMessage(ComponentGetsourcePayload),
+
+    // component:setsource
+    #[serde(rename = "source")]
+    ComponentSourceMessage,
+
     // protocol:component
     #[serde(rename = "list")]
     ComponentListRequest(ComponentListRequestPayload),
+    //NOTE: used in several capabilities as response message
+    #[serde(rename = "component")]
+    ComponentComponentMessage,
+    #[serde(rename = "componentsready")]
+    ComponentComponentsreadyMessage,
 
     // graph:readonly
     // protocol:graph
