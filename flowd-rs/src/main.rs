@@ -470,13 +470,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // network:control (?)
                     FBPMessage::NetworkStartRequest(_payload) => {
                         info!("got network:start message");
-                        info!("response: sending network:started response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&NetworkStartedResponse::default())
-                                    .expect("failed to serialize network:started response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match runtime.write().expect("lock poisoned").start() {
+                            Ok(_) => {
+                                info!("response: sending network:started response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkStartedResponse::default())
+                                            .expect("failed to serialize network:started response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                },
+                            Err(err) => {
+                                error!("runtime.start() failed: {}", err);
+                                info!("response: sending network:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            err.to_string(),
+                                            String::from(""),
+                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                        ))
+                                            .expect("failed to serialize network:started response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                },
+                        }
                     }
 
                     FBPMessage::NetworkStopRequest(_payload) => {
