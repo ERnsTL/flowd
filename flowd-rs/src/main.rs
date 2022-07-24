@@ -25,7 +25,7 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     }
 }
 
-fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> Result<()> {
+fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>) -> Result<()> {
     stream
         .set_write_timeout(Some(Duration::SECOND))
         .expect("set_write_timeout call failed");
@@ -513,6 +513,11 @@ fn main() {
     )));
     info!("runtime initialized");
 
+    let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::default()));
+    //TODO actually load components
+    info!("component library initialized");
+
+    //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
         String::from("main"),
         String::from("basic description"),
@@ -527,11 +532,12 @@ fn main() {
         // create Arc pointers for the new thread
         let graphref = graph.clone();
         let runtimeref = runtime.clone();
+        let componentlibref = componentlib.clone();
         // spawn thread
         spawn(move || match stream {
             Ok(stream) => {
                 info!("got a client");
-                if let Err(err) = handle_client(stream, graphref, runtimeref) {
+                if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
                     match err {
                         Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
                         e => error!("test: {}", e),
@@ -3100,4 +3106,15 @@ impl Default for GraphPropertiesEnvironment {
             content: String::from(""), //TODO always empty for flowd - optimize
         }
     }
+}
+
+// ----------
+// component library
+// ----------
+
+//TODO cannot think of a better name ATM, see https://stackoverflow.com/questions/1866794/naming-classes-how-to-avoid-calling-everything-a-whatevermanager
+//TODO implement some functionality
+#[derive(Default)]
+struct ComponentLibrary {
+    available: Vec<ComponentComponentPayload>,
 }
