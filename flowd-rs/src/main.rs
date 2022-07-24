@@ -480,12 +480,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     }
 
                     FBPMessage::NetworkStopRequest(_payload) => {
-                        info!("got network:start message");
-                        info!("response: sending network:start response");
+                        info!("got network:stop message");
+                        info!("response: sending network:stop response");
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&NetworkStartedResponse::default())
-                                    .expect("failed to serialize network:started response"),
+                                serde_json::to_string(&NetworkStoppedResponse::default())
+                                    .expect("failed to serialize network:stopped response"),
                             ))
                             .expect("failed to write message into websocket");
                     }
