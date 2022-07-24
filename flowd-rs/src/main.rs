@@ -122,7 +122,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("response: sending network:status message");
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&NetworkStatusMessage::default())
+                                serde_json::to_string(&NetworkStatusMessage::new(&runtime.read().expect("lock poisoned").status))
                                     .expect("failed to serialize network:status message"),
                             ))
                             .expect("failed to write message into websocket");
