@@ -3030,7 +3030,7 @@ impl Default for TraceErrorResponsePayload {
 #[derive(Serialize, Deserialize, Debug)]
 struct Graph {
     #[serde(rename = "caseSensitive")]
-    case_sensitive: bool, // always true
+    case_sensitive: bool, // always true for flowd TODO optimize
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
     outports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
