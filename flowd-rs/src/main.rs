@@ -1732,7 +1732,7 @@ impl ComponentPort {
 struct ComponentComponentsreadyMessage {
     protocol: String,
     command: String,
-    payload: u32, // noflo-ui expects payload to be integer -> TODO number of component:component messages before the component:componentsready message?
+    payload: u32, // noflo-ui expects payload to be integer -> TODO clarify spec: number of component:component messages before the component:componentsready message?
 }
 
 impl Default for ComponentComponentsreadyMessage {
@@ -1741,6 +1741,16 @@ impl Default for ComponentComponentsreadyMessage {
             protocol: String::from("component"),
             command: String::from("componentsready"),
             payload: 1,
+        }
+    }
+}
+
+impl ComponentComponentsreadyMessage {
+    fn new(count_ready: u32) -> Self {
+        ComponentComponentsreadyMessage {
+            protocol: String::from("component"),
+            command: String::from("componentsready"),
+            payload: count_ready,
         }
     }
 }
