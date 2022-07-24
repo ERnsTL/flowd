@@ -737,6 +737,11 @@ struct RuntimeRuntimePayload {
     namespace: String,             // spec: namespace of components for this project of top-level graph
     repository: String,            // spec: source code repository of this runtime software //TODO but it is the repo of the graph, is it?
     repository_version: String,    // spec: repository version of this software build
+
+    // runtime state
+    #[serde(skip)]
+    status: NetworkStatusPayload,  // for network:status, network:started, network:stopped
+    //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -776,15 +781,23 @@ impl Default for RuntimeRuntimePayload {
             namespace: String::from("main"), // namespace of components TODO implement
             repository: String::from("https://github.com/ERnsTL/flowd.git"),  //TODO use this feature of building and saving the graph into a Git repo
             repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and actual version
+            ..Default::default()    // status
         }
     }
 }
 
 impl RuntimeRuntimePayload {
-    fn new(active_graph: String) -> RuntimeRuntimePayload {
+    fn new(active_graph: String) -> Self {
         RuntimeRuntimePayload{
-            graph: active_graph,
-            ..Default::default()
+            graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
+            status: NetworkStatusPayload {
+                graph: active_graph,
+                uptime: 0,
+                started: false,
+                running: false,
+                debug: false,
+            },
+            ..Default::default()  //TODO mock other fields as well
         }
     }
 
