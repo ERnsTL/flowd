@@ -1619,6 +1619,23 @@ impl Default for NetworkStoppedResponsePayload {
     }
 }
 
+impl NetworkStoppedResponse {
+    fn new(status: &NetworkStartedResponsePayload) -> Self {
+        NetworkStoppedResponse {
+            protocol: String::from("network"),
+            command: String::from("stopped"),
+            payload: NetworkStoppedResponsePayload {
+                time_stopped: UtcTime(chrono::Utc::now()),
+                uptime: (chrono::Utc::now() - status.time_started.0).num_seconds(),
+                graph: status.graph.clone(),
+                started: status.started,
+                running: status.running,
+                debug: status.debug,
+            },
+        }
+    }
+}
+
 // network:getstatus -> network:status | network:error
 #[derive(Deserialize, Debug)]
 struct NetworkGetstatusMessage {
