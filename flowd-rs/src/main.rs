@@ -476,7 +476,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 info!("response: sending network:started response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&NetworkStartedResponse::default())
+                                        serde_json::to_string(&NetworkStartedResponse::new(&runtime.read().expect("lock poisoned").status))
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -491,7 +491,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             String::from(""),
                                             runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
                                         ))
-                                            .expect("failed to serialize network:started response"),
+                                            .expect("failed to serialize network:error response"),
                                     ))
                                     .expect("failed to write message into websocket");
                                 },
