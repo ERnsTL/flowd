@@ -500,13 +500,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::NetworkStopRequest(_payload) => {
                         info!("got network:stop message");
-                        info!("response: sending network:stop response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&NetworkStoppedResponse::default())
-                                    .expect("failed to serialize network:stopped response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match runtime.write().expect("lock poisoned").stop() {
+                            Ok(_) => {
+                                info!("response: sending network:stop response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkStoppedResponse::new(&runtime.read().expect("lock poisoned").status))
+                                            .expect("failed to serialize network:stopped response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                },
+                            Err(err) => {
+                                error!("runtime.stop() failed: {}", err);
+                                info!("response: sending network:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            err.to_string(),
+                                            String::from(""),
+                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                        ))
+                                            .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                },
+                        }
                     }
 
                     FBPMessage::NetworkDebugRequest(_payload) => {
