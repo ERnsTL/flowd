@@ -1546,6 +1546,16 @@ impl Default for NetworkStartedResponsePayload {
     }
 }
 
+impl<'a> NetworkStartedResponse<'a> {
+    fn new(status: &'a NetworkStartedResponsePayload) -> Self {
+        NetworkStartedResponse {
+            protocol: String::from("network"),
+            command: String::from("started"),
+            payload: status,
+        }
+    }
+}
+
 // network:stop -> network:stopped | network:error
 #[derive(Deserialize, Debug)]
 struct NetworkStopRequest {
@@ -1667,13 +1677,13 @@ impl Default for NetworkStatusPayload {
 }
 
 impl NetworkStatusPayload {
-    fn new(current_graph: String) -> Self {
+    fn new(status: &NetworkStartedResponsePayload) -> Self {
         NetworkStatusPayload {
-            graph: current_graph,
-            uptime: 0,
-            started: false,
-            running: false,
-            debug: false,
+            graph: status.graph.clone(),
+            uptime: (chrono::Utc::now() - status.time_started.0).num_seconds().into(),
+            started: status.started,
+            running: status.running,
+            debug: status.debug,
         }
     }
 }
