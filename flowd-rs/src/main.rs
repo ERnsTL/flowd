@@ -1579,11 +1579,12 @@ struct NetworkStoppedResponse {
 
 #[derive(Serialize, Debug)]
 struct NetworkStoppedResponsePayload {
-    time: String, //TODO spec time format?
-    uptime: u32, // spec: time the network was running, in seconds //TODO spec: should the time it was stopped be subtracted from this number? //TODO spec: not "time" but "duration"
+    #[serde(rename = "time")]
+    time_stopped: UtcTime, //TODO spec: string. clarify spec: time format? purpose? datetime where network was stopped?
+    uptime: i64, // spec: time the network was running, in seconds //TODO spec: should the time it was stopped be subtracted from this number? //TODO spec: not "time" but "duration"
     graph: String,
-    running: bool, //TODO spec: shouldn't this always be false?    //TODO spec: ordering of fields is different between network:started and network:stopped
     started: bool, // spec: see network:status response for meaning of started and running
+    running: bool, // TODO spec: shouldn't this always be false?    //TODO spec: ordering of fields is different between network:started and network:stopped -> fix in spec.
     debug: bool,
 }
 
@@ -1600,7 +1601,7 @@ impl Default for NetworkStoppedResponse {
 impl Default for NetworkStoppedResponsePayload {
     fn default() -> Self {
         NetworkStoppedResponsePayload {
-            time: String::from("2021-01-01T19:00:00+01:00"), //TODO is this correct?
+            time_stopped: UtcTime(chrono::Utc::now()), //TODO is this correct?
             uptime: 123,
             graph: String::from("main_graph"),
             started: false,
