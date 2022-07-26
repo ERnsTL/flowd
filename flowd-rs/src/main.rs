@@ -132,7 +132,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkPersistRequest(_payload) => {
                         info!("got network:persist message");
                         // persist and send either network:persist or network:error
-                        match runtime.read().expect("lock poisoned").persist() {
+                        match runtime.read().expect("lock poisoned").persist() {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
                             Ok(_) => {
                                 info!("response: sending network:persist message");
                                 websocket
