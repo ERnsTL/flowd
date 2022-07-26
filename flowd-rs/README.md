@@ -65,6 +65,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO component:component message and component:componentsready message: Should the returned components be one per Websocket message or could the list also be returned in one WebSocket message as multiple FBP network protocol messages? Either way, it should be documented.
 * TODO general: there are features and changes specified, but no no version of the FBP network protocol released. latest version is 0.7 but there are some features which were added after that, but there is no version 0.8 - formally, they do not belong to any version. How to correctly report support for these changes and new features?
 * TODO Possibility to unify network:status, network:started, network:stopped messages?
+* TODO NetworkStarted response payload: Format of the time field. Just a String, but what format? ISO8601 or Unixtime? Why is this field neccessary, what is the meaning of it?
 
 Clarifications for Graph schema:
 
