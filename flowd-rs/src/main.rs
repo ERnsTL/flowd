@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 //use dashmap::DashMap;
 
+use chrono::prelude::*;
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -121,7 +123,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("response: sending network:status message");
                         websocket
                             .write_message(Message::text(
-                                serde_json::to_string(&NetworkStatusMessage::new(&runtime.read().expect("lock poisoned").status))
+                                serde_json::to_string(&NetworkStatusMessage::new(&NetworkStatusPayload::new(&runtime.read().expect("lock poisoned").status)))
                                     .expect("failed to serialize network:status message"),
                             ))
                             .expect("failed to write message into websocket");
@@ -757,7 +759,7 @@ struct RuntimeRuntimePayload {
 
     // runtime state
     #[serde(skip)]
-    status: NetworkStatusPayload,  // for network:status, network:started, network:stopped
+    status: NetworkStartedResponsePayload,  // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
 }
 
@@ -807,9 +809,9 @@ impl RuntimeRuntimePayload {
     fn new(active_graph: String) -> Self {
         RuntimeRuntimePayload{
             graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
-            status: NetworkStatusPayload {
+            status: NetworkStartedResponsePayload {
+                time_started: UtcTime(chrono::MIN_DATETIME), // zero value
                 graph: active_graph,
-                uptime: 0,
                 started: false,
                 running: false,
                 debug: false,
@@ -825,10 +827,10 @@ impl RuntimeRuntimePayload {
 
     fn start(&mut self) -> std::result::Result<(), std::io::Error> {
         //TODO implement
+        self.status.time_started = UtcTime(chrono::Utc::now());
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = true;
-        self.status.uptime = 1; //TODO implement - store start time somewhere and serde: get value using function call to calc the time difference
         Ok(())
     }
 }
@@ -1495,27 +1497,39 @@ struct NetworkStartRequestPayload {
 }
 
 #[derive(Serialize, Debug)]
-struct NetworkStartedResponse {
+struct NetworkStartedResponse<'a> {
     protocol: String,
     command: String,
-    payload: NetworkStartedResponsePayload,
+    payload: &'a NetworkStartedResponsePayload,
 }
 
 #[derive(Serialize, Debug)]
 struct NetworkStartedResponsePayload {
-    time: String, //TODO spec time format?
+    #[serde(rename = "time")]
+    time_started: UtcTime, //TODO clarify spec: defined as just a String. But what time format? meaning of the field anyway?
     graph: String,
     started: bool, // spec: see network:status response for meaning of started and running //TODO spec: shouldn't this always be true?
     running: bool,
     debug: bool,
 }
 
-impl Default for NetworkStartedResponse {
+//NOTE: this type alias allows us to implement Serialize (a trait from another crate) for DateTime (also from another crate)
+#[derive(Debug)]
+struct UtcTime(chrono::DateTime<Utc>);
+
+impl Serialize for UtcTime {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::ser::Serializer {
+        return Ok(serializer.serialize_str(self.0.format("%+").to_string().as_str()).expect("fail serializing datetime"));
+    }
+}
+
+impl Default for NetworkStartedResponse<'_> {
     fn default() -> Self {
         NetworkStartedResponse {
             protocol: String::from("network"),
             command: String::from("started"),
-            payload: NetworkStartedResponsePayload::default(),
+            ..Default::default()
         }
     }
 }
@@ -1523,7 +1537,7 @@ impl Default for NetworkStartedResponse {
 impl Default for NetworkStartedResponsePayload {
     fn default() -> Self {
         NetworkStartedResponsePayload {
-            time: String::from("2021-01-01T19:00:00+01:00"), //TODO is this correct?
+            time_started: UtcTime(chrono::Utc::now()), //TODO is this correct?
             graph: String::from("main_graph"),
             started: false,
             running: false,
@@ -1633,7 +1647,7 @@ impl<'a> NetworkStatusMessage<'a> {
 #[derive(Serialize, Debug)]
 struct NetworkStatusPayload {
     graph: String,
-    uptime: u32, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network
+    uptime: i64, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network. NOTE: i64 because of return type from new() chrono calculations return type, which cannot be converted to u32.
     // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started. not started+running=undefined (TODO).
     started: bool, // spec: whether or not network has been started
     running: bool, // spec: boolean tells whether the network is running at the moment or not
