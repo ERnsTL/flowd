@@ -833,6 +833,14 @@ impl RuntimeRuntimePayload {
         self.status.running = true;
         Ok(())
     }
+
+    fn stop(&mut self) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        self.status.graph = self.graph.clone();
+        self.status.started = true;
+        self.status.running = false;    // was started, but not running any more
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
