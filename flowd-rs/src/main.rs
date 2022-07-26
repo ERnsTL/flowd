@@ -1,6 +1,5 @@
 #![feature(duration_constants)]
 
-use std::error;
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
 use std::thread::spawn;
