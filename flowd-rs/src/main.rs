@@ -181,15 +181,29 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::GraphClearRequest(_payload) => {
+                    FBPMessage::GraphClearRequest(payload) => {
                         info!("got graph:clear message");
-                        info!("response: sending graph:clear response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphClearResponse::default())
-                                    .expect("failed to serialize graph:clear response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match graph.write().expect("lock poisoned").clear(&payload, &runtime.read().expect("lock poisoned")) {
+                            Ok(_) => {
+                                info!("response: sending graph:clear response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphClearResponse::new(&payload))
+                                            .expect("failed to serialize graph:clear response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("graph.clear() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                     }
 
                     FBPMessage::GraphAddnodeRequest(_payload) => {
