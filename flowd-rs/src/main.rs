@@ -859,6 +859,14 @@ impl RuntimeRuntimePayload {
         self.status.running = false;    // was started, but not running any more
         Ok(())
     }
+
+    fn debug_mode(&mut self, graph: &str, mode: bool) -> std::result::Result<(), std::io::Error> {
+        //TODO check if the given graph exists
+        //TODO check if the given graph is the currently selected one
+        //TODO implement
+        self.status.debug = mode;
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
