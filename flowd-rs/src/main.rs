@@ -952,11 +952,20 @@ impl RuntimeRuntimePayload {
     }
 
     //TODO can this function fail, at all? can the error response be removed?
-    //TODO clarify spec: when is a clear() allowed?
+    //TODO clarify spec: when is clear() allowed? in running state or in stopped state?
     fn clear_trace(&mut self, graph: &str) -> std::result::Result<(), std::io::Error> {
         //TODO implement
         //TODO check if graph exists and is current graph
         Ok(())
+    }
+
+    //TODO can this function fail, at all? can the error response be removed?
+    //TODO clarify spec: when is dump() allowed? in running state or in stopped state?
+    fn dump_trace(&mut self, graph: &str) -> std::result::Result<String, std::io::Error> {
+        //TODO implement
+        //TODO check if graph exists and is current graph
+        //TODO implement Flowtrace format?
+        Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 }
 
