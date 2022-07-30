@@ -934,6 +934,14 @@ impl RuntimeRuntimePayload {
         self.tracing = false;
         Ok(())
     }
+
+    //TODO can this function fail, at all? can the error response be removed?
+    //TODO clarify spec: when is a clear() allowed?
+    fn clear_trace(&mut self, graph: &str) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        //TODO check if graph exists and is current graph
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
