@@ -3066,7 +3066,9 @@ struct TraceStartResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct TraceStartResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:start instead of trace:error enough?
+struct TraceStartResponsePayload {
+    graph: String,
+} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:start instead of trace:error enough?
 
 impl Default for TraceStartResponse {
     fn default() -> Self {
