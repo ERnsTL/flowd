@@ -1756,7 +1756,9 @@ struct NetworkDebugResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct NetworkDebugResponsePayload {}
+struct NetworkDebugResponsePayload {
+    graph: String,
+}
 
 impl Default for NetworkDebugResponse {
     fn default() -> Self {
