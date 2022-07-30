@@ -1,4 +1,5 @@
 #![feature(duration_constants)]
+#![feature(io_error_more)]
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
@@ -3542,6 +3543,27 @@ impl Graph {
             });
         }
         return out;
+    }
+
+    fn clear(&mut self, payload: &GraphClearRequestPayload, runtime: &RuntimeRuntimePayload) -> Result<(), std::io::Error> {
+        if runtime.status.running {
+            // not allowed at the moment (TODO), theoretically graph and network could be different and the graph could be modified while the network is still running in the old config, then stop network and immediately start the network again according to the new graph structure, having only short downtime.
+            return Err(std::io::Error::new(std::io::ErrorKind::ResourceBusy, String::from("network still running")));
+            //TODO ^ requires the feature "io_error_more", is this OK or risky, or bloated?
+        }
+        if payload.name != runtime.graph {
+            // multiple graphs currently not supported
+            //TODO implement
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed, currently one graph supported")));
+        }
+        //TODO implement some semantics like fields "library", "main" and subgraph feature - also need multiple graph support
+        // actually clear
+        self.groups.clear();
+        self.connections.clear();
+        self.inports.clear();
+        self.outports.clear();
+        self.processes.clear();
+        Ok(())
     }
 }
 
