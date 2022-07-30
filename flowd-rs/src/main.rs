@@ -415,7 +415,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to write message into websocket");
                             },
                             Err(err) => {
-                                error!("runtime.tracing_start() failed: {}", err);
+                                error!("runtime.start_trace() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
                                     .write_message(Message::text(
@@ -441,7 +441,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to write message into websocket");
                             },
                             Err(err) => {
-                                error!("runtime.tracing_start() failed: {}", err);
+                                error!("runtime.stop_trace() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
                                     .write_message(Message::text(
