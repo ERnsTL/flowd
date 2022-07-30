@@ -527,15 +527,29 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::NetworkDebugRequest(_payload) => {
+                    FBPMessage::NetworkDebugRequest(payload) => {
                         info!("got network:debug message");
-                        info!("response: sending network:debug response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&NetworkDebugResponse::default())
-                                    .expect("failed to serialize network:debug response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match runtime.write().expect("lock poisoned").debug_mode(payload.graph.as_str(), payload.enable) {
+                            Ok(_) => {
+                                info!("response: sending network:debug response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkDebugResponse::new(payload.graph))
+                                            .expect("failed to serialize network:debug response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                            Err(err) => {
+                                error!("runtime.debug_mode() failed: {}", err);
+                                info!("response: sending network:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(err.to_string(), String::from(""), payload.graph))
+                                            .expect("failed to serialize network:debug response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                        }
                     }
 
                     //TODO group and order handler blocks by capability
