@@ -3150,7 +3150,9 @@ struct TraceStopResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct TraceStopResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:stop instead of trace:error enough?
+struct TraceStopResponsePayload {
+    graph: String,
+} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:stop instead of trace:error enough?
 
 impl Default for TraceStopResponse {
     fn default() -> Self {
@@ -3164,7 +3166,21 @@ impl Default for TraceStopResponse {
 
 impl Default for TraceStopResponsePayload {
     fn default() -> Self {
-        TraceStopResponsePayload {}
+        TraceStopResponsePayload {
+            graph: String::from("default_graph"),
+        }
+    }
+}
+
+impl TraceStopResponse {
+    fn new(graph: String) -> Self {
+        TraceStopResponse {
+            protocol: String::from("trace"),
+            command: String::from("stop"),
+            payload: TraceStopResponsePayload {
+                graph: graph,
+            },
+        }
     }
 }
 
