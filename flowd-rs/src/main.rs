@@ -1772,7 +1772,23 @@ impl Default for NetworkDebugResponse {
 
 impl Default for NetworkDebugResponsePayload {
     fn default() -> Self {
-        NetworkDebugResponsePayload {}
+        NetworkDebugResponsePayload {
+            graph: String::from("default_graph"),
+        }
+    }
+}
+
+impl NetworkDebugResponse {
+    //TODO optimize here we could probably use &str with lifetimes
+    //TODO clarify spec if enable status should be returned, does not seem required
+    fn new(graph: String) -> Self {
+        NetworkDebugResponse {
+            protocol: String::from("network"),
+            command: String::from("debug"),
+            payload: NetworkDebugResponsePayload {
+                graph: graph,
+            },
+        }
     }
 }
 
