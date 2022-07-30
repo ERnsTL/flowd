@@ -793,6 +793,7 @@ struct RuntimeRuntimePayload {
     #[serde(skip)]
     status: NetworkStartedResponsePayload,  // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
+    tracing: bool,  //TODO implement
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -879,6 +880,18 @@ impl RuntimeRuntimePayload {
         //TODO check if the given graph is the currently selected one
         //TODO implement
         self.status.debug = mode;
+        Ok(())
+    }
+
+    fn start_trace(&mut self, graph: &str, bufferSize: u32) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        //TODO keep "started" state somewhere
+        //TODO check if graph is known and is current graph
+        if self.tracing {
+            // wrong state
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("tracing already started")));
+        }
+        self.tracing = true;
         Ok(())
     }
 }
