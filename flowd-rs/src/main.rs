@@ -2212,10 +2212,12 @@ struct GraphClearRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphClearRequestPayload {
-    id: String,   // name of the graph
-    name: String, // human-readable label of the graph
-    library: String,
-    main: bool, // main graph?
+    #[serde(rename = "id")]
+    name: String,   // name of the graph
+    #[serde(rename = "name")]
+    label: String, // human-readable label of the graph
+    library: String,    //TODO clarify spec
+    main: bool, // TODO clarify spec
     icon: String,
     description: String,
     secret: String,
@@ -2230,10 +2232,12 @@ struct GraphClearResponse {
 
 #[derive(Serialize, Debug)]
 struct GraphClearResponsePayload {
-    id: String,   // name of the graph
-    name: String, // human-readable label of the graph
-    library: String,
-    main: bool, // main graph?
+    #[serde(rename = "id")]
+    name: String,   // name of the graph
+    #[serde(rename = "name")]
+    label: String, // human-readable label of the graph
+    library: String,    //TODO clarify spec
+    main: bool, // TODO clarify spec
     icon: String,
     description: String,
 }
@@ -2251,8 +2255,8 @@ impl Default for GraphClearResponse {
 impl Default for GraphClearResponsePayload {
     fn default() -> Self {
         GraphClearResponsePayload {
-            id: String::from("001"),
-            name: String::from("main_graph"),
+            name: String::from("001"),
+            label: String::from("main_graph"),
             library: String::from("main_library"),
             main: true,
             icon: String::from("fa-gbp"),
