@@ -1093,6 +1093,18 @@ impl Default for GraphErrorResponsePayload {
     }
 }
 
+impl GraphErrorResponse {
+    fn new(err: String) -> Self {
+        GraphErrorResponse {
+            protocol: String::from("graph"),
+            command: String::from("error"),
+            payload: GraphErrorResponsePayload {
+                message: err,
+            },
+        }
+    }
+}
+
 // network:error response
 #[derive(Serialize, Debug)]
 struct NetworkErrorResponse {
@@ -2261,6 +2273,24 @@ impl Default for GraphClearResponsePayload {
             main: true,
             icon: String::from("fa-gbp"),
             description: String::from("the main graph"),
+        }
+    }
+}
+
+impl GraphClearResponse {
+    fn new(payload: &GraphClearRequestPayload) -> Self {
+        GraphClearResponse {
+            protocol: String::from("graph"),
+            command: String::from("clear"),
+            payload: GraphClearResponsePayload {
+                //TODO unify GraphClearRequest and GraphClearResponse -> optimize this
+                name: payload.name.clone(),
+                label: payload.label.clone(),
+                library: payload.library.clone(),
+                main: payload.main,
+                icon: payload.icon.clone(),
+                description: payload.description.clone(),
+            },
         }
     }
 }
