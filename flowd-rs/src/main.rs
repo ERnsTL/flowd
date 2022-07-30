@@ -453,15 +453,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::TraceClearRequest(_payload) => {
+                    FBPMessage::TraceClearRequest(payload) => {
                         info!("got trace:clear message");
-                        info!("response: sending trace:clear response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&TraceClearResponse::default())
-                                    .expect("failed to serialize trace:clear response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        //TODO why does Rust require acquiring a write lock here?
+                        //TODO maybe check existence of the graph and if it is the current one out here?
+                        match runtime.write().expect("lock poisoned").clear_trace(payload.graph.as_str()) {
+                            Ok(_) => {
+                                info!("response: sending trace:clear response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&TraceClearResponse::new(payload.graph))
+                                            .expect("failed to serialize trace:clear response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("runtime.tracing_start() failed: {}", err);
+                                info!("response: sending trace:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize trace:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                        }
                     }
 
                     FBPMessage::TraceDumpRequest(_payload) => {
