@@ -68,6 +68,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO NetworkStarted response payload: Format of the time field. Just a String, but what format? ISO8601 or Unixtime? Why is this field neccessary, what is the meaning of it?
 * TODO network:debug request the specification does not specify how to respond in success case. Send back an empty network:debug message? Or filled with some values? Would be useful for correlation if the graph name at least was returned. Returning the new state would also make sense, but if the new state != requested state then a network:error would be returned. So, it looks like it is not neccessary to return the new state. Clarify and put it into the spec.
 * TODO network:debug from a language pespective, the spec only says enable: "whether to enable debug mode". It does not talk about disabling the debug mode. Improve wording.
+* TODO responses for trace:start, trace:stop, trace:clear, trace:dump : Return graph field?
 
 Clarifications for Graph schema:
 
