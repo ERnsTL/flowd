@@ -3082,7 +3082,21 @@ impl Default for TraceStartResponse {
 
 impl Default for TraceStartResponsePayload {
     fn default() -> Self {
-        TraceStartResponsePayload {}
+        TraceStartResponsePayload {
+            graph: String::from("default_graph")
+        }
+    }
+}
+
+impl TraceStartResponse {
+    fn new(graph: String) -> Self {
+        TraceStartResponse {
+            protocol: String::from("trace"),
+            command: String::from("start"),
+            payload: TraceStartResponsePayload {
+                graph: graph.clone(),
+            },
+        }
     }
 }
 
@@ -3237,6 +3251,18 @@ impl Default for TraceErrorResponsePayload {
     fn default() -> Self {
         TraceErrorResponsePayload {
             message: String::from("default trace error message"),
+        }
+    }
+}
+
+impl TraceErrorResponse {
+    fn new(err: String) -> Self {
+        TraceErrorResponse {
+            protocol: String::from("trace"),
+            command: String::from("error"),
+            payload: TraceErrorResponsePayload {
+                message: err,
+            },
         }
     }
 }
