@@ -480,15 +480,30 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::TraceDumpRequest(_payload) => {
+                    FBPMessage::TraceDumpRequest(payload) => {
                         info!("got trace:dump message");
-                        info!("response: sending trace:dump response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&TraceDumpResponse::default())
-                                    .expect("failed to serialize trace:dump response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        //TODO why does Rust require getting a write() on the lock?
+                        match runtime.write().expect("lock poisoned").dump_trace(&payload.graph) {
+                            Ok(dump) => {
+                                info!("response: sending trace:dump response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&TraceDumpResponse::new(payload.graph, dump))
+                                            .expect("failed to serialize trace:dump response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("runtime.dump_trace() failed: {}", err);
+                                info!("response: sending trace:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize trace:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                        }
                     }
 
                     // protocol:runtime
