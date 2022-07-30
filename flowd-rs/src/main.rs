@@ -3314,7 +3314,10 @@ struct TraceDumpResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct TraceDumpResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:dump instead of trace:error enough?
+struct TraceDumpResponsePayload {
+    graph: String,
+    flowtrace: String,  //TODO any better format than String - a data structure?
+} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:dump instead of trace:error enough?
 
 impl Default for TraceDumpResponse {
     fn default() -> Self {
@@ -3328,7 +3331,23 @@ impl Default for TraceDumpResponse {
 
 impl Default for TraceDumpResponsePayload {
     fn default() -> Self {
-        TraceDumpResponsePayload {}
+        TraceDumpResponsePayload {
+            graph: String::from("default_graph"),
+            flowtrace: String::from(""),    //TODO clarify spec: how to indicate an empty tracefile? Does it need "[]" or "{}" at least?
+        }
+    }
+}
+
+impl TraceDumpResponse {
+    fn new(graph: String, dump: String) -> Self {
+        TraceDumpResponse {
+            protocol: String::from("trace"),
+            command: String::from("dump"),
+            payload: TraceDumpResponsePayload {
+                graph: graph,
+                flowtrace: dump,
+            },
+        }
     }
 }
 
