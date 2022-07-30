@@ -439,7 +439,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize trace:stop response"),
                                     ))
                                     .expect("failed to write message into websocket");
-                                    },
+                            },
                             Err(err) => {
                                 error!("runtime.tracing_start() failed: {}", err);
                                 info!("response: sending trace:error response");
@@ -3231,7 +3231,9 @@ struct TraceClearResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct TraceClearResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:clear instead of trace:error enough?
+struct TraceClearResponsePayload {
+    graph: String,
+} //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:clear instead of trace:error enough?
 
 impl Default for TraceClearResponse {
     fn default() -> Self {
@@ -3245,7 +3247,21 @@ impl Default for TraceClearResponse {
 
 impl Default for TraceClearResponsePayload {
     fn default() -> Self {
-        TraceClearResponsePayload {}
+        TraceClearResponsePayload {
+            graph: String::from("default_graph"),
+        }
+    }
+}
+
+impl TraceClearResponse {
+    fn new(graph: String) -> Self {
+        TraceClearResponse {
+            protocol: String::from("trace"),
+            command: String::from("clear"),
+            payload: TraceClearResponsePayload {
+                graph: graph,
+            },
+        }
     }
 }
 
