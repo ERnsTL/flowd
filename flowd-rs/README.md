@@ -73,6 +73,12 @@ TODO Further FBP network protocol clarifications needed:
 * TODO trace:dump is the only trace:* message that has the "type" parameter. Looks like the runtime should just capture everything, but then at the final point, the trace:dump request asks just for a subset of the trace and the runtime has to throw most of the trace data away. -> would make more sense to request the type of dump at the trace:start request and trace:dump retrievies that type of dump. Then the runtime would capture only useful data, would be more efficient, throws nothing away.
 * TODO trace:dump do we have to return the field "type" on the response message? If the could be multiple requests for trace dumps, then for request-response correlation it would make sense. Otherwise, it would be redundant.
 * TODO documentation for trace:dump says "undefined".
+* TODO the documentation of graph:clear says "initialize an empty graph". The wording creates the impression of creating a new graph, but the intention of this message seems to be to clear the current graph? OTOH, the description of the field "id" says: "identifier for the graph being created". How to remove a graph? Also the command "clear" is different from "create" usually.
+* TODO general: why is there often times a parameter "graph" when there are no messages to create, delete or load another graph?
+* TODO inconsistency in graph:clear it is "id" and "name" but described as "human-readable label for the graph being created", but in runtime:runtime it is "id" and "label". Why not call it id+label in both messages? (And additionally, have the "description" field.)
+* TODO graph:clear how to interpret the field "main"? not sure at all.
+* TODO graph:clear the field "library" how to interpret this? format of this component library id? Where do components come from? Who defines the component library, how to add and remove and manage component libraries? Where is this component library stored? Or is this simply implementation-specific and left open? Or is this field meant as "the identifier of this graph if it is used as a component, under what name it should be listed in the component library"?
+* TODO documentation for graph:error is completely missing in the spec
 
 Clarifications for Graph schema:
 
