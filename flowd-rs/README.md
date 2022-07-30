@@ -69,6 +69,10 @@ TODO Further FBP network protocol clarifications needed:
 * TODO network:debug request the specification does not specify how to respond in success case. Send back an empty network:debug message? Or filled with some values? Would be useful for correlation if the graph name at least was returned. Returning the new state would also make sense, but if the new state != requested state then a network:error would be returned. So, it looks like it is not neccessary to return the new state. Clarify and put it into the spec.
 * TODO network:debug from a language pespective, the spec only says enable: "whether to enable debug mode". It does not talk about disabling the debug mode. Improve wording.
 * TODO responses for trace:start, trace:stop, trace:clear, trace:dump : Return graph field?
+* TODO when is a trace:clear and trace:dump allowed? while running or only while stopped? -> add state diagram or similar information to the trace:* messages.
+* TODO trace:dump is the only trace:* message that has the "type" parameter. Looks like the runtime should just capture everything, but then at the final point, the trace:dump request asks just for a subset of the trace and the runtime has to throw most of the trace data away. -> would make more sense to request the type of dump at the trace:start request and trace:dump retrievies that type of dump. Then the runtime would capture only useful data, would be more efficient, throws nothing away.
+* TODO trace:dump do we have to return the field "type" on the response message? If the could be multiple requests for trace dumps, then for request-response correlation it would make sense. Otherwise, it would be redundant.
+* TODO documentation for trace:dump says "undefined".
 
 Clarifications for Graph schema:
 
