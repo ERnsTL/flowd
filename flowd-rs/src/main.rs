@@ -900,13 +900,23 @@ impl RuntimeRuntimePayload {
 
     fn start_trace(&mut self, graph: &str, bufferSize: u32) -> std::result::Result<(), std::io::Error> {
         //TODO implement
-        //TODO keep "started" state somewhere
-        //TODO check if graph is known and is current graph
+        //TODO check if graph exists and is current graph
         if self.tracing {
             // wrong state
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("tracing already started")));
         }
         self.tracing = true;
+        Ok(())
+    }
+
+    fn stop_trace(&mut self, graph: &str) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        //TODO check if graph exists and is current graph
+        if !self.tracing {
+            // wrong state
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("tracing not started")));
+        }
+        self.tracing = false;
         Ok(())
     }
 }
