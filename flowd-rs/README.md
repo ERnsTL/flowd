@@ -79,6 +79,9 @@ TODO Further FBP network protocol clarifications needed:
 * TODO graph:clear how to interpret the field "main"? not sure at all.
 * TODO graph:clear the field "library" how to interpret this? format of this component library id? Where do components come from? Who defines the component library, how to add and remove and manage component libraries? Where is this component library stored? Or is this simply implementation-specific and left open? Or is this field meant as "the identifier of this graph if it is used as a component, under what name it should be listed in the component library"?
 * TODO documentation for graph:error is completely missing in the spec
+* TODO what is the expected numeric range of metadata x and y that is present on graph node and graph inports and outports? Only positive or also negative? What range in each direction?
+* TODO graph:addinport which fields should be sent back to the client?
+* TODO in which graph running state should edge changes and adding and removing inports and outports be allowed? The network is wired and running, after all... how to handle?
 
 Clarifications for Graph schema:
 
