@@ -1,5 +1,6 @@
 #![feature(duration_constants)]
 #![feature(io_error_more)]
+#![feature(map_try_insert)]
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
@@ -2329,7 +2330,7 @@ struct GraphAddnodeRequestPayload {
 
 #[derive(Deserialize, Debug)]
 struct GraphNodeMetadata {
-    x: i32, // TODO check spec: can x be negative? -> i32 or u32
+    x: i32, // TODO check spec: can x and y be negative? -> i32 or u32?
     y: i32,
 }
 
@@ -3511,8 +3512,8 @@ struct GraphPort {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphPortMetadata {
-    x: u32,
-    y: u32,
+    x: i32,
+    y: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3579,6 +3580,20 @@ impl Graph {
         self.processes.clear();
         Ok(())
     }
+
+    fn add_inport(&mut self, name: String, portdef: GraphPort) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should adding an inport be allowed?
+        match self.inports.try_insert(name, portdef) {
+            Ok(_) => {
+                return Ok(());
+            },
+            Err(_) => {
+                //TODO we could pass on the std::collections::hash_map::OccupiedError
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport already exists")));
+            },
+        }
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
@@ -3586,6 +3601,19 @@ impl Default for GraphPropertiesEnvironment {
         GraphPropertiesEnvironment {
             typ: String::from("flowd"), //TODO constant value - optimize
             content: String::from(""), //TODO always empty for flowd - optimize
+        }
+    }
+}
+
+impl From<GraphAddinportRequestPayload> for GraphPort {
+    fn from(payload: GraphAddinportRequestPayload) -> Self {
+        GraphPort { //TODO optimize structure very much the same -> use one for both?
+            process: payload.node,
+            port: payload.port,
+            metadata: GraphPortMetadata {   //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
+                x: payload.metadata.x,
+                y: payload.metadata.y,
+            }
         }
     }
 }
