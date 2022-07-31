@@ -306,15 +306,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .expect("failed to write message into websocket");
                     }
 
-                    FBPMessage::GraphAddinportRequest(_payload) => {
+                    FBPMessage::GraphAddinportRequest(payload) => {
                         info!("got graph:addinport message");
-                        info!("response: sending graph:addinport response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphAddinportResponse::default())
-                                    .expect("failed to serialize graph:addinport response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        //TODO check if graph name matches
+                        //TODO extend to multi-graph functionality, find the correct graph to address
+                        match graph.write().expect("lock poisoned").add_inport(payload.public.clone(), GraphPort::from(payload)) {
+                            Ok(_) => {
+                                info!("response: sending graph:addinport response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphAddinportResponse::default())
+                                            .expect("failed to serialize graph:addinport response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                            Err(err) => {
+                                error!("runtime.dump_trace() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                        }
                     }
 
                     FBPMessage::GraphRemoveinportRequest(_payload) => {
