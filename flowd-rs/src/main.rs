@@ -3615,6 +3615,7 @@ impl Default for GraphPropertiesEnvironment {
     }
 }
 
+//TODO optimize, graph:addinport request payload is very similar to GraphPort -> possible re-use without conversion?
 impl From<GraphAddinportRequestPayload> for GraphPort {
     fn from(payload: GraphAddinportRequestPayload) -> Self {
         GraphPort { //TODO optimize structure very much the same -> use one for both?
