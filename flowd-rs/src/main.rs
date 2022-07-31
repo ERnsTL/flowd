@@ -3657,6 +3657,59 @@ impl Graph {
             },
         }
     }
+
+    fn rename_inport(&mut self, old: String, new: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should manipulating inports be allowed?
+
+        //TODO optimize: both variants work, which is faster?
+        /*
+        method 1:
+        get = contains
+        get+return = remove(incl. get)
+        insert
+
+        method 2:
+        insert(get)
+        get+return = remove
+        */
+        if self.inports.contains_key(&new) {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport already exists")));
+        }
+        match self.inports.remove(&old) {
+            Some(v) => {
+                self.inports.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("inport not found")));
+            }
+        }
+
+
+        //NOTE: below does not work because of "shared reference"
+        /*
+        // get current value
+        let val: GraphPort;
+        if let Some(v) = self.inports.get(old) {
+            val = *v;
+        } else {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("inport not found")));
+        }
+
+        // insert under new key
+        match self.inports.try_insert(new, val) {
+            Ok(_) => {
+                // remove old key
+                self.inports.remove(old).expect("should not happen: could not remove old entry during rename");
+                return Ok(());
+            },
+            Err(err) => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("new key already exists")));
+            }
+        }
+        */
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
