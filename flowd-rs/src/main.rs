@@ -2799,6 +2799,16 @@ impl Default for GraphAddinportResponsePayload {
     }
 }
 
+impl GraphAddinportResponse {
+    fn new() -> Self {
+        GraphAddinportResponse {
+            protocol: String::from("graph"),
+            command: String::from("addinport"),
+            payload: GraphAddinportResponsePayload::default(),  //TODO clarify spec: what values should be sent back?
+        }
+    }
+}
+
 // graph:removeinport -> graph:removeinport | graph:error
 #[derive(Deserialize, Debug)]
 struct GraphRemoveinportRequest {
