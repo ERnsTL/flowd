@@ -321,7 +321,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to write message into websocket");
                                     },
                             Err(err) => {
-                                error!("runtime.dump_trace() failed: {}", err);
+                                error!("graph.add_inport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
                                     .write_message(Message::text(
@@ -357,6 +357,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::GraphAddoutportRequest(_payload) => {
                         info!("got graph:addoutport message");
+                        //TODO check if graph name matches
+                        //TODO multi-graph support
                         info!("response: sending graph:addoutport response");
                         websocket
                             .write_message(Message::text(
@@ -368,6 +370,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::GraphRemoveoutportRequest(_payload) => {
                         info!("got graph:removeoutport message");
+                        //TODO check if graph name matches
+                        //TODO multi-graph support
                         info!("response: sending graph:removeoutport response");
                         websocket
                             .write_message(Message::text(
@@ -379,6 +383,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::GraphRenameoutportRequest(_payload) => {
                         info!("got graph:renameoutport message");
+                        //TODO check if graph name matches
+                        //TODO multi-graph support
                         info!("response: sending graph:renameoutport response");
                         websocket
                             .write_message(Message::text(
@@ -3617,6 +3623,19 @@ impl Graph {
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport already exists")));
+            },
+        }
+    }
+
+    fn remove_inport(&mut self, name: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should removing an inport be allowed?
+        match self.inports.remove(&name) {
+            Some(_) => {
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("inport not found")));
             },
         }
     }
