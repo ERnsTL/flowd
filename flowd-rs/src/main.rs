@@ -3748,6 +3748,19 @@ impl From<GraphAddinportRequestPayload> for GraphPort {
         }
     }
 }
+//TODO optimize, graph:addoutport is also very similar
+impl From<GraphAddoutportRequestPayload> for GraphPort {
+    fn from(payload: GraphAddoutportRequestPayload) -> Self {
+        GraphPort { //TODO optimize structure very much the same -> use one for both?
+            process: payload.node,
+            port: payload.port,
+            metadata: GraphPortMetadata {   //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
+                x: payload.metadata.x,
+                y: payload.metadata.y,
+            }
+        }
+    }
+}
 
 // ----------
 // component library
