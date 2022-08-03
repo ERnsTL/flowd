@@ -3779,6 +3779,26 @@ impl Graph {
         }
         */
     }
+
+    fn rename_outport(&mut self, old: String, new: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should manipulating outports be allowed?
+
+        //TODO optimize: which is faster? see above.
+        if self.outports.contains_key(&new) {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("outport already exists")));
+        }
+        match self.outports.remove(&old) {
+            Some(v) => {
+                self.outports.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("outport not found")));
+            }
+        }
+    }
+}
 }
 
 impl Default for GraphPropertiesEnvironment {
