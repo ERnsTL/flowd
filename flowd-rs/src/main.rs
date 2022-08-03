@@ -3700,6 +3700,19 @@ impl Graph {
         }
     }
 
+    fn remove_outport(&mut self, name: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should removing an outport be allowed?
+        match self.outports.remove(&name) {
+            Some(_) => {
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("outport not found")));
+            },
+        }
+    }
+
     fn rename_inport(&mut self, old: String, new: String) -> Result<(), std::io::Error> {
         //TODO implement
         //TODO in which state should manipulating inports be allowed?
