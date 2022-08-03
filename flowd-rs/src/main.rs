@@ -3654,7 +3654,21 @@ impl Graph {
             },
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport already exists")));
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport with that name already exists")));
+            },
+        }
+    }
+
+    fn add_outport(&mut self, name: String, portdef: GraphPort) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should adding an outport be allowed?
+        match self.outports.try_insert(name, portdef) {
+            Ok(_) => {
+                return Ok(());
+            },
+            Err(_) => {
+                //TODO we could pass on the std::collections::hash_map::OccupiedError
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("outport with that name already exists")));
             },
         }
     }
