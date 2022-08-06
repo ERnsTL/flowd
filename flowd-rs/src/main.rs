@@ -3822,7 +3822,25 @@ impl Graph {
             }
         }
     }
-}
+
+    fn add_node(&mut self, graph: String, component: String, name: String, metadata: GraphNodeMetadata) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change the nodeset?
+        //TODO check graph name and state, multi-graph support
+        let nodedef = GraphNode {
+            component: component,
+            metadata: metadata,
+        };
+        match self.nodes.try_insert(name, nodedef) {
+            Ok(_) => {
+                return Ok(());
+            },
+            Err(_) => {
+                //TODO we could pass on the std::collections::hash_map::OccupiedError
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("node with that name already exists")));
+            },
+        }
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
