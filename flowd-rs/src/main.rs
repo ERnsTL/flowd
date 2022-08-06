@@ -2417,14 +2417,16 @@ struct GraphAddnodeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphAddnodeRequestPayload {
-    id: String,                  // name of the node/process
+    #[serde(rename = "id")]
+    name: String,                  // name of the node/process
     component: String,           // component name to be used for this node/process
     metadata: GraphNodeMetadata, //TODO spec: key-value pairs (with some well-known values)
-    graph: bool,                 // name of the graph
+    graph: String,                 // name of the graph
     secret: String,
 }
 
-#[derive(Deserialize, Debug)]
+// NOTE: Serialize because used in GraphNode -> Graph which needs to be serialized
+#[derive(Serialize, Deserialize, Debug)]
 struct GraphNodeMetadata {
     x: i32, // TODO check spec: can x and y be negative? -> i32 or u32?
     y: i32,
@@ -3588,9 +3590,11 @@ struct Graph {
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
     outports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
-    groups: Vec<GraphGroup>, // TODO for internal representation this should be a hashmap
-    processes: HashMap<String, GraphNodeSpec>,
-    connections: Vec<GraphEdgeSpec>,
+    groups: Vec<GraphGroup>, // TODO for internal representation this should be a hashmap, but if there are few groups a vec might be ok
+    #[serde(rename = "processes")]
+    nodes: HashMap<String, GraphNode>,
+    #[serde(rename = "connections")]
+    edges: Vec<GraphEdgeSpec>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3629,6 +3633,12 @@ struct GraphGroup {
     metadata: GraphGroupMetadata,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphNode {
+    component: String,
+    metadata: GraphNodeMetadata,
+}
+
 impl Graph {
     fn new(name: String, description: String, icon: String) -> Self {
         Graph {
@@ -3642,8 +3652,8 @@ impl Graph {
             inports: HashMap::new(),
             outports: HashMap::new(),
             groups: vec!(),
-            processes: HashMap::new(),
-            connections: vec!(),
+            nodes: HashMap::new(),
+            edges: vec!(),
         }
     }
 
@@ -3680,10 +3690,10 @@ impl Graph {
         //TODO implement some semantics like fields "library", "main" and subgraph feature - also need multiple graph support
         // actually clear
         self.groups.clear();
-        self.connections.clear();
+        self.edges.clear();
         self.inports.clear();
         self.outports.clear();
-        self.processes.clear();
+        self.nodes.clear();
         Ok(())
     }
 
