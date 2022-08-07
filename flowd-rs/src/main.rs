@@ -3856,6 +3856,26 @@ impl Graph {
             },
         }
     }
+
+    fn rename_node(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should manipulating nodes be allowed?
+        //TODO check graph name and state, multi-graph support
+
+        //TODO optimize: which is faster? see above.
+        if self.nodes.contains_key(&new) {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("node with that name already exists")));
+        }
+        match self.nodes.remove(&old) {
+            Some(v) => {
+                self.nodes.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wtf node not found")));  // should not happen either
+            }
+        }
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
