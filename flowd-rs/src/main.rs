@@ -3957,6 +3957,18 @@ impl Graph {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node by that name not found")));
         }
     }
+
+    fn add_edge(&mut self, graph: String, edge: GraphEdge) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change the edgeset?
+        //TODO check graph name and state, multi-graph support
+
+        //TODO check if that edge already exists! There is a dedup(), helpful?
+        //TODO check for OOM by extending first?
+        self.edges.push(edge);
+        //TODO optimize: if it cannot fail, then no need for returning Result
+        Ok(())
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
