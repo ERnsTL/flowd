@@ -321,7 +321,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to write message into websocket");
                             },
                             Err(err) => {
-                                error!("graph.change_node() failed: {}", err);
+                                error!("graph.add_edge() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
                                     .write_message(Message::text(
