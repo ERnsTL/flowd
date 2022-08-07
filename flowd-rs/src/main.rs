@@ -2523,7 +2523,8 @@ struct GraphRernamenodeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphRenamenodeRequestPayload {
-    id: String,
+    from: String,
+    to: String,
     graph: String,
     secret: String,
 }
