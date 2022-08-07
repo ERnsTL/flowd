@@ -3872,6 +3872,20 @@ impl Graph {
         }
     }
 
+    fn remove_node(&mut self, graph: String, name: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should removing a node be allowed?
+        //TODO check graph name, multi-graph support
+        match self.nodes.remove(&name) {
+            Some(_) => {
+                return Ok(());
+            },
+            None => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node not found")));
+            },
+        }
+    }
+
     fn rename_node(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
         //TODO implement
         //TODO in which state should manipulating nodes be allowed?
