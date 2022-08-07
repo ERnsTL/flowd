@@ -232,6 +232,17 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
+                    FBPMessage::GraphRemovenodeRequest(_payload) => {
+                        info!("got graph:removenode message");
+                        info!("response: sending graph:removenode response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&GraphRemovenodeResponse::default())
+                                    .expect("failed to serialize graph:removenode response"),
+                            ))
+                            .expect("failed to write message into websocket");
+                    }
+
                     FBPMessage::GraphRenamenodeRequest(payload) => {
                         info!("got graph:renamenode message");
                         match graph.write().expect("lock poisoned").rename_node(payload.graph, payload.from, payload.to) {
@@ -264,17 +275,6 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .write_message(Message::text(
                                 serde_json::to_string(&GraphChangenodeResponse::default())
                                     .expect("failed to serialize graph:changenode response"),
-                            ))
-                            .expect("failed to write message into websocket");
-                    }
-
-                    FBPMessage::GraphRemovenodeRequest(_payload) => {
-                        info!("got graph:removenode message");
-                        info!("response: sending graph:removenode response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphRemovenodeResponse::default())
-                                    .expect("failed to serialize graph:removenode response"),
                             ))
                             .expect("failed to write message into websocket");
                     }
