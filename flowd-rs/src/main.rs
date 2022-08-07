@@ -3653,7 +3653,7 @@ struct Graph {
     #[serde(rename = "processes")]
     nodes: HashMap<String, GraphNode>,
     #[serde(rename = "connections")]
-    edges: Vec<GraphEdgeSpec>,
+    edges: Vec<GraphEdge>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3696,6 +3696,13 @@ struct GraphGroup {
 struct GraphNode {
     component: String,
     metadata: GraphNodeMetadata,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GraphEdge {
+    source: GraphNodeSpec,
+    target: GraphNodeSpec,
+    metadata: GraphEdgeMetadata,
 }
 
 impl Graph {
