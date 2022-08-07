@@ -83,6 +83,8 @@ TODO Further FBP network protocol clarifications needed:
 * TODO graph:addinport which fields should be sent back to the client?
 * TODO in which graph running state should edge changes and adding and removing inports and outports be allowed? The network is wired and running, after all... how to handle?
 * TODO FBP network protocol calls the message graph:addnode and the node is backed by a component, which makes sense. Whereas the FBP JSON graph spec calls them processes, but a graph contains nodes or components, but processes are a run-time word, but a graph is not a run-time construct. So, the wording is mixed. Non-runtime: Graph with edges and nodes. Nodes are backed by a component (program). Runtime wording: Network of processes (loaded components) with connections that need to be connected and disconnected.
+* TODO graph:changenode detailed behavior: Should only the fields present in the request message be overwritten (but then how to remove previously-set metadata keys?) or should the entire existing metadata block on the node be replaced?
+* TODO graph:changenode request: The fields x and y look like mandatory fields, they are not shown as optional. So, is it mandatory to at least change the x and y fields? But what if the client just wants to change some other field(s)?
 
 Clarifications for Graph schema:
 
