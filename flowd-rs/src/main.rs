@@ -4014,6 +4014,23 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
     }
+
+    fn change_edge(&mut self, graph: String, source: GraphNodeSpec, target: GraphNodeSpec, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change the edgeset?
+        //TODO check graph name and state, multi-graph support
+
+        // find correct index and set metadata
+        //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
+        for (i, edge) in self.edges.iter().enumerate() {
+            if edge.source == source && edge.target == target {
+                //TODO optimize, maybe direct assignment without [i] is possible
+                self.edges[i].metadata = metadata;
+                return Ok(());
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
