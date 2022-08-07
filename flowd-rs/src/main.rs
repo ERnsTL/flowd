@@ -2716,7 +2716,7 @@ struct GraphAddedgeRequestPayload {
     secret: String, // only present in the request payload
 }
 
-//NOTE: PartialEq is for graph.remove_edge()
+//NOTE: PartialEq is for graph.remove_edge() and graph.change_edge()
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct GraphNodeSpec {
     node: String,
