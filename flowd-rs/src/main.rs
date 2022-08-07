@@ -2702,7 +2702,8 @@ struct GraphAddedgeRequestPayload {
     secret: String, // only present in the request payload
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+//NOTE: PartialEq is for graph.remove_edge()
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct GraphNodeSpec {
     node: String,
     port: String,
@@ -3983,6 +3984,21 @@ impl Graph {
         self.edges.push(edge);
         //TODO optimize: if it cannot fail, then no need for returning Result
         Ok(())
+    }
+
+    fn remove_edge(&mut self, graph: String, source: GraphNodeSpec, target: GraphNodeSpec) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change the edgeset?
+        //TODO check graph name and state, multi-graph support
+
+        // find correct index and remove
+        for (i, edge) in self.edges.iter().enumerate() {
+            if edge.source == source && edge.target == target {
+                self.edges.remove(i);
+                return Ok(());
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
     }
 }
 
