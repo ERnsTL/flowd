@@ -307,15 +307,30 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::GraphAddedgeRequest(_payload) => {
+                    FBPMessage::GraphAddedgeRequest(payload) => {
                         info!("got graph:addedge message");
-                        info!("response: sending graph:addedge response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphAddedgeResponse::default())
-                                    .expect("failed to serialize graph:addedge response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        //TODO optimize clone here
+                        match graph.write().expect("lock poisoned").add_edge(payload.graph.clone(), GraphEdge::from(payload)) {
+                            Ok(_) => {
+                                info!("response: sending graph:addedge response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphAddedgeResponse::default())
+                                            .expect("failed to serialize graph:addedge response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("graph.change_node() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                     }
 
                     FBPMessage::GraphRemoveedgeRequest(_payload) => {
