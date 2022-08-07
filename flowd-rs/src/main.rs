@@ -2594,7 +2594,8 @@ struct GraphChangenodeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphChangenodeRequestPayload {
-    id: String,
+    #[serde(rename = "id")]
+    name: String,
     metadata: GraphChangenodeMetadata,
     graph: String,
     secret: String, // if using a single GraphChangenodeMessage struct, this field would be sent in response message
@@ -2604,7 +2605,7 @@ struct GraphChangenodeRequestPayload {
 struct GraphChangenodeMetadata {
     x: i32,
     y: i32,
-    height: u32,   // non-specified
+    height: u32,   // non-specified, but sent by noflo-ui (TODO clarify spec, TODO extend metadata structs to store these)
     width: u32,    // non-specified
     label: String, // non-specified
 }
