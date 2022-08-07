@@ -3920,6 +3920,22 @@ impl Graph {
             }
         }
     }
+
+    fn change_node(&mut self, graph: String, name: String, metadata: GraphChangenodeMetadata) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in which state should manipulating nodes be allowed?
+        //TODO check graph name and state, multi-graph support
+
+        //TODO currently we discard additional fields! -> issue #188
+        //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
+        if let Some(node) = self.nodes.get_mut(&name) { //TODO optimize: borrowing a String here
+            node.metadata.x = metadata.x;
+            node.metadata.y = metadata.y;
+            return Ok(());
+        } else {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node by that name not found")));
+        }
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
