@@ -3995,6 +3995,17 @@ impl From<GraphAddoutportRequestPayload> for GraphPort {
     }
 }
 
+//TODO optimize, make the useless -- actually only the graph field is too much -> filter that out by serde?
+impl From<GraphAddedgeRequestPayload> for GraphEdge {
+    fn from(payload: GraphAddedgeRequestPayload) -> Self {
+        GraphEdge {
+            source: payload.src,
+            target: payload.tgt,
+            metadata: payload.metadata,
+        }
+    }
+}
+
 // ----------
 // component library
 // ----------
