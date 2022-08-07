@@ -2496,7 +2496,8 @@ struct GraphRemovenodeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphRemovenodeRequestPayload {
-    id: String,
+    #[serde(rename = "id")]
+    name: String,
     graph: String,
     secret: String,
 }
