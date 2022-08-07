@@ -82,6 +82,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO what is the expected numeric range of metadata x and y that is present on graph node and graph inports and outports? Only positive or also negative? What range in each direction?
 * TODO graph:addinport which fields should be sent back to the client?
 * TODO in which graph running state should edge changes and adding and removing inports and outports be allowed? The network is wired and running, after all... how to handle?
+* TODO FBP network protocol calls the message graph:addnode and the node is backed by a component, which makes sense. Whereas the FBP JSON graph spec calls them processes, but a graph contains nodes or components, but processes are a run-time word, but a graph is not a run-time construct. So, the wording is mixed. Non-runtime: Graph with edges and nodes. Nodes are backed by a component (program). Runtime wording: Network of processes (loaded components) with connections that need to be connected and disconnected.
 
 Clarifications for Graph schema:
 
