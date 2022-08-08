@@ -89,6 +89,8 @@ TODO Further FBP network protocol clarifications needed:
 * TODO is graph edge metadata (route, schema, secure) just these 3 items or are there additional optional properties allowed like for the other metadata's?
 * TODO graph:addinitial behavior is not fully defined: Is it allowed to add multiple IIPs on one target node+port? (would say yes?) How to behave if removing an IIP: Remove the first match (based on data + target), or the last match, or random? (probably the last match?) Let's say we want IIPs XYXY as IIPs into a process, so we add X, add Y, add X, add Y -> result: XYXY as desired. But when sending graph:removeinitial "X" this could remove the first X or the last X -> resulting in YXY or XYY. Allowing multiple IIPs is useful if a component expects a stream of IPs as input, but we do not have the desired "real" data available and want to send it mock data or test inputs until the component on the input side is programmed and finished. Otherwise, a testdata generator component needs to be connected to the input... easier would be sending multiple IIPs.
 * TODO graph:addinitial seems unneccessary to send the complete data in order to remove the IIP. IIPs are not otherwise addressable. -> would have to make them addressable.
+* TODO graph:addgroup metadata has no ability to set x and y, or at least these are not mentioned. But should be! Positioning is important on the visual programming grid.
+* TODO how are subgraphs (with their own inports and outports) created and referenced in FBP network protocol and in the FBP JSON graph format?
 
 Clarifications for Graph schema:
 
