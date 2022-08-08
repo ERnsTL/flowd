@@ -2906,10 +2906,9 @@ struct GraphAddinitialResponse {
 }
 
 //NOTE: Serialize for graph:addinitial which makes use of the "data" field in graph -> connections -> data according to FBP JSON graph spec.
-#[derive(Serialize, Deserialize, Debug)]
-struct GraphIIPSpec {
-    data: String, // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
-}
+//NOTE: PartialEq are for graph.remove_initialip()
+//#[derive(Serialize, Deserialize, Debug, PartialEq)]
+type GraphIIPSpec = String; // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
 
 #[derive(Serialize, Debug)]
 struct GraphAddinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addinitial instead of graph:error enough?
