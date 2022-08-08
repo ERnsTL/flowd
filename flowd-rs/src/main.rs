@@ -3761,7 +3761,7 @@ struct GraphPortMetadata {
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphGroup {
     name: String,
-    nodes: Vec<GraphNodeSpec>,
+    nodes: Vec<String>, // spec: node IDs (.name)
     metadata: GraphGroupMetadata,
 }
 
