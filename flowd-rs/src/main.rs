@@ -4157,6 +4157,22 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
     }
+
+    fn rename_group(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change node groups?
+        //TODO check graph name and state, multi-graph support
+
+        // find correct index and rename
+        for (i, group) in self.groups.iter().enumerate() {
+            if group.name == old {
+                //TODO is it possible to do directly:  group.name = new  ?
+                self.groups[i].name = new;
+                return Ok(());
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
