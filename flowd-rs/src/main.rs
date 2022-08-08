@@ -4092,6 +4092,23 @@ impl From<GraphAddedgeRequestPayload> for GraphEdge {
         GraphEdge {
             source: payload.src,
             target: payload.tgt,
+            data: None,
+            metadata: payload.metadata,
+        }
+    }
+}
+
+// spec: IIPs are special cases of a graph connection/edge
+impl From<GraphAddinitialRequestPayload> for GraphEdge {
+    fn from(payload: GraphAddinitialRequestPayload) -> Self {
+        GraphEdge {
+            source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
+                node: String::from(""),
+                port: String::from(""),
+                index: String::from(""),
+            },
+            data: Some(payload.src),
+            target: payload.tgt,
             metadata: payload.metadata,
         }
     }
