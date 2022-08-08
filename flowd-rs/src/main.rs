@@ -637,15 +637,29 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::GraphRenamegroupRequest(_payload) => {
+                    FBPMessage::GraphRenamegroupRequest(payload) => {
                         info!("got graph:renamegroup message");
-                        info!("response: sending graph:renamegroup response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphRenamegroupResponse::default())
-                                    .expect("failed to serialize graph:renamegroup response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match graph.write().expect("lock poisoned").rename_group(payload.graph, payload.from, payload.to) {
+                            Ok(_) => {
+                                info!("response: sending graph:renamegroup response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphRenamegroupResponse::default())
+                                            .expect("failed to serialize graph:renamegroup response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                            Err(err) => {
+                                error!("graph.rename_group() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                     }
 
                     FBPMessage::GraphChangegroupRequest(_payload) => {
