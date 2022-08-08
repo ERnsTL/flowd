@@ -4128,6 +4128,21 @@ impl Graph {
         //TODO optimize: if it cannot fail then no need to return Result
         Ok(())
     }
+
+    fn remove_group(&mut self, graph: String, name: String) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change node groups?
+        //TODO check graph name and state, multi-graph support
+
+        // find correct index and remove
+        for (i, group) in self.groups.iter().enumerate() {
+            if group.name == name {
+                self.groups.remove(i);
+                return Ok(());
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
