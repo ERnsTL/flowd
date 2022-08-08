@@ -4182,6 +4182,23 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
     }
+
+    fn change_group(&mut self, graph: String, name: String, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change the groups?
+        //TODO check graph name and state, multi-graph support
+
+        // find correct index and set metadata
+        //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
+        for (i, group) in self.groups.iter().enumerate() {
+            if group.name == name {
+                //TODO optimize, maybe direct assignment without [i] is possible
+                self.groups[i].metadata = metadata;
+                return Ok(());
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
