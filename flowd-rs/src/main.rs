@@ -4111,6 +4111,17 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that data+tgt not found")));
     }
+
+    fn add_group(&mut self, graph: String, name: String, nodes: Vec<String>, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed to change node groups?
+        //TODO check graph name and state, multi-graph support
+        //TODO check nodes if they actually exist; check for duplicates; and node can only be part of a single group
+        //TODO check for OOm by extending first?
+        self.groups.push(GraphGroup { name: name, nodes: nodes, metadata: metadata });
+        //TODO optimize: if it cannot fail then no need to return Result
+        Ok(())
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
