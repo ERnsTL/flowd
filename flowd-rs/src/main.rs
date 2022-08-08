@@ -583,7 +583,24 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 .expect("failed to write message into websocket");
                             },
                             Err(err) => {
-                                error!("graph.rename_inport() failed: {}", err);
+                            },
+                        }
+                    }
+
+                    FBPMessage::GraphAddgroupRequest(payload) => {
+                        info!("got graph:addgroup message");
+                        match graph.write().expect("lock poisoned").add_group(payload.graph, payload.name, payload.nodes, payload.metadata) {
+                            Ok(_) => {
+                                info!("response: sending graph:addgroup response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphAddgroupResponse::default())
+                                            .expect("failed to serialize graph:addgroup response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                            Err(err) => {
+                                error!("graph.add_group() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
                                     .write_message(Message::text(
@@ -591,19 +608,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize graph:error response"),
                                     ))
                                     .expect("failed to write message into websocket");
-                            },
+                            }
                         }
-                    }
-
-                    FBPMessage::GraphAddgroupRequest(_payload) => {
-                        info!("got graph:addgroup message");
-                        info!("response: sending graph:addgroup response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphAddgroupResponse::default())
-                                    .expect("failed to serialize graph:addgroup response"),
-                            ))
-                            .expect("failed to write message into websocket");
                     }
 
                     FBPMessage::GraphRemovegroupRequest(_payload) => {
