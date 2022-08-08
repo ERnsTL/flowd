@@ -2891,9 +2891,10 @@ struct GraphAddinitialResponse {
     payload: GraphAddinitialResponsePayload,
 }
 
-#[derive(Deserialize, Debug)]
+//NOTE: Serialize for graph:addinitial which makes use of the "data" field in graph -> connections -> data according to FBP JSON graph spec.
+#[derive(Serialize, Deserialize, Debug)]
 struct GraphIIPSpec {
-    data: String, // can put JSON object, array, string, number, integer, boolean, null in there
+    data: String, // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
 }
 
 #[derive(Serialize, Debug)]
@@ -3746,6 +3747,7 @@ struct GraphNode {
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdge {
     source: GraphNodeSpec,
+    data: Option<GraphIIPSpec>,
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
 }
