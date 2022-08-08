@@ -662,15 +662,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::GraphChangegroupRequest(_payload) => {
+                    FBPMessage::GraphChangegroupRequest(payload) => {
                         info!("got graph:changegroup message");
-                        info!("response: sending graph:changegroup response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&GraphChangegroupResponse::default())
-                                    .expect("failed to serialize graph:changegroup response"),
-                            ))
-                            .expect("failed to write message into websocket");
+                        match graph.write().expect("lock poisoned").change_group(payload.graph, payload.name, payload.metadata) {
+                            Ok(_) => {
+                                info!("response: sending graph:changegroup response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphChangegroupResponse::default())
+                                            .expect("failed to serialize graph:changegroup response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("graph.change_group() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
+
+
                     }
 
                     // protocol:trace
