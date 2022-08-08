@@ -4048,6 +4048,18 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
     }
+
+    // spec: According to the FBP JSON graph format spec, initial IPs are declared as a special-case of a graph edge in the "connections" part of the graph.
+    fn add_initialip(&mut self, payload: GraphAddinitialRequestPayload) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed do change initial IPs (which are similar to edges)?
+        //TODO check graph name and state, multi-graph support
+
+        //TODO check for OOM by extending first?
+        self.edges.push(GraphEdge::from(payload));
+        //TODO optimize: if it cannot fail, then no need for returning Result
+        Ok(())
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
