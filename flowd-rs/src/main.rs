@@ -4073,6 +4073,30 @@ impl Graph {
         //TODO optimize: if it cannot fail, then no need for returning Result
         Ok(())
     }
+
+    fn remove_initialip(&mut self, payload: GraphRemoveinitialRequestPayload) -> Result<(), std::io::Error> {
+        //TODO implement
+        //TODO in what state is it allowed to change initial IPs (which are similar to edges)?
+        //TODO check graph name and state, multi-graph support
+
+        //TODO clarify spec: should we remove first or last match? currently removing last match
+        for (i, edge) in self.edges.iter().rev().enumerate() {
+            //TODO optimize: match for IIP match first or for target match? Target has more values to compare, but there may be more IIPs than target matches and IIPs might be longer thus more expensive to compare...
+            //TODO optimize the clone here and the GraphIIPSpec
+            // must be an IIP
+            if let Some(thedata) = edge.data.clone() {
+                // IIP data must be the same
+                if thedata == payload.src {
+                    // target must match
+                    if edge.target == payload.tgt {
+                        self.edges.remove(i);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that data+tgt not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
