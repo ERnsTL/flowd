@@ -898,8 +898,9 @@ fn main() {
 //TODO currently panicks if unknown variant
 //TODO currently panicks if field is missing during decoding
 //TODO note messages which are used multiple times
+//NOTE: denying unknown fields to learn them
 #[derive(Deserialize, Debug)]
-#[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
+#[serde(tag = "command", content = "payload", deny_unknown_fields)] //TODO multiple tags: protocol and command
 enum FBPMessage {
     // runtime base -- no capabilities required
     #[serde(rename = "getruntime")]
