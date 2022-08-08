@@ -3427,13 +3427,8 @@ struct GraphChangegroupRequest {
 struct GraphChangegroupRequestPayload {
     graph: String,
     name: String,
-    metadata: GraphChangegroupMetadata,
+    metadata: GraphGroupMetadata,
     secret: String, // only present in the request payload
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct GraphChangegroupMetadata {
-    description: String,
 }
 
 #[derive(Serialize, Debug)]
