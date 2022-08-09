@@ -163,22 +163,27 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::ComponentGetsourceMessage(payload) => {
                         info!("got component:getsource message");
-                        if payload.name == "default_graph" {
-                            info!("response: sending component:source message for graph");
-                            websocket
+                        //TODO multi-graph support (runtime has the info which graph is running currently)
+                        //TODO why does Rust require a write lock here? "cannot borrow data in dereference as mutable"
+                        match graph.write().expect("lock poisoned").get_source(payload.name) {
+                            Ok(source_info) => {
+                                websocket
                                 .write_message(Message::text(
-                                    serde_json::to_string(&ComponentSourceMessage::default_graph())
+                                    serde_json::to_string(&ComponentSourceMessage::new(source_info))
                                         .expect("failed to serialize component:source message"),
                                 ))
                                 .expect("failed to write message into websocket");
-                        } else {
-                            info!("response: sending component:source message for component");
-                            websocket
-                                .write_message(Message::text(
-                                    serde_json::to_string(&ComponentSourceMessage::default())
-                                        .expect("failed to serialize component:source message"),
-                                ))
-                                .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("graph.get_source() failed: {}", err);
+                                info!("response: sending graph:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize graph:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
                         }
                     }
 
