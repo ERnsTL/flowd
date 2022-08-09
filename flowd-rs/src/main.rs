@@ -4223,6 +4223,36 @@ impl Graph {
         }
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
     }
+
+    fn get_source(&mut self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
+        //TODO implement
+        //TODO how to re-compile Rust components?
+        //TODO where to find the source code?
+        //TODO optimize better to acquire read lock once but keep it for whole JSON serialization, or request multiple times but keep it shorter each time?
+        //TODO optimize how often is source for graph requested vs. for components? -> re-order if branches
+        if name == self.properties.name {
+            info!("response: preparing component:source message for graph");
+            return Ok(ComponentSourcePayload {
+                name: name,
+                language: String::from("json"), //TODO clarify spec: what to set here?
+                library: String::from(""), //TODO clarify spec: what to set here?
+                code: serde_json::to_string(self).expect("failed to serialize graph"),
+                tests: String::from("// tests for graph here"), //TODO clarify spec: what to set here?
+            });
+        } else {
+            if let Some(node) = self.nodes.get(&name) { //TODO optimize: &String or name.as_str()?
+                info!("response: preparing component:source message for component");
+                return Ok(ComponentSourcePayload {
+                    name: name,
+                    language: String::from(""), //TODO implement - get info from component library
+                    library: String::from(""),  //TODO implement - get info from component library
+                    code: String::from("// code for component here"),   //TODO implement - get from component library
+                    tests: String::from("// tests for component here"), //TODO where to get the tests from? in what format?
+                });
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component or graph with that name not found")));
+    }
 }
 
 impl Default for GraphPropertiesEnvironment {
