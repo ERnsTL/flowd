@@ -2415,6 +2415,14 @@ impl ComponentSourceMessage {
             payload: ComponentSourcePayload::default_graph(),
         }
     }
+
+    fn new(payload: ComponentSourcePayload) -> Self {
+        ComponentSourceMessage {
+            protocol: String::from("component"),
+            command: String::from("source"),
+            payload: payload,
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
