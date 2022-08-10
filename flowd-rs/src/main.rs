@@ -1307,6 +1307,12 @@ impl RuntimeRuntimePayload {
         //TODO implement Flowtrace format?
         Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
+
+    fn packet(&mut self, payload: &RuntimePacketRequestPayload) -> std::result::Result<(), std::io::Error> {
+        //TODO check if graph exists and if that port actually exists
+        //TODO implement and deliver to destination process
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Debug)]
