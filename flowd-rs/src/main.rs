@@ -828,9 +828,24 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         //TODO print incoming packet
                     }
 
-                    FBPMessage::RuntimePacketsentRequest(_payload) => {
+                    FBPMessage::RuntimePacketsentRequest(payload) => {
                         info!("got runtime:packetsent message");
-                        //TODO print and confirm/correlate to any previously sent packet to the remote runtime
+                        match runtime.write().expect("lock poisoned").packetsent(payload) {
+                            Ok(_) => {
+                                //nothing to send if ok, since this is already a confirmation of a previous runtime:packet that we sent to the remote runtime acting as remote subgraph
+                                info!("response: nothing, but runtime core returned OK");
+                            },
+                            Err(err) => {
+                                error!("runtime.packetsent() failed: {}", err);
+                                info!("response: sending runtime:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&RuntimeErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize runtime:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                     }
 
                     // network:data
