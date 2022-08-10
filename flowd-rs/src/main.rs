@@ -823,7 +823,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize network:edges response"),
                                     ))
                                     .expect("failed to write message into websocket");
-                                    },
+                            },
                             Err(err) => {
                                 error!("runtime.set_debug_edges() failed: {}", err);
                                 info!("response: sending network:error response");
