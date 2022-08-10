@@ -1333,8 +1333,21 @@ impl RuntimeRuntimePayload {
     fn packet(&mut self, payload: &RuntimePacketRequestPayload) -> std::result::Result<(), std::io::Error> {
         //TODO check if graph exists and if that port actually exists
         //TODO implement and deliver to destination process
+        info!("runtime: got a packet: {:?}", payload);
         Ok(())
     }
+
+    //TODO the payload has unusual type -> can we really re-use it? Unify these three: RuntimePacketRequestPayload, RuntimePacketResponsePayload, RuntimePacketsentResponsePayload?
+    fn packetsent(&mut self, payload: RuntimePacketRequestPayload) -> std::result::Result<(), std::io::Error> {
+        //TODO implement
+        //TODO confirm/correlate to any previously sent packet to the remote runtime, remote from list of awaiting packetsent confirmations
+        info!("runtime: got a packetsent confirmation: {:?}", payload);
+        Ok(())
+    }
+
+    //TODO return path: process that sends to an outport -> send to client. TODO clarify spec: which client should receive it?
+
+    //TODO runtime: command to connect an outport to a remote runtime as remote subgraph.
 }
 
 #[derive(Serialize, Debug)]
@@ -1628,6 +1641,7 @@ struct RuntimePacketsentMessage {
 }
 
 impl RuntimePacketsentMessage {
+    //TODO for correctness, we should convert to RuntimePacketsentResponsePayload actually, but they are structurally the same
     fn new(payload: RuntimePacketRequestPayload) -> Self {
         RuntimePacketsentMessage {
             protocol: String::from("runtime"),
