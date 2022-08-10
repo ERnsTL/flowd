@@ -1385,6 +1385,18 @@ impl Default for RuntimeErrorResponsePayload {
     }
 }
 
+impl RuntimeErrorResponse {
+    fn new(msg: String) -> Self {
+        RuntimeErrorResponse {
+            protocol: String::from("runtime"),
+            command: String::from("error"),
+            payload: RuntimeErrorResponsePayload{
+                message: msg,
+            },
+        }
+    }
+}
+
 // graph:error response
 #[derive(Serialize, Debug)]
 struct GraphErrorResponse {
