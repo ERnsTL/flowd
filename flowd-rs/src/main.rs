@@ -812,8 +812,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     }
 
                     // network:data
-                    FBPMessage::NetworkEdgesRequest(_payload) => {
+                    FBPMessage::NetworkEdgesRequest(payload) => {
                         info!("got network:edges message");
+                        //TODO clarify spec: what to do with this message's information?
+                        for edge in payload.edges {
+                            info!("  edge: src={:?} tgt={:?}", edge.src, edge.tgt);
+                        }
                         info!("response: sending network:edges response");
                         websocket
                             .write_message(Message::text(
