@@ -801,8 +801,30 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     }
 
                     // protocol:runtime
-                    FBPMessage::RuntimePacketRequest(_payload) => {
+                    FBPMessage::RuntimePacketRequest(payload) => {
                         info!("got runtime:packet message");
+                        //TODO or maybe better send this to graph?
+                        match runtime.write().expect("lock poisoned").packet(&payload) {
+                            Ok(_) => {
+                                info!("response: sending runtime:packetsent response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&RuntimePacketsentMessage::new(payload))
+                                            .expect("failed to serialize network:packetsent response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            },
+                            Err(err) => {
+                                error!("runtime.packet() failed: {}", err);
+                                info!("response: sending runtime:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&RuntimeErrorResponse::new(err.to_string()))
+                                            .expect("failed to serialize runtime:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
+                        }
                         //TODO print incoming packet
                     }
 
