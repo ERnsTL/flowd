@@ -814,17 +814,31 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // network:data
                     FBPMessage::NetworkEdgesRequest(payload) => {
                         info!("got network:edges message");
-                        //TODO clarify spec: what to do with this message's information?
-                        for edge in payload.edges {
-                            info!("  edge: src={:?} tgt={:?}", edge.src, edge.tgt);
+                        match runtime.write().expect("lock poisoned").set_debug_edges(payload.graph, payload.edges) {
+                            Ok(_) => {
+                                info!("response: sending network:edges response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkEdgesResponse::default())
+                                            .expect("failed to serialize network:edges response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                    },
+                            Err(err) => {
+                                error!("runtime.set_debug_edges() failed: {}", err);
+                                info!("response: sending network:error response");
+                                websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            err.to_string(),
+                                            String::from(""),
+                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                        ))
+                                            .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                            }
                         }
-                        info!("response: sending network:edges response");
-                        websocket
-                            .write_message(Message::text(
-                                serde_json::to_string(&NetworkEdgesResponse::default())
-                                    .expect("failed to serialize network:edges response"),
-                            ))
-                            .expect("failed to write message into websocket");
                     }
 
                     // network:control (?)
@@ -1240,6 +1254,18 @@ impl RuntimeRuntimePayload {
         //TODO check if the given graph is the currently selected one
         //TODO implement
         self.status.debug = mode;
+        Ok(())
+    }
+
+    //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
+    fn set_debug_edges(&mut self, graph: String, edges: Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
+        //TODO clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
+        //TODO implement
+        info!("got following debug edges:");
+        for edge in edges {
+            info!("  edge: src={:?} tgt={:?}", edge.src, edge.tgt);
+        }
+        info!("--- end");
         Ok(())
     }
 
