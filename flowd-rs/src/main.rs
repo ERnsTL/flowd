@@ -1537,7 +1537,7 @@ struct RuntimePacketRequest {
     payload: RuntimePacketRequestPayload,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 struct RuntimePacketRequestPayload {
     port: String,
     event: String, //TODO spec what does this do? format?
@@ -1592,11 +1592,21 @@ impl Default for RuntimePacketResponsePayload {
 }
 
 // runtime:packetsent
-#[derive(Deserialize, Debug)]
-struct RuntimePacketsentRequest {
+#[derive(Deserialize, Serialize, Debug)]
+struct RuntimePacketsentMessage {
     protocol: String,
     command: String,
-    payload: RuntimePacketRequestPayload, //NOTE: this is structurally the same for runtime:packet and runtime:packetsent //TODO spec: missing payload?
+    payload: RuntimePacketRequestPayload, //NOTE: this is structurally the same for runtime:packet and runtime:packetsent //TODO spec: missing payload, no there is even the payload! looks unefficient to send back the payload.
+}
+
+impl RuntimePacketsentMessage {
+    fn new(payload: RuntimePacketRequestPayload) -> Self {
+        RuntimePacketsentMessage {
+            protocol: String::from("runtime"),
+            command: String::from("packetsent"),
+            payload: payload,
+        }
+}
 }
 
 // runtime:ports response
