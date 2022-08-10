@@ -75,10 +75,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                 match fbpmsg {
                     // runtime base
                     FBPMessage::RuntimeGetruntimeMessage(payload) => {
-                        info!(
-                            "got runtime:getruntime message with secret {}",
-                            payload.secret
-                        );
+                        info!("got runtime:getruntime message with secret {}", payload.secret);
                         // send response = runtime:runtime message
                         info!("response: sending runtime:runtime message");
                         websocket
@@ -1204,6 +1201,7 @@ struct RuntimeRuntimePayload {
     #[serde(skip)]
     status: NetworkStartedResponsePayload,  // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
+    #[serde(skip)]
     tracing: bool,  //TODO implement
 }
 
