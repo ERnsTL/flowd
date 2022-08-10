@@ -91,7 +91,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO graph:addinitial seems unneccessary to send the complete data in order to remove the IIP. IIPs are not otherwise addressable. -> would have to make them addressable.
 * TODO graph:addgroup metadata has no ability to set x and y, or at least these are not mentioned. But should be! Positioning is important on the visual programming grid.
 * TODO how are subgraphs (with their own inports and outports) created and referenced in FBP network protocol and in the FBP JSON graph format?
-* TODO network:edges what is the use of this message? It seems to be something about debugging, but there is no behavioral specification how the runtime should respond to it. Also, what the response message should look like / or contain in terms of filled fields.
+* TODO network:edges what is the use of this message? It seems to be something about debugging, but there is no behavioral specification how the runtime should respond to it. Also, what the response message should look like / or contain in terms of filled fields. (This seems explained in network:data capability to listen to certain events happening on select edges. But how to debug / listen to status from components...? have to check.)
 
 Clarifications for Graph schema:
 
