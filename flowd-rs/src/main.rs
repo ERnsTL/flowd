@@ -1242,7 +1242,9 @@ impl Default for RuntimeRuntimePayload {
             namespace: String::from("main"), // namespace of components TODO implement
             repository: String::from("https://github.com/ERnsTL/flowd.git"),  //TODO use this feature of building and saving the graph into a Git repo
             repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and actual version
-            ..Default::default()    // status
+            // runtime values
+            status: NetworkStartedResponsePayload::default(),
+            tracing: false,
         }
     }
 }
