@@ -3884,8 +3884,8 @@ impl TraceErrorResponse {
 //TODO how to serialize/deserialize as object/hashtable in JSON, but use Vec internally? TODO performance tests Vec <-> HashMap.
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")] // spec: for example the field "caseSensitive"
 struct Graph {
-    #[serde(rename = "caseSensitive")]
     case_sensitive: bool, // always true for flowd TODO optimize
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
