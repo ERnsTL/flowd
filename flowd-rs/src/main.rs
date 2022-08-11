@@ -1001,7 +1001,7 @@ fn main() {
 
     //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
-        String::from("main"),
+        String::from("main_graph"),
         String::from("basic description"),
         String::from("usd")
     )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
