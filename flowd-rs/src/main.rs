@@ -109,6 +109,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .expect("failed to write message into websocket");
                             count += 1;
                         }
+                        info!("sent {} component:component responses", count);
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&ComponentComponentsreadyMessage::new(count))
