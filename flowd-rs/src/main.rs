@@ -98,6 +98,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // protocol:component
                     FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
+                        //TODO check secret
                         info!("response: sending component:component message(s) and closing component:componentsready response");
                         let mut count: u32 = 0;
                         for component in components.read().expect("lock poisoned").available.iter() {
@@ -120,6 +121,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::NetworkGetstatusMessage(_payload) => {
                         info!("got network:getstatus message");
+                        //TODO check secret
                         info!("response: sending network:status message");
                         websocket
                             .write_message(Message::text(
@@ -131,6 +133,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::NetworkPersistRequest(_payload) => {
                         info!("got network:persist message");
+                        //TODO check secret
                         // persist and send either network:persist or network:error
                         match runtime.read().expect("lock poisoned").persist() {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
                             Ok(_) => {
@@ -879,6 +882,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // network:control (?)
                     FBPMessage::NetworkStartRequest(_payload) => {
                         info!("got network:start message");
+                        //TODO check secret
                         match runtime.write().expect("lock poisoned").start() {
                             Ok(status) => {
                                 info!("response: sending network:started response");
@@ -908,6 +912,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::NetworkStopRequest(_payload) => {
                         info!("got network:stop message");
+                        //TODO check secret
                         match runtime.write().expect("lock poisoned").stop() {
                             Ok(status) => {
                                 info!("response: sending network:stop response");
