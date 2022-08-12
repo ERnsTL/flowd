@@ -1271,13 +1271,13 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn start(&mut self) -> std::result::Result<(), std::io::Error> {
+    fn start(&mut self) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement
         self.status.time_started = UtcTime(chrono::Utc::now());
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = true;
-        Ok(())
+        Ok(&self.status)
     }
 
     fn stop(&mut self) -> std::result::Result<(), std::io::Error> {
@@ -1308,7 +1308,7 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn start_trace(&mut self, graph: &str, bufferSize: u32) -> std::result::Result<(), std::io::Error> {
+    fn start_trace(&mut self, graph: &str, buffer_size: u32) -> std::result::Result<(), std::io::Error> {
         //TODO implement
         //TODO check if graph exists and is current graph
         if self.tracing {
