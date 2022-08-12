@@ -97,6 +97,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO runtime:packet can also be an output message, meaning a process in the runtime's network sent to the graph's outport and then it should get delivered to "the remote runtime" I guess, the spec just says "to the client", but what if there are multiple clients? Which is the correct client? What is the difference between "client" and "remote runtime"? What is the command of a runtime to "please connect that graph outport to some remote runtime"?
   * TODO Graph schema question: How to store that information "this graph outport should be connected to the remote FBP runtime at example.com:1234 secret xxxx?" (Always possible to do with a TCP socket component, but how to do it properly connecting FBP network protocol runtimes as remote subgraph?)
   * TODO runtime:packet input message, runtime:packet output message and runtime:packetsent ouput messages all look very similar and would create lots of useless network traffic by echoing the full messages back? Is that intended - runtime:packetsent with a simple correlation id would be sufficient?
+* TODO in trace:start message the field "buffersize" should be either camelCase like the runtime:runtime caseSensitive or both casesensitive and buffersize for consistency.
 
 Clarifications for Graph schema:
 
