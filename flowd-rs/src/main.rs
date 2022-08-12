@@ -880,11 +880,11 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStartRequest(_payload) => {
                         info!("got network:start message");
                         match runtime.write().expect("lock poisoned").start() {
-                            Ok(_) => {
+                            Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&NetworkStartedResponse::new(&runtime.read().expect("lock poisoned").status))
+                                        serde_json::to_string(&NetworkStartedResponse::new(&status))
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
