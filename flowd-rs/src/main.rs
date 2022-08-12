@@ -902,18 +902,18 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize network:error response"),
                                     ))
                                     .expect("failed to write message into websocket");
-                                },
+                            },
                         }
                     }
 
                     FBPMessage::NetworkStopRequest(_payload) => {
                         info!("got network:stop message");
                         match runtime.write().expect("lock poisoned").stop() {
-                            Ok(_) => {
+                            Ok(status) => {
                                 info!("response: sending network:stop response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&NetworkStoppedResponse::new(&runtime.read().expect("lock poisoned").status))
+                                        serde_json::to_string(&NetworkStoppedResponse::new(status))
                                             .expect("failed to serialize network:stopped response"),
                                     ))
                                     .expect("failed to write message into websocket");
