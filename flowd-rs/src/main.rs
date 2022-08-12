@@ -696,7 +696,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::TraceStartRequest(payload) => {
                         info!("got trace:start message");
                         //TODO not sure why Rust requires to use a write lock here
-                        match runtime.write().expect("lock poisoned").start_trace(payload.graph.as_str(), payload.buffersize) {
+                        match runtime.write().expect("lock poisoned").start_trace(payload.graph.as_str(), payload.buffer_size) {
                             Ok(_) => {
                                 info!("response: sending trace:start response");
                                 websocket
@@ -3613,7 +3613,8 @@ struct TraceStartRequest {
 #[derive(Deserialize, Debug)]
 struct TraceStartRequestPayload {
     graph: String,
-    buffersize: u32, // spec: size of tracing buffer to keep in bytes
+    #[serde(rename = "buffersize")]
+    buffer_size: u32, // spec: size of tracing buffer to keep in bytes, TODO unconsistent: no camelCase here
     secret: String,  // only present in the request payload
 }
 
