@@ -1280,12 +1280,12 @@ impl RuntimeRuntimePayload {
         Ok(&self.status)
     }
 
-    fn stop(&mut self) -> std::result::Result<(), std::io::Error> {
+    fn stop(&mut self) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = false;    // was started, but not running any more
-        Ok(())
+        Ok(&self.status)
     }
 
     fn debug_mode(&mut self, graph: &str, mode: bool) -> std::result::Result<(), std::io::Error> {
