@@ -22,6 +22,8 @@ use std::collections::HashMap;
 
 use chrono::prelude::*;
 
+use ringbuf::RingBuffer;
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -1004,6 +1006,9 @@ fn main() {
     let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::default()));
     //TODO actually load components
     info!("component library initialized");
+
+    let processes: Arc<ProcessManager> = Arc::new(ProcessManager::default());
+    info!("process manager initialized");
 
     //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
@@ -3892,7 +3897,7 @@ impl TraceErrorResponse {
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")] // spec: for example the field "caseSensitive"
-struct Graph {
+struct Graph<'a> {
     case_sensitive: bool, // always true for flowd TODO optimize
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
@@ -3901,7 +3906,7 @@ struct Graph {
     #[serde(rename = "processes")]
     nodes: HashMap<String, GraphNode>,
     #[serde(rename = "connections")]
-    edges: Vec<GraphEdge>,
+    edges: Vec<GraphEdge<'a>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3947,14 +3952,32 @@ struct GraphNode {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct GraphEdge {
+struct GraphEdge<'a> {
     source: GraphNodeSpec,
     data: Option<GraphIIPSpec>,
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
+
+    // runtime state
+    #[serde(skip)]
+    chan: EdgeBuffer<'a>,
 }
 
-impl Graph {
+struct EdgeBuffer<'a>(RingBuffer<&'a [u8]>);
+
+impl<'a> Default for EdgeBuffer<'_> {
+    fn default() -> Self {
+        EdgeBuffer(RingBuffer::new(8))
+    }
+}
+
+impl<'a> std::fmt::Debug for EdgeBuffer<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TODO")    //TODO implement
+    }
+}
+
+impl Graph<'_> {
     fn new(name: String, description: String, icon: String) -> Self {
         Graph {
             case_sensitive: true, //TODO always true - optimize
@@ -4414,19 +4437,20 @@ impl From<GraphAddoutportRequestPayload> for GraphPort {
 }
 
 //TODO optimize, make the useless -- actually only the graph field is too much -> filter that out by serde?
-impl From<GraphAddedgeRequestPayload> for GraphEdge {
+impl From<GraphAddedgeRequestPayload> for GraphEdge<'_> {
     fn from(payload: GraphAddedgeRequestPayload) -> Self {
         GraphEdge {
             source: payload.src,
             target: payload.tgt,
             data: None,
             metadata: payload.metadata,
+            chan: EdgeBuffer::default(),
         }
     }
 }
 
 // spec: IIPs are special cases of a graph connection/edge
-impl From<GraphAddinitialRequestPayload> for GraphEdge {
+impl From<GraphAddinitialRequestPayload> for GraphEdge<'_> {
     fn from(payload: GraphAddinitialRequestPayload) -> Self {
         GraphEdge {
             source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
@@ -4437,6 +4461,7 @@ impl From<GraphAddinitialRequestPayload> for GraphEdge {
             data: Some(payload.src),
             target: payload.tgt,
             metadata: payload.metadata,
+            chan: EdgeBuffer::default(),
         }
     }
 }
@@ -4451,3 +4476,32 @@ impl From<GraphAddinitialRequestPayload> for GraphEdge {
 struct ComponentLibrary {
     available: Vec<ComponentComponentPayload>,
 }
+
+// ----------
+// components
+// ----------
+
+//TODO decide architecture if using single-thread sync process() or multiple threads and channels
+
+trait Component {
+    fn new() -> Self where Self: Sized;
+    fn process(&mut self, inports: &Vec<GraphPort>, outports: &Vec<GraphPort>);
+}
+
+struct RepeatComponent {}
+
+impl Component for RepeatComponent {
+    fn new() -> Self where Self: Sized {
+        todo!()
+    }
+
+    fn process(&mut self, inports: &Vec<GraphPort>, outports: &Vec<GraphPort>) {
+        todo!()
+    }
+}
+
+// ----------
+// processes
+// ----------
+
+type ProcessManager<'a> = HashMap<String, &'a dyn Component>;

@@ -20,5 +20,7 @@ serde_json = "1.0"
 
 chrono = "0.4"
 
+ringbuf = "0.2.8"
+
 [[bin]]
 name = "flowd-rs"
