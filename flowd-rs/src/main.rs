@@ -3897,7 +3897,7 @@ impl TraceErrorResponse {
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")] // spec: for example the field "caseSensitive"
-struct Graph<'a> {
+struct Graph {
     case_sensitive: bool, // always true for flowd TODO optimize
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
@@ -3906,7 +3906,7 @@ struct Graph<'a> {
     #[serde(rename = "processes")]
     nodes: HashMap<String, GraphNode>,
     #[serde(rename = "connections")]
-    edges: Vec<GraphEdge<'a>>,
+    edges: Vec<GraphEdge>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -3952,32 +3952,14 @@ struct GraphNode {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct GraphEdge<'a> {
+struct GraphEdge {
     source: GraphNodeSpec,
     data: Option<GraphIIPSpec>,
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
-
-    // runtime state
-    #[serde(skip)]
-    chan: EdgeBuffer<'a>,
 }
 
-struct EdgeBuffer<'a>(RingBuffer<&'a [u8]>);
-
-impl<'a> Default for EdgeBuffer<'_> {
-    fn default() -> Self {
-        EdgeBuffer(RingBuffer::new(8))
-    }
-}
-
-impl<'a> std::fmt::Debug for EdgeBuffer<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("TODO")    //TODO implement
-    }
-}
-
-impl Graph<'_> {
+impl Graph {
     fn new(name: String, description: String, icon: String) -> Self {
         Graph {
             case_sensitive: true, //TODO always true - optimize
@@ -4437,20 +4419,19 @@ impl From<GraphAddoutportRequestPayload> for GraphPort {
 }
 
 //TODO optimize, make the useless -- actually only the graph field is too much -> filter that out by serde?
-impl From<GraphAddedgeRequestPayload> for GraphEdge<'_> {
+impl From<GraphAddedgeRequestPayload> for GraphEdge {
     fn from(payload: GraphAddedgeRequestPayload) -> Self {
         GraphEdge {
             source: payload.src,
             target: payload.tgt,
             data: None,
             metadata: payload.metadata,
-            chan: EdgeBuffer::default(),
         }
     }
 }
 
 // spec: IIPs are special cases of a graph connection/edge
-impl From<GraphAddinitialRequestPayload> for GraphEdge<'_> {
+impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
     fn from(payload: GraphAddinitialRequestPayload) -> Self {
         GraphEdge {
             source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
@@ -4461,7 +4442,6 @@ impl From<GraphAddinitialRequestPayload> for GraphEdge<'_> {
             data: Some(payload.src),
             target: payload.tgt,
             metadata: payload.metadata,
-            chan: EdgeBuffer::default(),
         }
     }
 }
@@ -4481,21 +4461,32 @@ struct ComponentLibrary {
 // components
 // ----------
 
-//TODO decide architecture if using single-thread sync process() or multiple threads and channels
+type ProcessInports = HashMap<String, ProcessEdgeSender>;
+type ProcessOutports = HashMap<String, ProcessEdgeReceiver>;
+type ProcessEdgeSender = ringbuf::Consumer<Vec<u8>>;
+type ProcessEdgeReceiver = ringbuf::Producer<Vec<u8>>;
 
 trait Component {
-    fn new() -> Self where Self: Sized;
-    fn process(&mut self, inports: &Vec<GraphPort>, outports: &Vec<GraphPort>);
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSender) -> Self where Self: Sized;
+    fn run(&mut self);
 }
 
-struct RepeatComponent {}
+struct RepeatComponent {
+    inn: ProcessEdgeSender,
+    out: ProcessEdgeReceiver,
+    signals: ProcessEdgeSender,
+}
 
 impl Component for RepeatComponent {
-    fn new() -> Self where Self: Sized {
-        todo!()
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessEdgeSender) -> Self where Self: Sized {
+        RepeatComponent {
+            inn: inports.remove("IN").expect("found no IN inport"),
+            out: outports.remove("OUT").expect("found no OUT outport"),
+            signals: signals,
+        }
     }
 
-    fn process(&mut self, inports: &Vec<GraphPort>, outports: &Vec<GraphPort>) {
+    fn run(&mut self) {
         todo!()
     }
 }
