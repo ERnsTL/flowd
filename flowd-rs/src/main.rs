@@ -4461,24 +4461,25 @@ struct ComponentLibrary {
 // components
 // ----------
 
-type ProcessInports = HashMap<String, ProcessEdgeSender>;
-type ProcessOutports = HashMap<String, ProcessEdgeReceiver>;
-type ProcessEdgeSender = ringbuf::Consumer<Vec<u8>>;
-type ProcessEdgeReceiver = ringbuf::Producer<Vec<u8>>;
+type ProcessInports = HashMap<String, ProcessEdgeSource>;
+type ProcessOutports = HashMap<String, ProcessEdgeSink>;
+type ProcessEdgeSource = ringbuf::Consumer<MessageBuf>;
+type ProcessEdgeSink = ringbuf::Producer<MessageBuf>;
+type MessageBuf = Vec<u8>;
 
 trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSender) -> Self where Self: Sized;
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized;
     fn run(&mut self);
 }
 
 struct RepeatComponent {
-    inn: ProcessEdgeSender,
-    out: ProcessEdgeReceiver,
-    signals: ProcessEdgeSender,
+    inn: ProcessEdgeSource,
+    out: ProcessEdgeSink,
+    signals: ProcessEdgeSource,
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessEdgeSender) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized {
         RepeatComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
@@ -4487,7 +4488,23 @@ impl Component for RepeatComponent {
     }
 
     fn run(&mut self) {
-        todo!()
+        let inn = &mut self.inn;    //TODO optimize
+        let out = &mut self.out;
+        loop {
+            // check signals
+            self.signals.pop_each(|ip| {
+                println!("received ip: {}", String::from_utf8(ip).expect("invalid utf-8"));
+                return true;
+            }, Some(10));
+            // check in port
+            inn.pop_each(|ip| {
+                print!("repeating packet...");
+                out.push(ip).expect("could not push into OUT");
+                println!("done");
+                return true;
+            }, Some(10));
+            println!("-- end of iteration");
+        }
     }
 }
 
