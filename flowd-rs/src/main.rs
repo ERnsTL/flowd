@@ -4493,7 +4493,7 @@ type MessageBuf = Vec<u8>;
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized;
     fn run(&mut self);
-    fn get_metadata(& self) -> ComponentComponentPayload;   // dont need &self on this, but Rust wants it to be dispatchable
+    fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
 
 struct RepeatComponent {
@@ -4531,7 +4531,7 @@ impl Component for RepeatComponent {
         }
     }
 
-    fn get_metadata(&self) -> ComponentComponentPayload {
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("Repeat"),
             description: String::from("Copies data as-is from IN port to OUT port."),
