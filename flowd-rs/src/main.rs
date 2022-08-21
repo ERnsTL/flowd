@@ -4463,6 +4463,7 @@ struct ComponentLibrary {
 
 type ProcessInports = HashMap<String, ProcessEdgeSource>;
 type ProcessOutports = HashMap<String, ProcessEdgeSink>;
+type ProcessEdge = RingBuffer<MessageBuf>;
 type ProcessEdgeSource = ringbuf::Consumer<MessageBuf>;
 type ProcessEdgeSink = ringbuf::Producer<MessageBuf>;
 type MessageBuf = Vec<u8>;
