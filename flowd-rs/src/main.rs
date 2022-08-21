@@ -167,25 +167,55 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::ComponentGetsourceMessage(payload) => {
                         info!("got component:getsource message");
                         //TODO multi-graph support (runtime has the info which graph is running currently)
-                        //TODO why does Rust require a write lock here? "cannot borrow data in dereference as mutable"
-                        match graph.write().expect("lock poisoned").get_source(payload.name) {
-                            Ok(source_info) => {
-                                websocket
-                                .write_message(Message::text(
-                                    serde_json::to_string(&ComponentSourceMessage::new(source_info))
-                                        .expect("failed to serialize component:source message"),
-                                ))
-                                .expect("failed to write message into websocket");
-                            },
-                            Err(err) => {
-                                error!("graph.get_source() failed: {}", err);
-                                info!("response: sending graph:error response");
-                                websocket
+                        //TODO optimize: need 2 locks to get graph source - and it is not the common case
+                        if graph.read().expect("lock poisoned").properties.name == payload.name {
+                            // retrieve graph source
+                            info!("got a request for graph source of {}", &payload.name);
+                            //TODO why does Rust require a write lock here? "cannot borrow data in dereference as mutable"
+                            match graph.write().expect("lock poisoned").get_source(payload.name) {
+                                Ok(source_info) => {
+                                    info!("response: sending component:source message for graph");
+                                    websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
-                                            .expect("failed to serialize graph:error response"),
+                                        serde_json::to_string(&ComponentSourceMessage::new(source_info))
+                                            .expect("failed to serialize component:source message"),
                                     ))
                                     .expect("failed to write message into websocket");
+                                },
+                                Err(err) => {
+                                    error!("graph.get_source() failed: {}", err);
+                                    info!("response: sending graph:error response");
+                                    websocket
+                                        .write_message(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                }
+                            }
+                        } else {
+                            // retrieve component source from component library
+                            info!("got a request for component source of {}", &payload.name);
+                            match components.read().expect("lock poisoned").get_source(payload.name) {
+                                Ok(source_info) => {
+                                    info!("response: sending component:source message for component");
+                                    websocket
+                                    .write_message(Message::text(
+                                        serde_json::to_string(&ComponentSourceMessage::new(source_info))
+                                            .expect("failed to serialize component:source message"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                },
+                                Err(err) => {
+                                    error!("componentlib.get_source() failed: {}", err);
+                                    info!("response: sending graph:error response");
+                                    websocket
+                                        .write_message(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                }
                             }
                         }
                     }
@@ -4354,13 +4384,8 @@ impl Graph {
     }
 
     fn get_source(&mut self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
-        //TODO implement
-        //TODO how to re-compile Rust components?
-        //TODO where to find the source code?
-        //TODO optimize better to acquire read lock once but keep it for whole JSON serialization, or request multiple times but keep it shorter each time?
-        //TODO optimize how often is source for graph requested vs. for components? -> re-order if branches
+        //TODO optimize: the message handler has already checked the graph name outside
         if name == self.properties.name {
-            info!("response: preparing component:source message for graph");
             return Ok(ComponentSourcePayload {
                 name: name,
                 language: String::from("json"), //TODO clarify spec: what to set here?
@@ -4368,19 +4393,8 @@ impl Graph {
                 code: serde_json::to_string(self).expect("failed to serialize graph"),
                 tests: String::from("// tests for graph here"), //TODO clarify spec: what to set here?
             });
-        } else {
-            if let Some(node) = self.nodes.get(&name) { //TODO optimize: &String or name.as_str()?
-                info!("response: preparing component:source message for component");
-                return Ok(ComponentSourcePayload {
-                    name: name,
-                    language: String::from(""), //TODO implement - get info from component library
-                    library: String::from(""),  //TODO implement - get info from component library
-                    code: String::from("// code for component here"),   //TODO implement - get from component library
-                    tests: String::from("// tests for component here"), //TODO where to get the tests from? in what format?
-                });
-            }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component or graph with that name not found")));
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph with that name not found")));
     }
 }
 
@@ -4464,6 +4478,30 @@ impl ComponentLibrary {
         ComponentLibrary {
             available: available,
         }
+    }
+
+    fn get_source(& self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
+        // spec: Name of the component to for which to get source code.
+        // spec: Should contain the library prefix, example: "my-project/SomeComponent"
+        //TODO how to re-compile Rust components? how to meaningfully debug from the web? would need compiler output.
+        //NOTE: components used as nodes in the current graph may be a different set than those that the component libary has available!
+        //TODO optimize: access HashMap by &String or name.as_str()?
+        //TODO optimize: for component:getsource we need to return an array, but for internal purpose a HashMap would be much more efficient
+        //if let Some(node) = self.available.get(&name) {
+        //TODO there is vec.binary_search() and vec.sort_by_key() - maybe as fast as hashmap?
+        for (i, component) in self.available.iter().enumerate() {
+            if component.name == name {
+                return Ok(ComponentSourcePayload {
+                    //TODO implement
+                    name: name,
+                    language: String::from(""), //TODO implement - get real info
+                    library: String::from(""),  //TODO implement - get real info
+                    code: String::from("// code for component here"),   //TODO implement - get real info
+                    tests: String::from("// tests for component here"), //TODO where to get the tests from? in what format?
+                });
+            }
+        }
+        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
     }
 
     fn new_component(name: String) -> Result<Box<dyn Component>, std::io::Error> {
