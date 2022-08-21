@@ -1003,7 +1003,9 @@ fn main() {
     )));
     info!("runtime initialized");
 
-    let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::default()));
+    let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
+        RepeatComponent::get_metadata(),
+    ])));
     //TODO actually load components
     info!("component library initialized");
 
@@ -4458,6 +4460,12 @@ struct ComponentLibrary {
 }
 
 impl ComponentLibrary {
+    fn new(available: Vec<ComponentComponentPayload>) -> Self {
+        ComponentLibrary {
+            available: available,
+        }
+    }
+
     fn new_component(name: String) -> Result<Box<dyn Component>, std::io::Error> {
         //TODO implement - ports are currently totally unconnected
         let inports = ProcessInports::new();
