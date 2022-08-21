@@ -1248,6 +1248,8 @@ struct RuntimeRuntimePayload {
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
     #[serde(skip)]
     tracing: bool,  //TODO implement
+    #[serde(skip)]
+    processes: ProcessManager,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -1290,6 +1292,7 @@ impl Default for RuntimeRuntimePayload {
             // runtime values
             status: NetworkStartedResponsePayload::default(),
             tracing: false,
+            processes: ProcessManager::default(),
         }
     }
 }
@@ -4618,4 +4621,17 @@ impl Component for RepeatComponent {
 // processes
 // ----------
 
-type ProcessManager<'a> = HashMap<String, &'a dyn Component>;
+struct Process {
+    signal: ProcessEdgeSink,    // signalling channel
+    joinhandle: std::thread::JoinHandle<()>,    // for waiting for thread exit TODO what is its generic parameter?
+    //TODO detect process exit
+}
+
+impl std::fmt::Debug for Process {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        //TODO any more useful value to return?
+        f.debug_struct("Process").field("signal", &self.signal.remaining()).finish()
+    }
+}
+
+type ProcessManager = HashMap<String, Process>;
