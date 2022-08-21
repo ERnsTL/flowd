@@ -4508,6 +4508,39 @@ impl Component for RepeatComponent {
             println!("-- end of iteration");
         }
     }
+
+    fn get_metadata(&self) -> ComponentComponentPayload {
+        ComponentComponentPayload {
+            name: String::from("Repeat"),
+            description: String::from("Copies data as-is from IN port to OUT port."),
+            icon: String::from("fa-copy"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("IN"),
+                    allowed_type: String::from("any"),
+                    schema: String::from(""),
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("data to be repeated on outport"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
+                ComponentPort {
+                    name: String::from("OUT"),
+                    allowed_type: String::from("any"),
+                    schema: String::from(""),
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("repeated data from IN port"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+        }
+    }
 }
 
 // ----------
