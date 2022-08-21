@@ -2405,7 +2405,7 @@ impl Default for ComponentComponentPayload {
         ComponentComponentPayload {
             name: String::from("main/Repeat"), //TODO Repeat, Drop, Output required for tests
             description: String::from("description of the Repeat component"),
-            icon: String::from("usd"), //TODO with fa- prefix?
+            icon: String::from("fa-usd"), //TODO with fa- prefix? FontAwesome should not so much be our concern in a new()-like method
             subgraph: false,
             in_ports: vec![],
             out_ports: vec![],
