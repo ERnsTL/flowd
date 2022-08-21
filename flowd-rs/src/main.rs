@@ -101,9 +101,9 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::ComponentListRequest(_payload) => {
                         info!("got component:list message");
                         //TODO check secret
-                        info!("response: sending component:component message(s) and closing component:componentsready response");
                         let mut count: u32 = 0;
                         for component in components.read().expect("lock poisoned").available.iter() {
+                            info!("response: sending component:component message");
                             websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&ComponentComponentMessage::new(&component))
@@ -112,14 +112,15 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             .expect("failed to write message into websocket");
                             count += 1;
                         }
-                        info!("sent {} component:component responses", count);
+                        info!("response: sending component:componentsready response");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&ComponentComponentsreadyMessage::new(count))
                                     .expect("failed to serialize component:componentsready response"),
                             ))
                             .expect("failed to write message into websocket");
-                    }
+                        info!("sent {} component:component responses", count);
+                        }
 
                     FBPMessage::NetworkGetstatusMessage(_payload) => {
                         info!("got network:getstatus message");
