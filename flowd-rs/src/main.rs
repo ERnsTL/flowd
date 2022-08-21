@@ -4,7 +4,7 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
-use std::thread::spawn;
+use std::thread;
 use std::time::Duration;
 
 use tungstenite::handshake::server::{Request, Response};
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 
 use chrono::prelude::*;
 
-use ringbuf::RingBuffer;
+use rtrb::{RingBuffer, PushError, PopError};
 
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
@@ -916,7 +916,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStartRequest(_payload) => {
                         info!("got network:start message");
                         //TODO check secret
-                        match runtime.write().expect("lock poisoned").start() {
+                        match runtime.write().expect("lock poisoned").start(graph.read().expect("lock poisoned")) {
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
@@ -1060,7 +1060,7 @@ fn main() {
         let runtimeref = runtime.clone();
         let componentlibref = componentlib.clone();
         // spawn thread
-        spawn(move || match stream {
+        thread::spawn(move || match stream {
             Ok(stream) => {
                 info!("got a client");
                 if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
@@ -4532,9 +4532,9 @@ impl ComponentLibrary {
 
 type ProcessInports = HashMap<String, ProcessEdgeSource>;
 type ProcessOutports = HashMap<String, ProcessEdgeSink>;
-type ProcessEdge = RingBuffer<MessageBuf>;
-type ProcessEdgeSource = ringbuf::Consumer<MessageBuf>;
-type ProcessEdgeSink = ringbuf::Producer<MessageBuf>;
+type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
+type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
+type ProcessEdgeSink = rtrb::Producer<MessageBuf>;
 type MessageBuf = Vec<u8>;
 
 trait Component {
@@ -4559,9 +4559,11 @@ impl Component for RepeatComponent {
     }
 
     fn run(&mut self) {
+        info!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out;
         loop {
+            info!("Repeat: begin of iteration");
             // check signals
             self.signals.pop_each(|ip| {
                 println!("received ip: {}", String::from_utf8(ip).expect("invalid utf-8"));
@@ -4574,7 +4576,7 @@ impl Component for RepeatComponent {
                 println!("done");
                 return true;
             }, Some(10));
-            println!("-- end of iteration");
+            info!("Repeat: -- end of iteration");
         }
     }
 
