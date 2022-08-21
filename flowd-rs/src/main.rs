@@ -1317,8 +1317,58 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn start(&mut self) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn start(&mut self, graph: std::sync::RwLockReadGuard<Graph>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement
+        //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
+        //TODO implement: what if the name of the node changes? then the process is not found by that name anymore in the process manager
+        for (proc_name, node) in graph.nodes.iter() {
+            info!("setting up node:  name={} component={}", proc_name, node.component);
+            //TODO construct all edges
+            //TODO start processes and hand over correct channel ends
+            //TODO is there anything in .metadata that affects process setup?
+
+            // process' ports
+            //TODO implement process port creation correctly
+            //TODO construct correctly! need to generate all edges and then hook up according to graph definition, including IIPs
+            let (mut sink, mut source) = ProcessEdge::new(7);
+
+            //TODO would be great to have the port name here for diagnostics
+            let mut inports: ProcessInports = ProcessInports::new();
+            inports.insert("IN".to_owned(), source).expect("process inport insert failed");
+
+            //TODO would be great to have the port name here for diagnostics
+            let mut outports: ProcessOutports = ProcessOutports::new();
+            outports.insert("OUT".to_owned(), sink).expect("process outport insert failed");
+
+            // process signal channel
+            let (signalsink, signalsource) = ProcessEdge::new(2);
+
+            // process itself in thread
+            let component_name = node.component.clone();
+            let joinhandle = thread::spawn(move || {
+                info!("this is thread");
+                // component
+                //TODO make it generic instead of if
+                //let component: Component where Component: Sized;
+                match component_name.as_str() {
+                    // core components
+                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
+                    _ => {
+                        //TODO error
+                    }
+                }
+            });
+
+            //###
+
+            // store process signal channel and join handle
+            self.processes.insert(proc_name.clone(), Process {
+                signal: signalsink,
+                joinhandle: joinhandle,
+            });
+        }
+
+        // return status
         self.status.time_started = UtcTime(chrono::Utc::now());
         self.status.graph = self.graph.clone();
         self.status.started = true;
