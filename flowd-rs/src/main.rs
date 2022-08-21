@@ -4471,6 +4471,7 @@ type MessageBuf = Vec<u8>;
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized;
     fn run(&mut self);
+    fn get_metadata(& self) -> ComponentComponentPayload;   // dont need &self on this, but Rust wants it to be dispatchable
 }
 
 struct RepeatComponent {
