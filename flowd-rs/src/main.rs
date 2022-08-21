@@ -4457,6 +4457,28 @@ struct ComponentLibrary {
     available: Vec<ComponentComponentPayload>,
 }
 
+impl ComponentLibrary {
+    fn new_component(name: String) -> Result<Box<dyn Component>, std::io::Error> {
+        //TODO implement - ports are currently totally unconnected
+        let inports = ProcessInports::new();
+        let outports = ProcessOutports::new();
+        let (sink, source) = ProcessEdge::new(7).split();
+        // TODO add dynamically-loaded components as well
+        match name.as_str() {
+            "Repeat" => {
+                return Ok(Box::new(RepeatComponent::new(
+                    inports,
+                    outports,
+                    source,
+                )));
+            },
+            _ => {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
+            }
+        }
+    }
+}
+
 // ----------
 // components
 // ----------
