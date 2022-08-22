@@ -4650,7 +4650,13 @@ impl Component for RepeatComponent {
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.recv() {
-                println!("received ip: {}", String::from_utf8(ip).expect("invalid utf-8"));
+                //TODO optimize string conversions
+                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                // stop signal
+                if ip == "stop".as_bytes().to_vec() {
+                    info!("Repeat: got stop signal, exiting");
+                    break;
+                }
             }
             // check in port
             if let Ok(ip) = inn.pop() {
@@ -4660,6 +4666,7 @@ impl Component for RepeatComponent {
             }
             info!("Repeat: -- end of iteration");
         }
+        info!("Repeat: exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
