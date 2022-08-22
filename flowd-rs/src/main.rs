@@ -1339,11 +1339,15 @@ impl RuntimeRuntimePayload {
 
             //TODO would be great to have the port name here for diagnostics
             let mut inports: ProcessInports = ProcessInports::new();
-            inports.insert("IN".to_owned(), source).expect("process inport insert failed");
+            if let Some(_) = inports.insert("IN".to_owned(), source) {
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process inport insert failed, key exists")));
+            }
 
             //TODO would be great to have the port name here for diagnostics
             let mut outports: ProcessOutports = ProcessOutports::new();
-            outports.insert("OUT".to_owned(), sink).expect("process outport insert failed");
+            if let Some(_) = outports.insert("OUT".to_owned(), sink) {
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process outport insert failed, key exists")));
+            }
 
             // process signal channel
             let (signalsink, signalsource) = std::sync::mpsc::sync_channel(3);
