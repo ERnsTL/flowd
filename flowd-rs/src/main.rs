@@ -4579,7 +4579,7 @@ impl ComponentLibrary {
         //TODO optimize: for component:getsource we need to return an array, but for internal purpose a HashMap would be much more efficient
         //if let Some(node) = self.available.get(&name) {
         //TODO there is vec.binary_search() and vec.sort_by_key() - maybe as fast as hashmap?
-        for (i, component) in self.available.iter().enumerate() {
+        for component in self.available.iter() {
             if component.name == name {
                 return Ok(ComponentSourcePayload {
                     //TODO implement
