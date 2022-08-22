@@ -31,6 +31,7 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     }
 }
 
+//fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, processes: Arc<RwLock<ProcessManager>>) -> Result<()> {
 fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>) -> Result<()> {
     stream
         .set_write_timeout(Some(Duration::SECOND))
@@ -916,7 +917,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStartRequest(_payload) => {
                         info!("got network:start message");
                         //TODO check secret
-                        match runtime.write().expect("lock poisoned").start(graph.read().expect("lock poisoned")) {
+                        //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
+                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned")) {
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
@@ -1040,8 +1042,8 @@ fn main() {
     //TODO actually load components
     info!("component library initialized");
 
-    let processes: Arc<ProcessManager> = Arc::new(ProcessManager::default());
-    info!("process manager initialized");
+    //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
+    //info!("process manager initialized");
 
     //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
@@ -1059,10 +1061,12 @@ fn main() {
         let graphref = graph.clone();
         let runtimeref = runtime.clone();
         let componentlibref = componentlib.clone();
+        //let processesref = processes.clone();
         // spawn thread
         thread::spawn(move || match stream {
             Ok(stream) => {
                 info!("got a client");
+                //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
                 if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
                     match err {
                         Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
@@ -1249,7 +1253,7 @@ struct RuntimeRuntimePayload {
     #[serde(skip)]
     tracing: bool,  //TODO implement
     #[serde(skip)]
-    processes: ProcessManager,
+    processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared)
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -1317,7 +1321,8 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn start(&mut self, graph: std::sync::RwLockReadGuard<Graph>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn start(&mut self, graph: &Graph) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement
         //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
         //TODO implement: what if the name of the node changes? then the process is not found by that name anymore in the process manager
@@ -1341,7 +1346,7 @@ impl RuntimeRuntimePayload {
             outports.insert("OUT".to_owned(), sink).expect("process outport insert failed");
 
             // process signal channel
-            let (signalsink, signalsource) = ProcessEdge::new(2);
+            let (signalsink, signalsource) = std::sync::mpsc::sync_channel(3);
 
             // process itself in thread
             let component_name = node.component.clone();
@@ -4562,7 +4567,7 @@ impl ComponentLibrary {
         //TODO implement - ports are currently totally unconnected
         let inports = ProcessInports::new();
         let outports = ProcessOutports::new();
-        let (sink, source) = ProcessEdge::new(7).split();
+        let (sink, source) = std::sync::mpsc::channel();
         // TODO add dynamically-loaded components as well
         match name.as_str() {
             "Repeat" => {
@@ -4588,10 +4593,12 @@ type ProcessOutports = HashMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
 type ProcessEdgeSink = rtrb::Producer<MessageBuf>;
+type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
+type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
 
 trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized;
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
     fn run(&mut self);
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
@@ -4599,11 +4606,11 @@ trait Component {
 struct RepeatComponent {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
-    signals: ProcessEdgeSource,
+    signals: ProcessSignalSource,
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessEdgeSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
         RepeatComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
@@ -4618,17 +4625,16 @@ impl Component for RepeatComponent {
         loop {
             info!("Repeat: begin of iteration");
             // check signals
-            self.signals.pop_each(|ip| {
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals.recv() {
                 println!("received ip: {}", String::from_utf8(ip).expect("invalid utf-8"));
-                return true;
-            }, Some(10));
+            }
             // check in port
-            inn.pop_each(|ip| {
+            if let Ok(ip) = inn.pop() {
                 print!("repeating packet...");
                 out.push(ip).expect("could not push into OUT");
                 println!("done");
-                return true;
-            }, Some(10));
+            }
             info!("Repeat: -- end of iteration");
         }
     }
@@ -4672,16 +4678,15 @@ impl Component for RepeatComponent {
 // ----------
 
 struct Process {
-    signal: ProcessEdgeSink,    // signalling channel
+    signal: ProcessSignalSink,    // signalling channel, uses mpsc channel which is lower performance but shareable and ok for signalling
     joinhandle: std::thread::JoinHandle<()>,    // for waiting for thread exit TODO what is its generic parameter?
     //TODO detect process exit
 }
 
+type ProcessManager = HashMap<String, Process>;
+
 impl std::fmt::Debug for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        //TODO any more useful value to return?
-        f.debug_struct("Process").field("signal", &self.signal.remaining()).finish()
+        f.debug_struct("Process").field("signal", &self.signal).field("joinhandle", &self.joinhandle).finish()
     }
 }
-
-type ProcessManager = HashMap<String, Process>;
