@@ -1343,7 +1343,7 @@ impl RuntimeRuntimePayload {
             // process' ports
             //TODO implement process port creation correctly
             //TODO construct correctly! need to generate all edges and then hook up according to graph definition, including IIPs
-            let (mut sink, mut source) = ProcessEdge::new(7);
+            let (sink, source) = ProcessEdge::new(7);
 
             //TODO would be great to have the port name here for diagnostics
             let mut inports: ProcessInports = ProcessInports::new();
@@ -1400,7 +1400,7 @@ impl RuntimeRuntimePayload {
         info!("stop: signaling all processes...");
         for (name, proc) in self.processes.iter() {
             info!("stop: signaling {}", name);
-            proc.signal.send("stop".as_bytes().to_vec());   //TODO change to try_send() for reliability
+            proc.signal.send("stop".as_bytes().to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability
         }
         info!("done");
 
