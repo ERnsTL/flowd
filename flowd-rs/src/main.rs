@@ -1386,7 +1386,26 @@ impl RuntimeRuntimePayload {
     }
 
     fn stop(&mut self) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
-        //TODO implement
+        //TODO implement in full detail
+
+        // signal all threads
+        info!("stop: signaling all processes...");
+        for (name, proc) in self.processes.iter() {
+            info!("stop: signaling {}", name);
+            proc.signal.send("stop".as_bytes().to_vec());   //TODO change to try_send() for reliability
+        }
+        info!("done");
+
+        // join all threads
+        //TODO what if one of them wont join? hangs? -> kill, how much time to give?
+        info!("stop: joining all threads...");
+        for (name, proc) in self.processes.drain() {
+            info!("stop: joining {}", name);
+            proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
+        }
+        info!("done");
+
+        // set status
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = false;    // was started, but not running any more
