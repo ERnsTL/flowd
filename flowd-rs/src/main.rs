@@ -1035,6 +1035,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 }
 
 fn main() {
+    println!("flowd {}", env!("CARGO_PKG_VERSION"));
+
     pretty_env_logger::init();
     info!("logging initialized");
 
