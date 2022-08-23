@@ -1046,14 +1046,15 @@ fn main() {
     )));
     info!("runtime initialized");
 
+    //NOTE: is currently located inside the runtime struct above; more notes on the "processes" field there
+    //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
+    //info!("process manager initialized");
+
     let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
         RepeatComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
-
-    //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
-    //info!("process manager initialized");
 
     //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
     let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
