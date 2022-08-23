@@ -1360,6 +1360,23 @@ impl RuntimeRuntimePayload {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process outport insert failed, key exists")));
             }
 
+            // IIP(s) into the process
+            for edge in graph.edges.iter() {
+                if let Some(iip) = &edge.data {
+                    if edge.target.node.as_str() == proc_name.as_str() {
+                        // construct the channel
+                        //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
+                        let (mut sink, source) = ProcessEdge::new(1);
+                        // send IIP
+                        sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
+                        // insert into inports
+                        if let Some(_) = inports.insert(edge.target.port.clone(), source) {
+                            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
+                        }
+                    }
+                }
+            }
+
             // process signal channel
             let (signalsink, signalsource) = std::sync::mpsc::sync_channel(3);
 
