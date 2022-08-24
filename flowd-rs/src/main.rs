@@ -3106,9 +3106,19 @@ impl Default for GraphNodeSpec {
 
 #[derive(Deserialize, Serialize, Debug)]
 struct GraphEdgeMetadata {
-    route: i32, //TODO clarify spec: Route identifier of a graph edge
-    schema: String, //TODO clarify spec: JSON schema associated with a graph edge (TODO check schema)
-    secure: bool, //TODO clarify spec: Whether edge data should be treated as secure
+    route: Option<i32>, //TODO clarify spec: Route identifier of a graph edge
+    schema: Option<String>, //TODO clarify spec: JSON schema associated with a graph edge (TODO check schema)
+    secure: Option<bool>, //TODO clarify spec: Whether edge data should be treated as secure
+}
+
+impl Default for GraphEdgeMetadata {
+    fn default() -> Self {
+        GraphEdgeMetadata { //TODO clarify spec: totally unsure what these mean or if these are sensible defaults or if better to leave fields undefined if no value
+            route: Some(0),
+            schema: Some(String::from("")),
+            secure: Some(false),
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
@@ -3234,7 +3244,7 @@ struct GraphAddinitialRequest {
 struct GraphAddinitialRequestPayload {
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
-    src: GraphIIPSpecNetwork,           //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
+    src: GraphIIPSpecNetwork,   //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
     tgt: GraphNodeSpec,
     secret: String, // only present in the request payload
 }
@@ -4571,7 +4581,7 @@ impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
             },
             data: Some(payload.src.data),   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
             target: payload.tgt,
-            metadata: payload.metadata,
+            metadata: payload.metadata, //TODO defaults may be unsensible -> clarify spec
         }
     }
 }
