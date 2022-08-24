@@ -1337,48 +1337,81 @@ impl RuntimeRuntimePayload {
         //TODO implement
         //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
         //TODO implement: what if the name of the node changes? then the process is not found by that name anymore in the process manager
-        for (proc_name, node) in graph.nodes.iter() {
-            info!("setting up node:  name={} component={}", proc_name, node.component);
-            //TODO construct all edges
-            //TODO start processes and hand over correct channel ends
-            //TODO is there anything in .metadata that affects process setup?
 
-            // process' ports
-            //TODO implement process port creation correctly
-            //TODO construct correctly! need to generate all edges and then hook up according to graph definition, including IIPs
-            let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
+        //TODO check if self.processes.len() == 0 AKA stopped
 
-            //TODO would be great to have the port name here for diagnostics
-            let mut inports: ProcessInports = ProcessInports::new();
-            if let Some(_) = inports.insert("IN".to_owned(), source) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process inport insert failed, key exists")));
-            }
-
-            //TODO would be great to have the port name here for diagnostics
-            let mut outports: ProcessOutports = ProcessOutports::new();
-            if let Some(_) = outports.insert("OUT".to_owned(), sink) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process outport insert failed, key exists")));
-            }
-
-            // IIP(s) into the process
-            for edge in graph.edges.iter() {
-                if let Some(iip) = &edge.data {
-                    if edge.target.node.as_str() == proc_name.as_str() {
-                        // construct the channel
-                        //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
-                        let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_SIGNAL_BUFSIZE);
-                        // send IIP
-                        sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
-                        // insert into inports
-                        if let Some(_) = inports.insert(edge.target.port.clone(), source) {
-                            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
-                        }
-                    }
+        // generate all connections
+        struct ProcPorts {
+            inports: ProcessInports,    // including ports with IIPs
+            outports: ProcessOutports,
+        }
+        impl Default for ProcPorts {
+            fn default() -> Self {
+                ProcPorts {
+                    inports: ProcessInports::new(),
+                    outports: ProcessOutports::new(),
                 }
             }
+        }
+        impl std::fmt::Debug for ProcPorts {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+               f.debug_struct("ProcPorts").field("inports", &self.inports).field("outports", &self.outports).finish()
+            }
+        }
+        let mut ports_all: HashMap<String, ProcPorts> = HashMap::with_capacity(graph.nodes.len());
+        // set up keys
+        for proc_name in graph.nodes.keys().into_iter() {
+            //TODO would be nice to know the name of the process
+            ports_all.try_insert(proc_name.clone(), ProcPorts::default()).expect("preparing edges for process failed: process name already exists");
+        }
+        // fill keys with connections
+        for edge in graph.edges.iter() {
+            if let Some(iip) = &edge.data {
+                // prepare IIP edge
+                info!("preparing edge from IIP to {}.{}", edge.target.node, edge.target.port);
+                //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
+                let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
+                // send IIP
+                sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
+                // insert into inports of target process
+                let targetproc = ports_all.get_mut(&edge.target.node).expect("process IIP target assignment process not found");
+                if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
+                }
+                // assign into outports of source process
+                // nothing to do in case of IIP
+            } else {
+                // prepare edge
+                info!("preparing edge from {}.{} to {}.{}", edge.source.node, edge.source.port, edge.target.node, edge.target.port);
+                let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
-            // process signal channel
-            let (signalsink, signalsource) = std::sync::mpsc::sync_channel(3);
+                // insert into inports of target process
+                let targetproc = ports_all.get_mut(&edge.target.node).expect("process IIP target assignment process not found");
+                if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process target inport insert failed, key exists")));
+                }
+                // assign into outports of source process
+                let sourceproc = ports_all.get_mut(&edge.source.node).expect("process source assignment process not found");
+                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), sink) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
+                }
+            }
+        }
+
+        // generate processes and assign prepared connections
+        for (proc_name, node) in graph.nodes.iter() {
+            info!("setting up node:  name={} component={}", proc_name, node.component);
+            //TODO is there anything in .metadata that affects process setup?
+
+            // get prepared ports for this process
+            let ports_this: ProcPorts = ports_all.remove(proc_name).expect("prepared connections for a node not found, source+target nodes in edges != nodes");
+            //TODO would be great to have the port name here for diagnostics
+            let inports: ProcessInports = ports_this.inports;
+            //TODO would be great to have the port name here for diagnostics
+            let outports: ProcessOutports = ports_this.outports;
+
+            // prepare process signal channel
+            let (signalsink, signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
             // process itself in thread
             let component_name = node.component.clone();
@@ -1396,13 +1429,19 @@ impl RuntimeRuntimePayload {
                 }
             });
 
-            //TODO implement
-
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
                 signal: signalsink,
                 joinhandle: joinhandle,
             });
+        }
+
+        // sanity check
+        if ports_all.len() != 0 {
+            // reset to known state
+            self.processes.clear();
+            // report error
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, String::from("there are ports for processes left over, source+target nodes in edges != nodes")));
         }
 
         // return status
