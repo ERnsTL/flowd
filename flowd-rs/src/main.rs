@@ -1050,8 +1050,10 @@ fn main() {
     //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
     //info!("process manager initialized");
 
+    //NOTE: also add new core components in runtime.start()
     let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
         RepeatComponent::get_metadata(),
+        DropComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1465,6 +1467,7 @@ impl RuntimeRuntimePayload {
                 match component_name.as_str() {
                     // core components
                     "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
+                    "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
                     _ => {
                         //TODO error
                     }
@@ -4774,7 +4777,7 @@ impl Component for RepeatComponent {
             info!("Repeat: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.recv() {
+            if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
@@ -4824,6 +4827,67 @@ impl Component for RepeatComponent {
                     value_default: String::from("")
                 }
             ],
+        }
+    }
+}
+
+struct DropComponent {
+    inn: ProcessEdgeSource,
+    signals: ProcessSignalSource,
+}
+
+impl Component for DropComponent {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+        DropComponent {
+            inn: inports.remove("IN").expect("found no IN inport"),
+            signals: signals,
+        }
+    }
+
+    fn run(&mut self) {
+        info!("Drop is now run()ning!");
+        let inn = &mut self.inn;    //TODO optimize
+        loop {
+            info!("Drop: begin of iteration");
+            // check signals
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals.try_recv() {
+                //TODO optimize string conversions
+                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                // stop signal
+                if ip == "stop".as_bytes().to_vec() {
+                    info!("Drop: got stop signal, exiting");
+                    break;
+                }
+            }
+            // check in port
+            if let Ok(ip) = inn.pop() {
+                print!("dropping packet.");
+            }
+            info!("Drop: -- end of iteration");
+        }
+        info!("Drop: exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("Drop"),
+            description: String::from("Drops all packets received on IN port."),
+            icon: String::from("trash-o"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("IN"),
+                    allowed_type: String::from("any"),
+                    schema: String::from(""),
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("data to be dropped"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![],
         }
     }
 }
