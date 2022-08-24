@@ -4700,7 +4700,8 @@ type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one 
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
 const PROCESSEDGE_BUFSIZE: usize = 7;
-const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 1;
+const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
+const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
