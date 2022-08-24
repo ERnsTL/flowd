@@ -98,6 +98,10 @@ TODO Further FBP network protocol clarifications needed:
   * TODO Graph schema question: How to store that information "this graph outport should be connected to the remote FBP runtime at example.com:1234 secret xxxx?" (Always possible to do with a TCP socket component, but how to do it properly connecting FBP network protocol runtimes as remote subgraph?)
   * TODO runtime:packet input message, runtime:packet output message and runtime:packetsent ouput messages all look very similar and would create lots of useless network traffic by echoing the full messages back? Is that intended - runtime:packetsent with a simple correlation id would be sufficient?
 * TODO in trace:start message the field "buffersize" should be either camelCase like the runtime:runtime caseSensitive or both casesensitive and buffersize for consistency.
+* TODO inconsistency (!) between graph format and graph:addinitial/graph:removeinitial is that the data value is inside "src" object for the FBP network protocol and one level above outside the src for the FBP graph schema! And "src" is not marked as optional in the Graph spec schema!
+* TODO graph:addinitial and graph:removeinitial, here noflo-ui just leaves away the other fields of "src" like so "src":{"data":"bla"} but the Network Protocol does not mention that this is allowed.
+* TODO Graph spec schema: What values should be filled for the "src" fields if "data" is filled?
+* TODO noflo-ui just leaves away the "index" field from "src" and "tgt" fields if it is not indexable, but Network Protocol spec does not say this is optional. And 2nd part of the question: How should this be saved in Graph spec schema-conformant way when noflo-ui does not send "index" field? The index is not optional in neither Network Protocol nor Graph spec.
 
 Clarifications for Graph schema:
 
