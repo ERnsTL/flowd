@@ -926,7 +926,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("got network:start message");
                         //TODO check secret
                         //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
-                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned")) {
+                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned")) {
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
@@ -1333,7 +1333,7 @@ impl RuntimeRuntimePayload {
     }
 
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
-    fn start(&mut self, graph: &Graph) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn start(&mut self, graph: &Graph, components: &ComponentLibrary) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement
         //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
         //TODO implement: what if the name of the node changes? then the process is not found by that name anymore in the process manager
@@ -1399,8 +1399,9 @@ impl RuntimeRuntimePayload {
         }
 
         // generate processes and assign prepared connections
+        let mut found: bool;
         for (proc_name, node) in graph.nodes.iter() {
-            info!("setting up node:  name={} component={}", proc_name, node.component);
+            info!("setting up process name={} component={}", proc_name, node.component);
             //TODO is there anything in .metadata that affects process setup?
 
             // get prepared ports for this process
@@ -1409,6 +1410,47 @@ impl RuntimeRuntimePayload {
             let inports: ProcessInports = ports_this.inports;
             //TODO would be great to have the port name here for diagnostics
             let outports: ProcessOutports = ports_this.outports;
+
+            // check if all ports exist
+            found = false;
+            for component in &components.available {
+                if component.name == node.component {
+                    // check inports
+                    /*
+                    if inports.len() != component.in_ports.len() {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, String::from(format!("unconnected port checking: inport count on component metadata != used in graph for process={} component={}", proc_name, component.name))));
+                    }
+                    */
+                    //TODO this provides the exact port that is missing and allows for checking of required ports
+                    for inport in &component.in_ports {
+                        if !inports.contains_key(&inport.name) {
+                            //TODO check if port is required, maybe add strict checking true/false as parameter
+                            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required port {} for component {}", proc_name, &inport.name, component.name))));
+                        }
+                    }
+
+                    // check outports
+                    /*
+                    if outports.len() != component.out_ports.len() {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, String::from(format!("unconnected port checking: outport count on component metadata != used in graph for process={} component={}", proc_name, component.name))));
+                    }
+                    */
+                    //TODO this provides the exact port that is missing and allows for checking of required ports
+                    for outport in &component.out_ports {
+                        if !outports.contains_key(&outport.name) {
+                            //TODO check if port is required, maybe add strict checking true/false as parameter
+                            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required outport {} on component {}", proc_name, &outport.name, component.name))));
+                        }
+                    }
+
+                    // look no further
+                    break;
+                }
+            }
+            if !found {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("unconnected port checking could not find component in component library")));
+            }
+
 
             // prepare process signal channel
             let (signalsink, signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
