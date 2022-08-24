@@ -3090,7 +3090,8 @@ struct GraphAddedgeRequestPayload {
 struct GraphNodeSpec {
     node: String,
     port: String,
-    index: String, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust?
+    index: Option<String>, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust?
+    //NOTE: noflo-ui leaves index away if it is not an indexable port
 }
 
 impl Default for GraphNodeSpec {
@@ -3098,7 +3099,7 @@ impl Default for GraphNodeSpec {
         GraphNodeSpec {
             node: String::from("Repeater"),
             port: String::from("IN"),
-            index: String::from("1"),
+            index: Some(String::from("1")),
         }
     }
 }
@@ -4563,7 +4564,7 @@ impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
             source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
                 node: String::from(""),
                 port: String::from(""),
-                index: String::from(""),
+                index: Some(String::from("")),  //TODO clarify spec: what to save here when noflo-ui does not send this field?
             },
             data: Some(payload.src),
             target: payload.tgt,
