@@ -1346,7 +1346,7 @@ impl RuntimeRuntimePayload {
             // process' ports
             //TODO implement process port creation correctly
             //TODO construct correctly! need to generate all edges and then hook up according to graph definition, including IIPs
-            let (sink, source) = ProcessEdge::new(7);
+            let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
             //TODO would be great to have the port name here for diagnostics
             let mut inports: ProcessInports = ProcessInports::new();
@@ -1366,7 +1366,7 @@ impl RuntimeRuntimePayload {
                     if edge.target.node.as_str() == proc_name.as_str() {
                         // construct the channel
                         //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
-                        let (mut sink, source) = ProcessEdge::new(1);
+                        let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_SIGNAL_BUFSIZE);
                         // send IIP
                         sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
                         // insert into inports
@@ -4660,6 +4660,8 @@ type ProcessEdgeSink = rtrb::Producer<MessageBuf>;
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
+const PROCESSEDGE_BUFSIZE: usize = 7;
+const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 1;
 
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
