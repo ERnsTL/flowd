@@ -3090,8 +3090,7 @@ struct GraphAddedgeRequestPayload {
 struct GraphNodeSpec {
     node: String,
     port: String,
-    index: Option<String>, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust?
-    //NOTE: noflo-ui leaves index away if it is not an indexable port
+    index: Option<String>, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust? // NOTE: noflo-ui leaves index away if it is not an indexable port
 }
 
 impl Default for GraphNodeSpec {
