@@ -3234,7 +3234,7 @@ struct GraphAddinitialRequest {
 struct GraphAddinitialRequestPayload {
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
-    src: GraphIIPSpec,           //TODO spec: object,array,string,number,integer,boolean,null
+    src: GraphIIPSpecNetwork,           //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
     tgt: GraphNodeSpec,
     secret: String, // only present in the request payload
 }
@@ -3248,8 +3248,10 @@ struct GraphAddinitialResponse {
 
 //NOTE: Serialize for graph:addinitial which makes use of the "data" field in graph -> connections -> data according to FBP JSON graph spec.
 //NOTE: PartialEq are for graph.remove_initialip()
-//#[derive(Serialize, Deserialize, Debug, PartialEq)]
-type GraphIIPSpec = String; // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct GraphIIPSpecNetwork {
+    data: String,   // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
+}
 
 #[derive(Serialize, Debug)]
 struct GraphAddinitialResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addinitial instead of graph:error enough?
@@ -3281,7 +3283,7 @@ struct GraphRemoveinitialRequest {
 #[derive(Deserialize, Debug)]
 struct GraphRemoveinitialRequestPayload {
     graph: String,
-    src: GraphIIPSpec, //TODO spec: object,array,string,number,integer,boolean,null
+    src: GraphIIPSpecNetwork, //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
     tgt: GraphNodeSpec,
     secret: String, // only present in the request payload
 }
@@ -4097,7 +4099,8 @@ struct GraphNode {
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdge {
     source: GraphNodeSpec,
-    data: Option<GraphIIPSpec>,
+    //TODO enable sending of object/hashmap IIPs also, currently allows only string
+    data: Option<String>, // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
 }
@@ -4421,9 +4424,9 @@ impl Graph {
             //TODO optimize: match for IIP match first or for target match? Target has more values to compare, but there may be more IIPs than target matches and IIPs might be longer thus more expensive to compare...
             //TODO optimize the clone here and the GraphIIPSpec
             // must be an IIP
-            if let Some(thedata) = edge.data.clone() {
+            if let Some(iipdata) = &edge.data {
                 // IIP data must be the same
-                if thedata == payload.src {
+                if iipdata.as_str() == payload.src.data.as_str() {
                     // target must match
                     if edge.target == payload.tgt {
                         self.edges.remove(i);
@@ -4566,7 +4569,7 @@ impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
                 port: String::from(""),
                 index: Some(String::from("")),  //TODO clarify spec: what to save here when noflo-ui does not send this field?
             },
-            data: Some(payload.src),
+            data: Some(payload.src.data),   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
             target: payload.tgt,
             metadata: payload.metadata,
         }
