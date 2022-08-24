@@ -1446,6 +1446,7 @@ impl RuntimeRuntimePayload {
                     }
 
                     // look no further
+                    found = true;
                     break;
                 }
             }
@@ -4516,10 +4517,12 @@ impl Graph {
         for (i, edge) in self.edges.iter().rev().enumerate() {
             //TODO optimize: match for IIP match first or for target match? Target has more values to compare, but there may be more IIPs than target matches and IIPs might be longer thus more expensive to compare...
             //TODO optimize the clone here and the GraphIIPSpec
-            // must be an IIP
+            // check for IIP
             if let Some(iipdata) = &edge.data {
                 // IIP data must be the same
-                if iipdata.as_str() == payload.src.data.as_str() {
+                info!("comparing iipdata {} == {} ?", iipdata, payload.src.data);
+                if iipdata.as_bytes() == payload.src.data.as_bytes() {  //TODO optimize, that is supposed to be a string comparison, but .as_str() = .as_str() did not work
+                    info!("yes");
                     // target must match
                     if edge.target == payload.tgt {
                         self.edges.remove(i);
@@ -4662,7 +4665,7 @@ impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
                 port: String::from(""),
                 index: Some(String::from("")),  //TODO clarify spec: what to save here when noflo-ui does not send this field?
             },
-            data: Some(payload.src.data),   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
+            data: if payload.src.data.len() > 0 { Some(payload.src.data) } else { None },   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
             target: payload.tgt,
             metadata: payload.metadata, //TODO defaults may be unsensible -> clarify spec
         }
