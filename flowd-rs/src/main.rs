@@ -174,6 +174,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             // retrieve graph source
                             info!("got a request for graph source of {}", &payload.name);
                             //TODO why does Rust require a write lock here? "cannot borrow data in dereference as mutable"
+                            debug!("source is: {}", graph.write().expect("lock poisoned").get_source(payload.name.clone()).expect("could not get graph source").code);
                             match graph.write().expect("lock poisoned").get_source(payload.name) {
                                 Ok(source_info) => {
                                     info!("response: sending component:source message for graph");
