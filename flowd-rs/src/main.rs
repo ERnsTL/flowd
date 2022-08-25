@@ -1070,17 +1070,18 @@ fn main() {
     let server = TcpListener::bind("localhost:3569").unwrap();
     info!("management listening on localhost:3569");
 
-    for stream in server.incoming() {
-        // create Arc pointers for the new thread
-        let graphref = graph.clone();
-        let runtimeref = runtime.clone();
-        let componentlibref = componentlib.clone();
-        //let processesref = processes.clone();
-        // start thread
-        //TODO add IP address into name, but not available outside here
-        thread::Builder::new().name("client-handler".to_string()).spawn(move || match stream {
-            Ok(stream) => {
-                info!("got a client");
+    for stream_res in server.incoming() {
+        if let Ok(stream) = stream_res {
+            // create Arc pointers for the new thread
+            let graphref = graph.clone();
+            let runtimeref = runtime.clone();
+            let componentlibref = componentlib.clone();
+            //let processesref = processes.clone();
+
+            // start thread
+            // since the thread name can only be 15 characters on Linux and an IP address already has up to 15, the IP address is not in the name
+            thread::Builder::new().name("client-handler".into()).spawn(move || {
+                info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
                 //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
                 if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
                     match err {
@@ -1088,9 +1089,10 @@ fn main() {
                         e => error!("test: {}", e),
                     }
                 }
-            }
-            Err(e) => error!("Error accepting stream: {}", e),
-        }).expect("thread start for connection handler failed");
+            }).expect("thread start for connection handler failed");
+        } else if let Err(e) = stream_res {
+            error!("Error accepting stream: {}", e);
+        }
     }
 }
 
