@@ -923,7 +923,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     }
 
                     // network:control (?)
-                    FBPMessage::NetworkStartRequest(_payload) => {
+                    FBPMessage::NetworkStartRequest(payload) => {
                         info!("got network:start message");
                         //TODO check secret
                         //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
@@ -945,7 +945,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
-                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                            payload.graph
                                         ))
                                             .expect("failed to serialize network:error response"),
                                     ))
