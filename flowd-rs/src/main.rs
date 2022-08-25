@@ -4514,18 +4514,25 @@ impl Graph {
         //TODO in what state is it allowed to change initial IPs (which are similar to edges)?
         //TODO check graph name and state, multi-graph support
 
-        //TODO clarify spec: should we remove first or last match? currently removing last match
-        for (i, edge) in self.edges.iter().rev().enumerate() {
+        //TODO clarify spec: should we remove first or last match? currently removing first match
+        //NOTE: if finding and removing last match first, therefore using self.edges.iter().rev().enumerate(), then rev() reverses the order, but enumerate's index of 0 is the last element!
+        for (i, edge) in self.edges.iter().enumerate() {
             //TODO optimize: match for IIP match first or for target match? Target has more values to compare, but there may be more IIPs than target matches and IIPs might be longer thus more expensive to compare...
             //TODO optimize the clone here and the GraphIIPSpec
             // check for IIP
             if let Some(iipdata) = &edge.data {
                 // IIP data must be the same
-                info!("comparing iipdata {} == {} ?", iipdata, payload.src.data);
+                // for rev() iteration
+                //info!("index {}: comparing iipdata {} == {} ?", self.edges.len()-1-i, iipdata, payload.src.data);
+                // for normal, non-rev() iteration
+                //info!("index {}: comparing iipdata {} == {} ?", i, iipdata, payload.src.data);
                 if iipdata.as_bytes() == payload.src.data.as_bytes() {  //TODO optimize, that is supposed to be a string comparison, but .as_str() = .as_str() did not work
-                    info!("yes");
+                    //info!("yes");
                     // target must match
                     if edge.target == payload.tgt {
+                        // for rev() iteration
+                        //self.edges.remove(self.edges.len()-1-i);
+                        // for normal non-rev() iteration
                         self.edges.remove(i);
                         return Ok(());
                     }
