@@ -1076,8 +1076,9 @@ fn main() {
         let runtimeref = runtime.clone();
         let componentlibref = componentlib.clone();
         //let processesref = processes.clone();
-        // spawn thread
-        thread::spawn(move || match stream {
+        // start thread
+        //TODO add IP address into name, but not available outside here
+        thread::Builder::new().name("client-handler".to_string()).spawn(move || match stream {
             Ok(stream) => {
                 info!("got a client");
                 //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
@@ -1089,7 +1090,7 @@ fn main() {
                 }
             }
             Err(e) => error!("Error accepting stream: {}", e),
-        });
+        }).expect("thread start for connection handler failed");
     }
 }
 
@@ -1461,7 +1462,7 @@ impl RuntimeRuntimePayload {
 
             // process itself in thread
             let component_name = node.component.clone();
-            let joinhandle = thread::spawn(move || {
+            let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
                 info!("this is thread");
                 // component
                 //TODO make it generic instead of if
@@ -1474,7 +1475,7 @@ impl RuntimeRuntimePayload {
                         //TODO error
                     }
                 }
-            });
+            }).expect("thread start failed");
 
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
