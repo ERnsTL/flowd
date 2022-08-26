@@ -4,7 +4,7 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, RwLock};
-use std::thread;
+use std::thread::{self, Thread};
 use std::time::Duration;
 
 use tungstenite::handshake::server::{Request, Response};
@@ -1473,7 +1473,7 @@ impl RuntimeRuntimePayload {
                     "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
                     "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
                     _ => {
-                        //TODO error
+                        error!("unknown component in network start! exiting thread.");
                     }
                 }
             }).expect("thread start failed");
@@ -4753,7 +4753,7 @@ type ProcessInports = HashMap<String, ProcessEdgeSource>;
 type ProcessOutports = HashMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
-type ProcessEdgeSink = rtrb::Producer<MessageBuf>;
+type ProcessEdgeSink = rtrb::Producer<MessageBuf>;  //TODO optimize, make this into a tuple and add some thread wakeup handle as second entry
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
@@ -4790,7 +4790,7 @@ impl Component for RepeatComponent {
             info!("Repeat: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
                 //TODO optimize string conversions
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
@@ -4800,12 +4800,17 @@ impl Component for RepeatComponent {
                 }
             }
             // check in port
-            if let Ok(ip) = inn.pop() {
-                info!("got a packet, repeating...");
-                out.push(ip).expect("could not push into OUT");
-                info!("sent");
+            loop {
+                if let Ok(ip) = inn.pop() {
+                    info!("repeating packet...");
+                    out.push(ip).expect("could not push into OUT");
+                    info!("done");
+                } else {
+                    break;
+                }
             }
             info!("Repeat: -- end of iteration");
+            //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
         }
         info!("Repeat: exiting");
     }
@@ -4864,7 +4869,7 @@ impl Component for DropComponent {
             info!("Drop: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
                 //TODO optimize string conversions
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
@@ -4874,10 +4879,15 @@ impl Component for DropComponent {
                 }
             }
             // check in port
-            if let Ok(_ip) = inn.pop() {
-                info!("got a packet, dropping.");
+            loop {
+                if let Ok(_ip) = inn.pop() {
+                    info!("dropping packet.");
+                } else {
+                    break;
+                }
             }
             info!("Drop: -- end of iteration");
+            //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
         }
         info!("Drop: exiting");
     }
