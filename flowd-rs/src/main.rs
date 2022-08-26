@@ -1346,6 +1346,22 @@ impl RuntimeRuntimePayload {
 
         //TODO check if self.processes.len() == 0 AKA stopped
 
+        //TODO optimize the yield_now() inside the process threads
+        // use [`channel`]s, [`Condvar`]s, [`Mutex`]es or [`join`]
+        // -> https://doc.rust-lang.org/std/sync/index.html
+        // or even basic:  https://doc.rust-lang.org/std/thread/fn.park.html
+        //    -> would have to hand over Arc<ProcessManager> to each process, then it gets the thread handle out of this.
+        //    Problem:  Does not know which process is on the other end, so would also have to hand over the process name on the other end. ugly.
+        // -> better to hand over something that can be pre-generated and cloned = no difference between "sender" and "receiver"
+        // -> https://doc.rust-lang.org/std/sync/struct.Condvar.html
+        // foreach node in graph.nodes: pre-generate condvar + mutex here so that the next foreach over the edges can put it into a tuple on each ProcessEdgeSink
+        // then the sending process can wake up the next process in the graph like a flush() on the according outport
+        // putting in a JoinHandle or Thread is not possible because Rust does not allow creating a "prepared empty" Thread and pre-generating these
+        // more ideas:
+        //  https://stackoverflow.com/questions/37964467/how-to-freeze-a-thread-and-notify-it-from-another
+        //  https://doc.rust-lang.org/std/sync/struct.Condvar.html#method.wait_timeout
+        //  https://github.com/kirillkh/monitor_rs
+
         // generate all connections
         struct ProcPorts {
             inports: ProcessInports,    // including ports with IIPs
