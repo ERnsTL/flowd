@@ -4803,7 +4803,7 @@ impl Component for RepeatComponent {
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out;
         loop {
-            info!("Repeat: begin of iteration");
+            trace!("Repeat: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
@@ -4825,7 +4825,7 @@ impl Component for RepeatComponent {
                     break;
                 }
             }
-            info!("Repeat: -- end of iteration");
+            trace!("Repeat: -- end of iteration");
             //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
         }
         info!("Repeat: exiting");
@@ -4882,7 +4882,7 @@ impl Component for DropComponent {
         info!("Drop is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         loop {
-            info!("Drop: begin of iteration");
+            trace!("Drop: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
@@ -4902,7 +4902,7 @@ impl Component for DropComponent {
                     break;
                 }
             }
-            info!("Drop: -- end of iteration");
+            trace!("Drop: -- end of iteration");
             //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
         }
         info!("Drop: exiting");
