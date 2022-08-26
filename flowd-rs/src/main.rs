@@ -1458,7 +1458,6 @@ impl RuntimeRuntimePayload {
                 return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("unconnected port checking could not find component in component library")));
             }
 
-
             // prepare process signal channel
             let (signalsink, signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
@@ -4802,9 +4801,9 @@ impl Component for RepeatComponent {
             }
             // check in port
             if let Ok(ip) = inn.pop() {
-                print!("repeating packet...");
+                info!("got a packet, repeating...");
                 out.push(ip).expect("could not push into OUT");
-                println!("done");
+                info!("sent");
             }
             info!("Repeat: -- end of iteration");
         }
@@ -4875,8 +4874,8 @@ impl Component for DropComponent {
                 }
             }
             // check in port
-            if let Ok(ip) = inn.pop() {
-                print!("dropping packet.");
+            if let Ok(_ip) = inn.pop() {
+                info!("got a packet, dropping.");
             }
             info!("Drop: -- end of iteration");
         }
