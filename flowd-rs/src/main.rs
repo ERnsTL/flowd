@@ -1570,6 +1570,7 @@ impl RuntimeRuntimePayload {
         for (name, proc) in self.processes.iter() {
             info!("stop: signaling {}", name);
             proc.signal.send("stop".as_bytes().to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability
+            proc.joinhandle.thread().unpark();  // wake up for reception
         }
         info!("done");
 
@@ -1583,6 +1584,7 @@ impl RuntimeRuntimePayload {
         info!("done");
 
         // set status
+        info!("network is shut down.");
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = false;    // was started, but not running any more
