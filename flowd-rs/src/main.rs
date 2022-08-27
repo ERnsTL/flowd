@@ -1515,9 +1515,10 @@ impl RuntimeRuntimePayload {
                     let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
                     let joinhandles_tmp = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
                     let thr = joinhandles_tmp.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
-                    outport.1.wakeup = Some(thr.clone());
+                    outport.1.wakeup = Some(thr.clone());   // before this was None, now replaced with Some(Thread)
+                    outport.1.proc_name = None; // before this was Some(String), now replaced with None
                 }
-                drop(joinhandlesref);
+                drop(joinhandlesref);   // not needed anymore, we got the handles
 
                 // component
                 //TODO make it generic instead of if
