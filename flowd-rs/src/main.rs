@@ -1346,7 +1346,7 @@ impl RuntimeRuntimePayload {
 
         //TODO check if self.processes.len() == 0 AKA stopped
 
-        //TODO optimize the yield_now() inside the process threads
+        //TODO optimize thread sync and packet transfer
         // use [`channel`]s, [`Condvar`]s, [`Mutex`]es or [`join`]
         // -> https://doc.rust-lang.org/std/sync/index.html
         // or even basic:  https://doc.rust-lang.org/std/thread/fn.park.html
@@ -1372,14 +1372,18 @@ impl RuntimeRuntimePayload {
         // -> batching would make sense. but only the producer knows how much how big its batch is and how many it will produce in the next time units.
         // but batching increases latency 
 
-        // TODO build another edge data structure mentioning the name of the process
-        // all threads get their variables moved including the Arc<Lock<Process>>
-        // park
-        // start() finishes adding all processes
-        // start() unparks all processes
-        // the worker threads set the handles
-        // starts the inner component
-        // ... or we put it generally into Some(Thread) - yes
+        // How thread sync is currently done:
+        // 1. during edge generation, for each outport, save the process name in a separate data structure
+        // 2. start the threads, hand them over the thread handles hashmap, but first thing they do is park
+        // 3. network start (= this fn) starts all threads for the FBP processes and stores their threads handles in the thread handles hashmap where key = FBP process name
+        //    -> now all thread handles are complete in the hashmap
+        // 4. then unpark/wake all threads,
+        // 5. each thread replaces the FBP process name on its outports with the thread handle, then drops the Arc ref to the thread handles hashmap
+        // 6. each thread instantiates its component and calls run()
+        // 7. each component gets the thread handle and stores it for wake-up after it sent a packet on the outport
+        //    -> each component can decide when it will wake the next FBP process (after first packet, after a few have been generated or when it is done for the iteration or when the channel is full etc.)
+
+        //TODO optimize: check performance, maybe this could be done easier using the signal channel sending (), but since the thread_handle already has blocking feature built-in...
 
         // generate all connections
         struct ProcPorts {
@@ -1393,7 +1397,7 @@ impl RuntimeRuntimePayload {
                     outports: ProcessOutports::new(),
                 }
             }
-        }//###
+        }
         impl std::fmt::Debug for ProcPorts {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                f.debug_struct("ProcPorts").field("inports", &self.inports).field("outports", &self.outports).finish()
@@ -1433,14 +1437,14 @@ impl RuntimeRuntimePayload {
                 }
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.node).expect("process source assignment process not found");
-                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.node.clone()) } ) {//###
+                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.node.clone()) } ) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
                 }
             }
         }
 
         // generate processes and assign prepared connections
-        let mut joinhandles: Arc<HashMap<String, Thread>> = Arc::new(HashMap::new());
+        let thread_handles: Arc<std::sync::Mutex<HashMap<String, Thread>>> = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let mut found: bool;
         for (proc_name, node) in graph.nodes.iter() {
             info!("setting up process name={} component={}", proc_name, node.component);
@@ -1499,9 +1503,9 @@ impl RuntimeRuntimePayload {
 
             // process itself in thread
             let component_name = node.component.clone();
-            let joinhandlesref = joinhandles.clone();
+            let joinhandlesref = thread_handles.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
-                info!("this is thread, waiting for Thread replacement");
+                info!("this is process thread, waiting for Thread replacement");
                 thread::park();
                 info!("replacing Thread objects and starting component");
 
@@ -1509,7 +1513,8 @@ impl RuntimeRuntimePayload {
                 // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
                 for outport in outports.iter_mut() {
                     let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
-                    let thr = joinhandlesref.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
+                    let joinhandles_tmp = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
+                    let thr = joinhandles_tmp.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
                     outport.1.wakeup = Some(thr.clone());
                 }
                 drop(joinhandlesref);
@@ -1527,6 +1532,8 @@ impl RuntimeRuntimePayload {
                 }
             }).expect("thread start failed");
 
+            // store thread handle for wakeup in components
+            thread_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
                 signal: signalsink,
@@ -4842,15 +4849,15 @@ impl Component for RepeatComponent {
     }
 
     fn run(&mut self) {
-        info!("Repeat is now run()ning!");
+        debug!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
-            trace!("Repeat: begin of iteration");
+            debug!("Repeat: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
+            if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
@@ -4864,13 +4871,14 @@ impl Component for RepeatComponent {
                 if let Ok(ip) = inn.pop() {
                     info!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
+                    out_wakeup.unpark();
                     info!("done");
                 } else {
                     break;
                 }
             }
-            trace!("Repeat: -- end of iteration");
-            //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
+            debug!("Repeat: -- end of iteration");
+            thread::park();
         }
         info!("Repeat: exiting");
     }
@@ -4923,13 +4931,12 @@ impl Component for DropComponent {
     }
 
     fn run(&mut self) {
-        info!("Drop is now run()ning!");
+        debug!("Drop is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         loop {
-            trace!("Drop: begin of iteration");
+            debug!("Drop: begin of iteration");
             // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.recv_timeout(Duration::SECOND) {
+            if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
@@ -4941,13 +4948,13 @@ impl Component for DropComponent {
             // check in port
             loop {
                 if let Ok(_ip) = inn.pop() {
-                    info!("dropping packet.");
+                    info!("got a packet, dropping it.");
                 } else {
                     break;
                 }
             }
-            trace!("Drop: -- end of iteration");
-            //std::thread::yield_now();   //TODO optimize, see https://doc.rust-lang.org/std/thread/fn.yield_now.html and network start()
+            debug!("Drop: -- end of iteration");
+            thread::park();
         }
         info!("Drop: exiting");
     }
