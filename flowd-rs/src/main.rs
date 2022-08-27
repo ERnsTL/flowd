@@ -1358,9 +1358,28 @@ impl RuntimeRuntimePayload {
         // then the sending process can wake up the next process in the graph like a flush() on the according outport
         // putting in a JoinHandle or Thread is not possible because Rust does not allow creating a "prepared empty" Thread and pre-generating these
         // more ideas:
-        //  https://stackoverflow.com/questions/37964467/how-to-freeze-a-thread-and-notify-it-from-another
-        //  https://doc.rust-lang.org/std/sync/struct.Condvar.html#method.wait_timeout
-        //  https://github.com/kirillkh/monitor_rs
+        //   https://stackoverflow.com/questions/37964467/how-to-freeze-a-thread-and-notify-it-from-another
+        //   https://doc.rust-lang.org/std/sync/struct.Condvar.html#method.wait_timeout
+        //   https://github.com/kirillkh/monitor_rs
+        // what is the difference in cost between mutex+condvar, SyncChannel<()> and thread.park?
+        // We need a sync mechanism that is SPSC, where the writer blocks if full, the reader blocks if empty and CPU-free waiting
+        // General question: Should the Component be dumb and its process() be called to work off any packets (easy case in terms of thread sync)
+        //   or should the Component be in control? Yes, because it might have external dependencies that have different timing than the FBP network (connections to external services etc.) so it must be able to manage itself
+        //   -> we need a way for the Component to receive a wakeup call, but that does nothing if it is already actively processing messages = no cluttering with () wakeups, so it must be a capacity 1 channel that does not block the sender if full. only full bounded connection buffer should block. Hm, but sending could already block before it has any chance to wake up the next process.
+        //   -> so the sending mechanism and the wakeup mechanism must be the same thing (or it can be 2 separate things inside, but it must be 1 call from the sender's perspective)
+        // sending first packet of 10 should already wake the receiver.
+        // but what if the sender is slower at producing than the receiver at consuming than the receiver?
+        // -> batching would make sense. but only the producer knows how much how big its batch is and how many it will produce in the next time units.
+        // but batching increases latency 
+
+        // TODO build another edge data structure mentioning the name of the process
+        // all threads get their variables moved including the Arc<Lock<Process>>
+        // park
+        // start() finishes adding all processes
+        // start() unparks all processes
+        // the worker threads set the handles
+        // starts the inner component
+        // ... or we put it generally into Some(Thread) - yes
 
         // generate all connections
         struct ProcPorts {
@@ -1374,7 +1393,7 @@ impl RuntimeRuntimePayload {
                     outports: ProcessOutports::new(),
                 }
             }
-        }
+        }//###
         impl std::fmt::Debug for ProcPorts {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                f.debug_struct("ProcPorts").field("inports", &self.inports).field("outports", &self.outports).finish()
@@ -1414,13 +1433,14 @@ impl RuntimeRuntimePayload {
                 }
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.node).expect("process source assignment process not found");
-                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), sink) {
+                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.node.clone()) } ) {//###
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
                 }
             }
         }
 
         // generate processes and assign prepared connections
+        let mut joinhandles: Arc<HashMap<String, Thread>> = Arc::new(HashMap::new());
         let mut found: bool;
         for (proc_name, node) in graph.nodes.iter() {
             info!("setting up process name={} component={}", proc_name, node.component);
@@ -1431,7 +1451,7 @@ impl RuntimeRuntimePayload {
             //TODO would be great to have the port name here for diagnostics
             let inports: ProcessInports = ports_this.inports;
             //TODO would be great to have the port name here for diagnostics
-            let outports: ProcessOutports = ports_this.outports;
+            let mut outports: ProcessOutports = ports_this.outports;
 
             // check if all ports exist
             found = false;
@@ -1479,8 +1499,21 @@ impl RuntimeRuntimePayload {
 
             // process itself in thread
             let component_name = node.component.clone();
+            let joinhandlesref = joinhandles.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
-                info!("this is thread");
+                info!("this is thread, waiting for Thread replacement");
+                thread::park();
+                info!("replacing Thread objects and starting component");
+
+                // replace all process names with Thread handles
+                // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
+                for outport in outports.iter_mut() {
+                    let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
+                    let thr = joinhandlesref.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
+                    outport.1.wakeup = Some(thr.clone());
+                }
+                drop(joinhandlesref);
+
                 // component
                 //TODO make it generic instead of if
                 //let component: Component where Component: Sized;
@@ -1507,6 +1540,11 @@ impl RuntimeRuntimePayload {
             self.processes.clear();
             // report error
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, String::from("there are ports for processes left over, source+target nodes in edges != nodes")));
+        }
+
+        // unpark all processes since all joinhandles are now known and so that they can replace the process names with the join handles and instantiate their components
+        for proc in self.processes.iter() {
+            proc.1.joinhandle.thread().unpark();
         }
 
         // return status
@@ -4769,7 +4807,12 @@ type ProcessInports = HashMap<String, ProcessEdgeSource>;
 type ProcessOutports = HashMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
-type ProcessEdgeSink = rtrb::Producer<MessageBuf>;  //TODO optimize, make this into a tuple and add some thread wakeup handle as second entry
+#[derive(Debug)]
+struct ProcessEdgeSink {
+    sink: rtrb::Producer<MessageBuf>,
+    wakeup: Option<Thread>,
+    proc_name: Option<String>,
+}
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
@@ -4801,7 +4844,8 @@ impl Component for RepeatComponent {
     fn run(&mut self) {
         info!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
-        let out = &mut self.out;
+        let out = &mut self.out.sink;
+        let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
             trace!("Repeat: begin of iteration");
             // check signals
