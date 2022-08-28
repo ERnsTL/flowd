@@ -4883,6 +4883,7 @@ impl Component for RepeatComponent {
                     debug!("done");
 
                     // small benchmark
+                    // (2022-08-28) currently 2x as fast as latest Go flowd
                     /*
                     info!("sending 1M packets...");
                     let now1 = chrono::Utc::now();
