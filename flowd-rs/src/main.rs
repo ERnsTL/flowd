@@ -4831,7 +4831,7 @@ struct ProcessEdgeSink {
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 type MessageBuf = Vec<u8>;
-const PROCESSEDGE_BUFSIZE: usize = 7;
+const PROCESSEDGE_BUFSIZE: usize = 7*7*7;
 const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
 const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
@@ -4862,7 +4862,7 @@ impl Component for RepeatComponent {
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
-            debug!("Repeat: begin of iteration");
+            trace!("Repeat: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
@@ -4877,15 +4877,32 @@ impl Component for RepeatComponent {
             // check in port
             loop {
                 if let Ok(ip) = inn.pop() {
-                    info!("repeating packet...");
+                    debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
                     out_wakeup.unpark();
+                    debug!("done");
+
+                    // small benchmark
+                    /*
+                    info!("sending 1M packets...");
+                    let now1 = chrono::Utc::now();
+                    for n in 1..1000000 {
+                        while out.is_full() {
+                            // wait
+                            out_wakeup.unpark();
+                            trace!("waiting");
+                        }
+                        out.push(Vec::from("bla"));
+                    }
+                    let now2 = chrono::Utc::now();
                     info!("done");
+                    info!("time: {}ms", (now2 - now1).num_milliseconds());
+                    */
                 } else {
                     break;
                 }
             }
-            debug!("Repeat: -- end of iteration");
+            trace!("Repeat: -- end of iteration");
             thread::park();
         }
         info!("Repeat: exiting");
@@ -4942,7 +4959,7 @@ impl Component for DropComponent {
         debug!("Drop is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         loop {
-            debug!("Drop: begin of iteration");
+            trace!("Drop: begin of iteration");
             // check signals
             if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
@@ -4956,12 +4973,12 @@ impl Component for DropComponent {
             // check in port
             loop {
                 if let Ok(_ip) = inn.pop() {
-                    info!("got a packet, dropping it.");
+                    debug!("got a packet, dropping it.");
                 } else {
                     break;
                 }
             }
-            debug!("Drop: -- end of iteration");
+            trace!("Drop: -- end of iteration");
             thread::park();
         }
         info!("Drop: exiting");
