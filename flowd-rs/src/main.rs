@@ -11,9 +11,8 @@ use tungstenite::handshake::server::{Request, Response};
 use tungstenite::handshake::HandshakeRole;
 use tungstenite::{accept_hdr, Error, HandshakeError, Message, Result};
 
-extern crate pretty_env_logger;
-#[macro_use]
-extern crate log;
+#[macro_use] extern crate log;
+extern crate simplelog; //TODO check the paris feature flag for tags, useful?
 
 use serde::{Deserialize, Serialize};
 
@@ -1038,7 +1037,13 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
 
-    pretty_env_logger::init();
+    //NOTE: important to show the thread name = the FBP process name
+    simplelog::TermLogger::init(
+        simplelog::LevelFilter::Debug,
+        simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
+        simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto
+    );
     info!("logging initialized");
 
     //TODO the runtime should manage the graphs -> add_graph() and also checking that they actually exist and should have a method switch_graph()
