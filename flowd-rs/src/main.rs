@@ -56,6 +56,7 @@ fn main() {
     let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
         RepeatComponent::get_metadata(),
         DropComponent::get_metadata(),
+        OutputComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1532,6 +1533,7 @@ impl RuntimeRuntimePayload {
                     // core components
                     "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
                     "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
+                    "Output" => { OutputComponent::new(inports, outports, signalsource).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
