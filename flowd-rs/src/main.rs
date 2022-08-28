@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use chrono::prelude::*;
 
-use rtrb::{RingBuffer, PushError, PopError};
+use rtrb;
 
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
