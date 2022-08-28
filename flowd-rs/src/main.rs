@@ -4709,6 +4709,7 @@ impl From<GraphAddinportRequestPayload> for GraphPort {
         }
     }
 }
+
 //TODO optimize, graph:addoutport is also very similar
 impl From<GraphAddoutportRequestPayload> for GraphPort {
     fn from(payload: GraphAddoutportRequestPayload) -> Self {
@@ -4890,10 +4891,12 @@ impl Component for RepeatComponent {
                     for n in 1..1000000 {
                         while out.is_full() {
                             // wait
-                            out_wakeup.unpark();
+                            //out_wakeup.unpark();
                             trace!("waiting");
+                            thread::yield_now();
                         }
-                        out.push(Vec::from("bla"));
+                        out.push(Vec::from("bla")).unwrap();
+                        if n % 100 == 0 { out_wakeup.unpark(); }
                     }
                     let now2 = chrono::Utc::now();
                     info!("done");
