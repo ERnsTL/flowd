@@ -30,6 +30,73 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     }
 }
 
+fn main() {
+    println!("flowd {}", env!("CARGO_PKG_VERSION"));
+
+    //NOTE: important to show the thread name = the FBP process name
+    simplelog::TermLogger::init(
+        simplelog::LevelFilter::Debug,
+        simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
+        simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto
+    ).expect("logging init failed");
+    info!("logging initialized");
+
+    //TODO the runtime should manage the graphs -> add_graph() and also checking that they actually exist and should have a method switch_graph()
+    let runtime: Arc<RwLock<RuntimeRuntimePayload>> = Arc::new(RwLock::new(RuntimeRuntimePayload::new(
+        String::from("main_graph")
+    )));
+    info!("runtime initialized");
+
+    //NOTE: is currently located inside the runtime struct above; more notes on the "processes" field there
+    //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
+    //info!("process manager initialized");
+
+    //NOTE: also add new core components in runtime.start()
+    let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
+        RepeatComponent::get_metadata(),
+        DropComponent::get_metadata(),
+    ])));
+    //TODO actually load components
+    info!("component library initialized");
+
+    //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
+    let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
+        String::from("main_graph"),
+        String::from("basic description"),
+        String::from("usd")
+    )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
+    info!("graph initialized");
+
+    let server = TcpListener::bind("localhost:3569").unwrap();
+    info!("management listening on localhost:3569");
+
+    for stream_res in server.incoming() {
+        if let Ok(stream) = stream_res {
+            // create Arc pointers for the new thread
+            let graphref = graph.clone();
+            let runtimeref = runtime.clone();
+            let componentlibref = componentlib.clone();
+            //let processesref = processes.clone();
+
+            // start thread
+            // since the thread name can only be 15 characters on Linux and an IP address already has up to 15, the IP address is not in the name
+            thread::Builder::new().name("client-handler".into()).spawn(move || {
+                info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
+                //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
+                if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
+                    match err {
+                        Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
+                        e => error!("test: {}", e),
+                    }
+                }
+            }).expect("thread start for connection handler failed");
+        } else if let Err(e) = stream_res {
+            error!("Error accepting stream: {}", e);
+        }
+    }
+}
+
 //fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, processes: Arc<RwLock<ProcessManager>>) -> Result<()> {
 fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>) -> Result<()> {
     stream
@@ -1032,73 +1099,6 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
     //websocket.close().expect("could not close websocket");
     info!("---");
     Ok(())
-}
-
-fn main() {
-    println!("flowd {}", env!("CARGO_PKG_VERSION"));
-
-    //NOTE: important to show the thread name = the FBP process name
-    simplelog::TermLogger::init(
-        simplelog::LevelFilter::Debug,
-        simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
-        simplelog::TerminalMode::Mixed,
-        simplelog::ColorChoice::Auto
-    );
-    info!("logging initialized");
-
-    //TODO the runtime should manage the graphs -> add_graph() and also checking that they actually exist and should have a method switch_graph()
-    let runtime: Arc<RwLock<RuntimeRuntimePayload>> = Arc::new(RwLock::new(RuntimeRuntimePayload::new(
-        String::from("main_graph")
-    )));
-    info!("runtime initialized");
-
-    //NOTE: is currently located inside the runtime struct above; more notes on the "processes" field there
-    //let processes: Arc<RwLock<ProcessManager>> = Arc::new(RwLock::new(ProcessManager::default()));
-    //info!("process manager initialized");
-
-    //NOTE: also add new core components in runtime.start()
-    let componentlib: Arc<RwLock<ComponentLibrary>> = Arc::new(RwLock::new(ComponentLibrary::new(vec![
-        RepeatComponent::get_metadata(),
-        DropComponent::get_metadata(),
-    ])));
-    //TODO actually load components
-    info!("component library initialized");
-
-    //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
-    let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
-        String::from("main_graph"),
-        String::from("basic description"),
-        String::from("usd")
-    )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
-    info!("graph initialized");
-
-    let server = TcpListener::bind("localhost:3569").unwrap();
-    info!("management listening on localhost:3569");
-
-    for stream_res in server.incoming() {
-        if let Ok(stream) = stream_res {
-            // create Arc pointers for the new thread
-            let graphref = graph.clone();
-            let runtimeref = runtime.clone();
-            let componentlibref = componentlib.clone();
-            //let processesref = processes.clone();
-
-            // start thread
-            // since the thread name can only be 15 characters on Linux and an IP address already has up to 15, the IP address is not in the name
-            thread::Builder::new().name("client-handler".into()).spawn(move || {
-                info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
-                //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
-                if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
-                    match err {
-                        Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
-                        e => error!("test: {}", e),
-                    }
-                }
-            }).expect("thread start for connection handler failed");
-        } else if let Err(e) = stream_res {
-            error!("Error accepting stream: {}", e);
-        }
-    }
 }
 
 //TODO currently panicks if unknown variant
