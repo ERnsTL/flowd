@@ -35,7 +35,7 @@ fn main() {
 
     //NOTE: important to show the thread name = the FBP process name
     simplelog::TermLogger::init(
-        simplelog::LevelFilter::Debug,
+        simplelog::LevelFilter::Info,
         simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
         simplelog::TerminalMode::Mixed,
         simplelog::ColorChoice::Auto
