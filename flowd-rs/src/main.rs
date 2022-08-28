@@ -5038,12 +5038,12 @@ impl Component for OutputComponent {
     }
 
     fn run(&mut self) {
-        debug!("Repeat is now run()ning!");
+        debug!("Output is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
-            trace!("Repeat: begin of iteration");
+            trace!("Output: begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
@@ -5051,7 +5051,7 @@ impl Component for OutputComponent {
                 info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
                 // stop signal
                 if ip == "stop".as_bytes().to_vec() {
-                    info!("Repeat: got stop signal, exiting");
+                    info!("Output: got stop signal, exiting");
                     break;
                 }
             }
