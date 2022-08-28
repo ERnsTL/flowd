@@ -35,7 +35,7 @@ fn main() {
 
     //NOTE: important to show the thread name = the FBP process name
     simplelog::TermLogger::init(
-        simplelog::LevelFilter::Info,
+        simplelog::LevelFilter::Info,   // can locally increase this for dev, TODO make configurable via args
         simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
         simplelog::TerminalMode::Mixed,
         simplelog::ColorChoice::Auto
@@ -4883,7 +4883,7 @@ impl Component for RepeatComponent {
                     debug!("done");
 
                     // small benchmark
-                    // (2022-08-28) at commit 561927 currently 2x as fast as latest Go flowd
+                    // (2022-08-28) at commit 561927 currently 2x as fast as latest Go flowd, with perfect scheduling situation even 6x as fast
                     /*
                     info!("sending 1M packets...");
                     let now1 = chrono::Utc::now();
