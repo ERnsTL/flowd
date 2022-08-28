@@ -4893,7 +4893,7 @@ impl Component for RepeatComponent {
                             // wait
                             //out_wakeup.unpark();
                             trace!("waiting");
-                            thread::yield_now();
+                            //thread::yield_now();
                         }
                         out.push(Vec::from("bla")).unwrap();
                         if n % 100 == 0 { out_wakeup.unpark(); }
@@ -4985,8 +4985,11 @@ impl Component for DropComponent {
             }
             */
             while !inn.is_empty() {
-                _ = inn.pop().ok();
-                debug!("got a packet, dropping it.");
+                //_ = inn.pop().ok();
+                //debug!("got a packet, dropping it.");
+
+                debug!("got {} packets, dropping them.", inn.slots());
+                inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
             }
             trace!("Drop: -- end of iteration");
             thread::park();
