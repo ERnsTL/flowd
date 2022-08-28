@@ -35,10 +35,16 @@ fn main() {
 
     //NOTE: important to show the thread name = the FBP process name
     simplelog::TermLogger::init(
-        simplelog::LevelFilter::Info,   // can locally increase this for dev, TODO make configurable via args
-        simplelog::ConfigBuilder::default().set_time_level(simplelog::LevelFilter::Off).set_thread_level(simplelog::LevelFilter::Info).set_thread_mode(simplelog::ThreadLogMode::Names).set_thread_padding(simplelog::ThreadPadding::Right(15)).build(),
-        simplelog::TerminalMode::Mixed,
-        simplelog::ColorChoice::Auto
+        simplelog::LevelFilter::Debug,   // can locally increase this for dev, TODO make configurable via args
+        simplelog::ConfigBuilder::default()
+            .set_time_level(simplelog::LevelFilter::Off)
+            .set_thread_level(simplelog::LevelFilter::Info)
+            .set_thread_mode(simplelog::ThreadLogMode::Names)
+            .set_thread_padding(simplelog::ThreadPadding::Right(15))    // maximum thread name length on Linux
+            .set_level_padding(simplelog::LevelPadding::Right)
+            .build(),
+        simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
+        simplelog::ColorChoice::Auto    // depending on whether interactive or not
     ).expect("logging init failed");
     info!("logging initialized");
 
