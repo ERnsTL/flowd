@@ -4975,12 +4975,18 @@ impl Component for DropComponent {
                 }
             }
             // check in port
+            /*
             loop {
                 if let Ok(_ip) = inn.pop() {
                     debug!("got a packet, dropping it.");
                 } else {
                     break;
                 }
+            }
+            */
+            while !inn.is_empty() {
+                _ = inn.pop().ok();
+                debug!("got a packet, dropping it.");
             }
             trace!("Drop: -- end of iteration");
             thread::park();
