@@ -223,7 +223,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
-                                            runtime.read().expect("lock poisoned").graph.clone()
+                                            runtime.read().expect("lock poisoned").graph.clone()    // there is no field "graph" in the payload that could re-used here
                                         ))
                                         .expect("failed to serialize network:error message"),
                                     ))
@@ -961,7 +961,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // network:data
                     FBPMessage::NetworkEdgesRequest(payload) => {
                         info!("got network:edges message");
-                        match runtime.write().expect("lock poisoned").set_debug_edges(payload.graph, payload.edges) {
+                        match runtime.write().expect("lock poisoned").set_debug_edges(&payload.graph, payload.edges) {
                             Ok(_) => {
                                 info!("response: sending network:edges response");
                                 websocket
@@ -979,7 +979,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
-                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                            payload.graph
                                         ))
                                             .expect("failed to serialize network:error response"),
                                     ))
@@ -1020,7 +1020,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                     }
 
-                    FBPMessage::NetworkStopRequest(_payload) => {
+                    FBPMessage::NetworkStopRequest(payload) => {
                         info!("got network:stop message");
                         //TODO check secret
                         match runtime.write().expect("lock poisoned").stop() {
@@ -1041,7 +1041,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
-                                            runtime.read().expect("lock poisoned").graph.clone()    //TODO can we avoid clone here?
+                                            payload.graph
                                         ))
                                             .expect("failed to serialize network:error response"),
                                     ))
@@ -1606,7 +1606,7 @@ impl RuntimeRuntimePayload {
     }
 
     //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
-    fn set_debug_edges(&mut self, graph: String, edges: Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
+    fn set_debug_edges(&mut self, graph: &str, edges: Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
         //TODO clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
         //TODO implement
         info!("got following debug edges:");
