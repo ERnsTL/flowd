@@ -1445,13 +1445,13 @@ impl RuntimeRuntimePayload {
         for edge in graph.edges.iter() {
             if let Some(iip) = &edge.data {
                 // prepare IIP edge
-                info!("preparing edge from IIP to {}.{}", edge.target.node, edge.target.port);
+                info!("preparing edge from IIP to {}.{}", edge.target.process, edge.target.port);
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
                 sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
                 // insert into inports of target process
-                let targetproc = ports_all.get_mut(&edge.target.node).expect("process IIP target assignment process not found");
+                let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
                 }
@@ -1459,17 +1459,17 @@ impl RuntimeRuntimePayload {
                 // nothing to do in case of IIP
             } else {
                 // prepare edge
-                info!("preparing edge from {}.{} to {}.{}", edge.source.node, edge.source.port, edge.target.node, edge.target.port);
+                info!("preparing edge from {}.{} to {}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
                 let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
                 // insert into inports of target process
-                let targetproc = ports_all.get_mut(&edge.target.node).expect("process IIP target assignment process not found");
+                let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process target inport insert failed, key exists")));
                 }
                 // assign into outports of source process
-                let sourceproc = ports_all.get_mut(&edge.source.node).expect("process source assignment process not found");
-                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.node.clone()) } ) {
+                let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
+                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.process.clone()) } ) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
                 }
             }
@@ -2133,8 +2133,8 @@ struct NetworkEdgesRequestPayload {
 //NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdgeSpec {
-    src: GraphNodeSpec,
-    tgt: GraphNodeSpec,
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
 }
 
 #[derive(Serialize, Debug)]
@@ -2221,8 +2221,8 @@ impl Default for NetworkConnectResponse {
 #[derive(Serialize, Debug)]
 struct NetworkTransmissionPayload {
     id: String, // spec: textual edge identifier, usually in form of a FBP language line
-    src: GraphNodeSpec,
-    tgt: GraphNodeSpec,
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
     graph: String,
     subgraph: Vec<String>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
 }
@@ -2231,8 +2231,8 @@ impl Default for NetworkTransmissionPayload {
     fn default() -> Self {
         NetworkTransmissionPayload {
             id: String::from("Repeater.OUT -> Display.IN"), //TODO not sure if this is correct
-            src: GraphNodeSpec::default(),
-            tgt: GraphNodeSpec::default(),
+            src: GraphNodeSpecNetwork::default(),
+            tgt: GraphNodeSpecNetwork::default(),
             graph: String::from("main_graph"),
             subgraph: vec![String::from("Repeater.OUT -> Display.IN")], //TODO not sure of this is correct, most likely not
         }
@@ -3266,8 +3266,8 @@ struct GraphAddedgeRequest {
 
 #[derive(Deserialize, Debug)]
 struct GraphAddedgeRequestPayload {
-    src: GraphNodeSpec,
-    tgt: GraphNodeSpec,
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     graph: String,
     secret: String, // only present in the request payload
@@ -3275,15 +3275,15 @@ struct GraphAddedgeRequestPayload {
 
 //NOTE: PartialEq is for graph.remove_edge() and graph.change_edge()
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-struct GraphNodeSpec {
+struct GraphNodeSpecNetwork {
     node: String,
     port: String,
     index: Option<String>, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust? // NOTE: noflo-ui leaves index away if it is not an indexable port
 }
 
-impl Default for GraphNodeSpec {
+impl Default for GraphNodeSpecNetwork {
     fn default() -> Self {
-        GraphNodeSpec {
+        GraphNodeSpecNetwork {
             node: String::from("Repeater"),
             port: String::from("IN"),
             index: Some(String::from("1")),
@@ -3356,8 +3356,8 @@ struct GraphRemoveedgeRequest {
 #[derive(Deserialize, Debug)]
 struct GraphRemoveedgeRequestPayload {
     graph: String, //TODO spec: for graph:addedge the graph attricbute is after src,tgt but for removeedge it is first
-    src: GraphNodeSpec,
-    tgt: GraphNodeSpec,
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
     secret: String, // only present in the request payload
 }
 
@@ -3399,8 +3399,8 @@ struct GraphChangeedgeRequest {
 struct GraphChangeedgeRequestPayload {
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
-    src: GraphNodeSpec,
-    tgt: GraphNodeSpec,
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
     secret: String, // only present in the request payload
 }
 
@@ -3443,7 +3443,7 @@ struct GraphAddinitialRequestPayload {
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     src: GraphIIPSpecNetwork,   //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
-    tgt: GraphNodeSpec,
+    tgt: GraphNodeSpecNetwork,
     secret: String, // only present in the request payload
 }
 
@@ -3492,7 +3492,7 @@ struct GraphRemoveinitialRequest {
 struct GraphRemoveinitialRequestPayload {
     graph: String,
     src: GraphIIPSpecNetwork, //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
-    tgt: GraphNodeSpec,
+    tgt: GraphNodeSpecNetwork,
     secret: String, // only present in the request payload
 }
 
@@ -4595,7 +4595,7 @@ impl Graph {
         Ok(())
     }
 
-    fn remove_edge(&mut self, graph: String, source: GraphNodeSpec, target: GraphNodeSpec) -> Result<(), std::io::Error> {
+    fn remove_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork) -> Result<(), std::io::Error> {
         //TODO implement
         //TODO in what state is it allowed do change the edgeset?
         //TODO check graph name and state, multi-graph support
@@ -4610,7 +4610,7 @@ impl Graph {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
     }
 
-    fn change_edge(&mut self, graph: String, source: GraphNodeSpec, target: GraphNodeSpec, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
+    fn change_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
         //TODO implement
         //TODO in what state is it allowed do change the edgeset?
         //TODO check graph name and state, multi-graph support
@@ -4787,8 +4787,8 @@ impl From<GraphAddoutportRequestPayload> for GraphPort {
 impl From<GraphAddedgeRequestPayload> for GraphEdge {
     fn from(payload: GraphAddedgeRequestPayload) -> Self {
         GraphEdge {
-            source: payload.src,
-            target: payload.tgt,
+            source: GraphNodeSpec::from(payload.src),
+            target: GraphNodeSpec::from(payload.tgt),
             data: None,
             metadata: payload.metadata,
         }
@@ -4800,13 +4800,23 @@ impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
     fn from(payload: GraphAddinitialRequestPayload) -> Self {
         GraphEdge {
             source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
-                node: String::from(""),
+                process: String::from(""),
                 port: String::from(""),
                 index: Some(String::from("")),  //TODO clarify spec: what to save here when noflo-ui does not send this field?
             },
             data: if payload.src.data.len() > 0 { Some(payload.src.data) } else { None },   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
-            target: payload.tgt,
+            target: GraphNodeSpec::from(payload.tgt),
             metadata: payload.metadata, //TODO defaults may be unsensible -> clarify spec
+        }
+    }
+}
+
+impl From<GraphNodeSpecNetwork> for GraphNodeSpec {
+    fn from(nodespec_network: GraphNodeSpecNetwork) -> Self {
+        GraphNodeSpec {
+            process: nodespec_network.node,
+            port: nodespec_network.port,
+            index: nodespec_network.index,
         }
     }
 }
