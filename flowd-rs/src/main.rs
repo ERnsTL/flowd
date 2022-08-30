@@ -4295,9 +4295,11 @@ struct GraphNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdge {
+    #[serde(rename = "src")]
     source: GraphNodeSpec,
     //TODO enable sending of object/hashmap IIPs also, currently allows only string
     data: Option<String>, // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
+    #[serde(rename = "tgt")]
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
 }
