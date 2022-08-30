@@ -103,6 +103,8 @@ TODO Further FBP network protocol clarifications needed:
 * TODO Graph spec schema: What values should be filled for the "src" fields if "data" is filled?
 * TODO noflo-ui just leaves away the "index" field from "src" and "tgt" fields if it is not indexable, but Network Protocol spec does not say this is optional. And 2nd part of the question: How should this be saved in Graph spec schema-conformant way when noflo-ui does not send "index" field? The index is not optional in neither Network Protocol nor Graph spec.
 * TODO please explain the meaning of the graph:addedge metadata fields.
+* TODO graph node metadata: x and y can be negative in noflo-ui usage, should be mentioned in FBP network protocol spec and FBP graph spec.
+  * TODO also mention fields used by noflo-ui: width, height, label; maybe as optionals.
 
 Clarifications for Graph schema:
 
