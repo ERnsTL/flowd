@@ -75,6 +75,25 @@ fn main() {
     )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
     info!("graph initialized");
 
+    // add graph exported/published inport and outport
+    graph.write().expect("lock poisoned").inports.insert("GRAPHIN".to_owned(), GraphPort {
+        process: "Repeat_1337".to_owned(),
+        port: "IN".to_owned(),
+        metadata: GraphPortMetadata {
+            x: 36,
+            y: 72,
+        }
+    });
+    graph.write().expect("lock poisoned").outports.insert("GRAPHOUT".to_owned(), GraphPort {
+        process: "Repeat_1337".to_owned(),
+        port: "OUT".to_owned(),
+        metadata: GraphPortMetadata {
+            x: 324,
+            y: 72,
+        }
+    });
+    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_1337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(72), width: Some(72), label: Some("Repeat_1337".to_owned()) }).expect("add_node() failed");
+
     let bind_addr = "localhost:3569";
     let server = TcpListener::bind(bind_addr).unwrap();
     info!("management listening on {}", bind_addr);
