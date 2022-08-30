@@ -3291,6 +3291,7 @@ impl Default for GraphNodeSpec {
     }
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Deserialize, Serialize, Debug)]
 struct GraphEdgeMetadata {
     route: Option<i32>, //TODO clarify spec: Route identifier of a graph edge
@@ -3304,6 +3305,16 @@ impl Default for GraphEdgeMetadata {
             route: Some(0),
             schema: Some(String::from("")),
             secure: Some(false),
+        }
+    }
+}
+
+impl GraphEdgeMetadata {
+    fn new(route: Option<i32>, schema: Option<String>, secure: Option<bool>) -> Self {
+        GraphEdgeMetadata {
+            route: route,
+            schema: schema,
+            secure: secure,
         }
     }
 }
@@ -4293,15 +4304,30 @@ struct GraphNode {
     metadata: GraphNodeMetadata,
 }
 
+#[serde_with::skip_serializing_none]    // noflo-ui interprets even "data": null as "this is an IIP". not good but we can disable serializing None //TODO make issue in noflo-ui
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdge {
     #[serde(rename = "src")]
     source: GraphNodeSpec,
     //TODO enable sending of object/hashmap IIPs also, currently allows only string
-    data: Option<String>, // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
+    data: Option<String>,  // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
     #[serde(rename = "tgt")]
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
+}
+
+#[serde_with::skip_serializing_none]    // do not serialize index if it is None
+#[derive(Deserialize, Serialize, Debug)]
+struct GraphNodeSpec {
+    process: String,
+    port: String,
+    index: Option<String>, // spec: connection index, for addressable ports //TODO spec: string or number -- how to handle in Rust? // NOTE: noflo-ui leaves index away if it is not an indexable port
+}
+
+impl PartialEq<GraphNodeSpecNetwork> for GraphNodeSpec {
+    fn eq(&self, other: &GraphNodeSpecNetwork) -> bool {
+        self.process == other.node && self.port == other.port && self.index == other.index
+    }
 }
 
 impl Graph {
