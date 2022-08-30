@@ -75,8 +75,9 @@ fn main() {
     )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
     info!("graph initialized");
 
-    let server = TcpListener::bind("localhost:3569").unwrap();
-    info!("management listening on localhost:3569");
+    let bind_addr = "localhost:3569";
+    let server = TcpListener::bind(bind_addr).unwrap();
+    info!("management listening on {}", bind_addr);
 
     for stream_res in server.incoming() {
         if let Ok(stream) = stream_res {
