@@ -105,6 +105,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO please explain the meaning of the graph:addedge metadata fields.
 * TODO graph node metadata: x and y can be negative in noflo-ui usage, should be mentioned in FBP network protocol spec and FBP graph spec.
   * TODO also mention fields used by noflo-ui: width, height, label; maybe as optionals.
+* TODO inconsistent fields in the graph node specifier! in FBP JSON graph schema it is process, port, index but in FBP network protocol it is node, port, index!
 
 Clarifications for Graph schema:
 
