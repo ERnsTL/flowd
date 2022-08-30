@@ -1485,6 +1485,7 @@ impl RuntimeRuntimePayload {
         // generate processes and assign prepared connections
         let thread_handles: Arc<std::sync::Mutex<HashMap<String, Thread>>> = Arc::new(std::sync::Mutex::new(HashMap::new()));
         let mut found: bool;
+        let mut found2: bool;
         for (proc_name, node) in graph.nodes.iter() {
             info!("setting up process name={} component={}", proc_name, node.component);
             //TODO is there anything in .metadata that affects process setup?
@@ -1510,6 +1511,18 @@ impl RuntimeRuntimePayload {
                     for inport in &component.in_ports {
                         if !inports.contains_key(&inport.name) {
                             //TODO check if port is required, maybe add strict checking true/false as parameter
+
+                            // check if connected to a graph inport
+                            found2 = false;
+                            for (_graph_inport_name, graph_inport) in graph.inports.iter() {
+                                if graph_inport.process.as_str() == proc_name.as_str() && graph_inport.port == inport.name {
+                                    // is connected to graph inport
+                                    found2 = true;
+                                    break; //TODO optimize condition flow, is mix of break+continue
+                                }
+                            }
+                            if found2 { continue; } //TODO optimize condition flow, is mix of break+continue
+
                             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required port {} for component {}", proc_name, &inport.name, component.name))));
                         }
                     }
@@ -1524,6 +1537,18 @@ impl RuntimeRuntimePayload {
                     for outport in &component.out_ports {
                         if !outports.contains_key(&outport.name) {
                             //TODO check if port is required, maybe add strict checking true/false as parameter
+
+                            // check if connected to a graph outport
+                            found2 = false;
+                            for (_graph_outport_name, graph_outport) in graph.outports.iter() {
+                                if graph_outport.process.as_str() == proc_name.as_str() && graph_outport.port == outport.name {
+                                    // is connected to graph outport
+                                    found2 = true;
+                                    break; //TODO optimize condition flow, is mix of break+continue
+                                }
+                            }
+                            if found2 { continue; } //TODO optimize condition flow, is mix of break+continue
+
                             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required outport {} on component {}", proc_name, &outport.name, component.name))));
                         }
                     }
@@ -5131,7 +5156,7 @@ impl Component for OutputComponent {
                 }
             }
             // check in port
-            // while !inn.is_empty() {
+            //TODO while !inn.is_empty() {
             loop {
                 if let Ok(ip) = inn.pop() {
                     // output the packet data with newline
