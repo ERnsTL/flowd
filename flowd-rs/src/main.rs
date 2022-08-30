@@ -3048,8 +3048,11 @@ struct GraphAddnodeRequestPayload {
 // NOTE: Serialize because used in GraphNode -> Graph which needs to be serialized
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphNodeMetadata {
-    x: i32, // TODO check spec: can x and y be negative? -> i32 or u32?
+    x: i32, // TODO check spec: can x and y be negative? -> i32 or u32? TODO in specs is range not defined, but noflo-ui uses negative coordinates as well
     y: i32,
+    width: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
+    height: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
+    label: Option<String>,  // not mentioned in specs, but used by noflo-ui, used for the process name in bigger letters than component name
 }
 
 #[derive(Serialize, Debug)]
@@ -4803,6 +4806,7 @@ impl ComponentLibrary {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
     }
 
+    //TODO currently all done in runtime.start()
     fn new_component(name: String) -> Result<Box<dyn Component>, std::io::Error> {
         //TODO implement - ports are currently totally unconnected
         let inports = ProcessInports::new();
