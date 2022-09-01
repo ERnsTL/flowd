@@ -73,6 +73,7 @@ fn main() {
         String::from("basic description"),
         String::from("usd")
     )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
+    let graph_inout: Arc<Mutex<GraphInportOutportHolder>> = Arc::new(Mutex::new(GraphInportOutportHolder { inports: None, outports: None, websockets: HashMap::new() }));
     info!("graph initialized");
 
     // add graph exported/published inport and outport
@@ -111,6 +112,7 @@ fn main() {
             let graphref = graph.clone();
             let runtimeref = runtime.clone();
             let componentlibref = componentlib.clone();
+            let graph_inoutref = graph_inout.clone();
             //let processesref = processes.clone();
 
             // start thread
@@ -118,7 +120,7 @@ fn main() {
             thread::Builder::new().name("client-handler".into()).spawn(move || {
                 info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
                 //if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, processesref) {
-                if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref) {
+                if let Err(err) = handle_client(stream, graphref, runtimeref, componentlibref, graph_inoutref) {
                     match err {
                         Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
                         e => error!("test: {}", e),
@@ -1129,6 +1131,9 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
             Message::Frame(_) => todo!()
         }
         info!("--- end of message handling iteration")
+    }
+    {
+        graph_inout.lock().expect("could not acquire lock for removing WebSocket from connections list").websockets.remove(&peer_addr);
     }
     //websocket.close().expect("could not close websocket");
     info!("---");
