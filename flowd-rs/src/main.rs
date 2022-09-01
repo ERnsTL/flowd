@@ -2169,15 +2169,26 @@ struct RuntimePacketResponse {
 }
 
 //TODO serde: RuntimePacketRequestPayload is the same as RuntimePacketResponsePayload except the payload -- any possibility to mark this optional for the response?
+#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
 #[derive(Serialize, Deserialize, Debug)]
 struct RuntimePacketResponsePayload {
     port: String,
-    event: String, //TODO spec what does this do? format?
+    event: RuntimePacketEvent, //TODO spec what does this do? format? fbp-protocol says: string enum
     #[serde(rename = "type")]
-    typ: String, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
-    schema: String, // spec: URL to JSON schema describing the format of the data
+    typ: Option<String>, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
+    schema: Option<String>, // spec: URL to JSON schema describing the format of the data
     graph: String,
-    payload: String, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
+    payload: Option<String>, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "lowercase")]  // fbp-protocol and noflo-ui expect this in lowercase
+enum RuntimePacketEvent {
+    Connect,
+    BeginGroup,
+    Data,
+    EndGroup,
+    Disconnect,
 }
 
 impl Default for RuntimePacketResponse {
@@ -2194,11 +2205,21 @@ impl Default for RuntimePacketResponsePayload {
     fn default() -> Self {
         RuntimePacketResponsePayload {
             port: String::from("IN"),
-            event: String::from("default event"),
-            typ: String::from("string"), //TODO is this correct?
-            schema: String::from(""),
-            graph: String::from(""),
-            payload: String::from("default packet payload"),
+            event: RuntimePacketEvent::Data,
+            typ: Some(String::from("string")), //TODO is this correct?
+            schema: None,
+            graph: String::from("default_graph"),
+            payload: Some(String::from("default packet payload")),
+        }
+    }
+}
+
+impl RuntimePacketResponse {
+    fn new(payload: RuntimePacketResponsePayload) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: payload,
         }
     }
 }
