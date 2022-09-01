@@ -106,6 +106,7 @@ TODO Further FBP network protocol clarifications needed:
 * TODO graph node metadata: x and y can be negative in noflo-ui usage, should be mentioned in FBP network protocol spec and FBP graph spec.
   * TODO also mention fields used by noflo-ui: width, height, label; maybe as optionals.
 * TODO inconsistent fields in the graph node specifier! in FBP JSON graph schema it is process, port, index but in FBP network protocol it is node, port, index!
+* TODO what does the field runtime:packet "event" do? Spec just says "packet event". Upon sending a runtime:packet from runtime to noflo-ui, it prints in console: "Runtime sent invalid payload for runtime:packet: data.payload.event should be equal to one of the allowed values" but spec mentions no list of allowed values. If not sending it, noflo-ui states: "data.payload.event should be string" -> hidden in schema.yaml there is info:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L51 -> add this to the spec, with explanations of each possible values
 
 Clarifications for Graph schema:
 
