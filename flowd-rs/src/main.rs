@@ -962,7 +962,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::RuntimePacketRequest(payload) => {
                         info!("got runtime:packet message");
                         //TODO or maybe better send this to graph?
-                        match runtime.write().expect("lock poisoned").packet(&payload) {
+                        match runtime.write().expect("lock poisoned").packet(&payload, &mut graph_inout.lock().expect("lock poisoned")) {
                             Ok(_) => {
                                 info!("response: sending runtime:packetsent response");
                                 websocket
@@ -1041,7 +1041,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("got network:start message");
                         //TODO check secret
                         //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
-                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned")) {
+                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned"), graph_inout.clone()) {
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
