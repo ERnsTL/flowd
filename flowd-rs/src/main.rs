@@ -2997,6 +2997,7 @@ impl Default for ComponentComponentPayload {
     }
 }
 
+#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema
 #[derive(Serialize, Debug)]
 struct ComponentPort {
     #[serde(rename = "id")]
@@ -3004,7 +3005,7 @@ struct ComponentPort {
     #[serde(rename = "type")]
     allowed_type: String, //TODO clarify spec: so if we define a boolean, we can send only booleans? What about struct/object types? How should the runtime verify that? //TODO map JSON types <-> Rust types
     #[serde(default)]
-    schema: String, // spec: optional
+    schema: Option<String>, // spec: optional
     #[serde(default)]
     required: bool, // spec: optional, whether the port needs to be connected for the component to work (TODO add checks for that and notify user (how?) that a vital port is unconnected if required=true)
     #[serde(default, rename = "addressable")]
@@ -3022,7 +3023,7 @@ impl Default for ComponentPort {
         ComponentPort {
             name: String::from("out"),
             allowed_type: String::from("string"),
-            schema: String::from(""), //TODO unnecessary to allocate a string to say "no schema" -> Option type or something
+            schema: None,
             required: true,
             is_arrayport: false,
             description: String::from("a default output port"),
@@ -3037,7 +3038,7 @@ impl ComponentPort {
         ComponentPort {
             name: String::from("in"),
             allowed_type: String::from("string"),
-            schema: String::from(""), //TODO unnecessary to allocate a string to say "no schema" -> Option type or something
+            schema: None,
             required: true,
             is_arrayport: false,
             description: String::from("a default input port"),
@@ -4612,7 +4613,7 @@ impl Graph {
             out.push(ComponentPort {
                 name: name.clone(),
                 allowed_type: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port TODO what happens if we return a empty allowed type (because we dont know from Graph inport)
-                schema: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
+                schema: None, //TODO clarify spec: not available from FBP JSON Graph port
                 required: true, //TODO clarify spec: not available from FBP JSON Graph port
                 is_arrayport: false, //TODO clarify spec: not available from FBP JSON Graph port
                 description: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
@@ -5249,7 +5250,7 @@ impl Component for RepeatComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: String::from(""),
+                    schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be repeated on outport"),
@@ -5261,7 +5262,7 @@ impl Component for RepeatComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: String::from(""),
+                    schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("repeated data from IN port"),
@@ -5334,7 +5335,7 @@ impl Component for DropComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: String::from(""),
+                    schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be dropped"),
@@ -5415,7 +5416,7 @@ impl Component for OutputComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: String::from(""),
+                    schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be printed and repeated on outport"),
@@ -5427,7 +5428,7 @@ impl Component for OutputComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: String::from(""),
+                    schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("repeated data from IN port"),
