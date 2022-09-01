@@ -1665,7 +1665,7 @@ impl RuntimeRuntimePayload {
                 joinhandle: joinhandle,
             });
         }
-        // work off graphname-IN and graphname-OUT special processes for graph inports and graph outports###
+        // work off graphname-IN and graphname-OUT special processes for graph inports and graph outports
         //TODO the signal channel and joinhandle of the graph outport process/thread could also simply be stored in the processes variable with all other FBP processes
         graph_inout.inports = None;
         graph_inout.outports = None;
@@ -1763,10 +1763,11 @@ impl RuntimeRuntimePayload {
                 self.processes.insert(format!("{}-OUT", graph.properties.name), Process {
                     signal: signalsink,
                     joinhandle: joinhandle,
-                });//###
+                });
 
                 // save single joinhandle and signal for that component
-                //### cannot clone joinhandle
+                //TODO optimize, cannot clone joinhandle
+                //TODO currentcy graph_inout.outports is unused
                 /*
                 graph_inout.outports = Some(Process {
                     signal: signalsink,
@@ -1774,7 +1775,7 @@ impl RuntimeRuntimePayload {
                 })
                 */
             }
-            //### self.graph_inout = graph_inout;
+            //TODO put graph_inout into runtime struct?  self.graph_inout = graph_inout;
         }
 
         // sanity check
