@@ -3,7 +3,7 @@
 #![feature(map_try_insert)]
 
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Mutex};
 use std::thread::{self, Thread};
 use std::time::Duration;
 
@@ -134,11 +134,23 @@ fn main() {
 }
 
 //fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, processes: Arc<RwLock<ProcessManager>>) -> Result<()> {
-fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>) -> Result<()> {
+fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> Result<()> {
     stream
         .set_write_timeout(Some(Duration::SECOND))
         .expect("set_write_timeout call failed");
     //stream.set_nodelay(true).expect("set_nodelay call failed");
+
+    // save stream clone/dup for graph outports process and pack into "cloned" WebSocket
+    /*
+    tungstenite::WebSocket::from_raw_socket(
+    websocket.get_mut().try_clone().expect("clone of tcp stream failed for graph outports handler thread"),
+    tungstenite::protocol::Role::Server,
+    None
+    */
+    let peer_addr = stream.peer_addr().expect("could not get peer socketaddr");
+    {
+        graph_inout.lock().expect("could not acquire lock for saving TcpStream for graph outport process").websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(stream.try_clone().expect("could not try_clone() TcpStream"), tungstenite::protocol::Role::Server, None));
+    }
 
     let callback = |req: &Request, mut response: Response| {
         debug!("Received a new ws handshake");
@@ -1739,6 +1751,21 @@ impl RuntimeRuntimePayload {
     //TODO return path: process that sends to an outport -> send to client. TODO clarify spec: which client should receive it?
 
     //TODO runtime: command to connect an outport to a remote runtime as remote subgraph.
+}
+
+// runtime state of graph inports and outports
+#[derive(Debug)]
+struct GraphInportOutportHolder {
+    // inports
+    // the edge sinks are stored here because the connection handler in handle_client() needs to send into these
+    inports: Option<HashMap<String, ProcessEdgeSink>>,
+
+    // outports are handled by 1 special component that needs to be signaled and joined on network stop()
+    // sink and wakeup are given to the processes that write into the graph outport process, so they are not stored here
+    outports: Option<Process>,
+
+    // connected client websockets ready to send responses to connected clients, for graphout process
+    websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>
 }
 
 #[derive(Serialize, Debug)]
