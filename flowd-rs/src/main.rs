@@ -967,7 +967,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 info!("response: sending runtime:packetsent response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&RuntimePacketsentMessage::new(payload))
+                                        serde_json::to_string(&RuntimePacketsentMessage::new(RuntimePacketsentPayload::from(payload)))
                                             .expect("failed to serialize network:packetsent response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -1901,7 +1901,7 @@ impl RuntimeRuntimePayload {
                     inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
                     thread::yield_now();
                 }
-                inport.sink.push(payload.payload.clone().into()).expect("push packet from graph inport into component failed");
+                inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into()).expect("push packet from graph inport into component failed");
                 inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
                 return Ok(());
             } else {
@@ -2168,15 +2168,15 @@ struct RuntimePacketRequest {
     payload: RuntimePacketRequestPayload,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-struct RuntimePacketRequestPayload {
+#[derive(Deserialize, Debug)]
+struct RuntimePacketRequestPayload {  // protocol spec shows it as non-optional, but fbp-protocol says only port, event, graph are required at https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L46
     port: String,
-    event: String, //TODO spec what does this do? format?
+    event: RuntimePacketEvent, //TODO spec what does this do? format is string, but with certain allowed values: TODO
     #[serde(rename = "type")]
-    typ: String, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
-    schema: String, // spec: URL to JSON schema describing the format of the data
+    typ: Option<String>, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
+    schema: Option<String>, // spec: URL to JSON schema describing the format of the data
     graph: String,
-    payload: String, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
+    payload: Option<String>, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
     secret: String,  // only present on the request payload
 }
 
@@ -2244,22 +2244,39 @@ impl RuntimePacketResponse {
 }
 
 // runtime:packetsent
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Serialize, Debug)]
 struct RuntimePacketsentMessage {
     protocol: String,
     command: String,
-    payload: RuntimePacketRequestPayload, //NOTE: this is structurally the same for runtime:packet and runtime:packetsent //TODO spec: missing payload, no there is even the payload! looks unefficient to send back the payload.
+    payload: RuntimePacketsentPayload, // clarify spec: echo the full runtime:packet back, with the full payload?! protocol spec looks like runtime needs to echo back oll of runtime:packet except secret, but fbp-protocol schema only requires port, event, graph @ https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L194
+}
+
+#[derive(Serialize, Debug)]    //TODO Deserialize seems useless, we are not getting that from the client? unless the client is another runtime...?
+struct RuntimePacketsentPayload {
+    port: String,
+    event: RuntimePacketEvent,
+    graph: String,
 }
 
 impl RuntimePacketsentMessage {
     //TODO for correctness, we should convert to RuntimePacketsentResponsePayload actually, but they are structurally the same
-    fn new(payload: RuntimePacketRequestPayload) -> Self {
+    fn new(payload: RuntimePacketsentPayload) -> Self {
         RuntimePacketsentMessage {
             protocol: String::from("runtime"),
             command: String::from("packetsent"),
             payload: payload,
         }
+    }
 }
+
+impl From<RuntimePacketRequestPayload> for RuntimePacketsentPayload {
+    fn from(packet: RuntimePacketRequestPayload) -> Self {
+        RuntimePacketsentPayload {
+            port: packet.port,
+            event: packet.event,
+            graph: packet.graph,
+        }
+    }
 }
 
 // runtime:ports response
