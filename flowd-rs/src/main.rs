@@ -986,24 +986,17 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         //TODO print incoming packet
                     }
 
+                    // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined)
+                    //TODO maybe handle this a level higher in list of FBPMessage variants?
                     FBPMessage::RuntimePacketsentRequest(payload) => {
                         info!("got runtime:packetsent message");
-                        match runtime.write().expect("lock poisoned").packetsent(payload) {
-                            Ok(_) => {
-                                //nothing to send if ok, since this is already a confirmation of a previous runtime:packet that we sent to the remote runtime acting as remote subgraph
-                                info!("response: nothing, but runtime core returned OK");
-                            },
-                            Err(err) => {
-                                error!("runtime.packetsent() failed: {}", err);
-                                info!("response: sending runtime:error response");
-                                websocket
-                                    .write_message(Message::text(
-                                        serde_json::to_string(&RuntimeErrorResponse::new(err.to_string()))
-                                            .expect("failed to serialize runtime:error response"),
-                                    ))
-                                    .expect("failed to write message into websocket");
-                            }
-                        }
+                        info!("response: sending runtime:error response");
+                        websocket
+                            .write_message(Message::text(
+                                serde_json::to_string(&RuntimeErrorResponse::new(String::from("runtime:packetsent from client is an error")))
+                                    .expect("failed to serialize runtime:error response"),
+                            ))
+                            .expect("failed to write message into websocket");
                     }
 
                     // network:data
@@ -1910,14 +1903,6 @@ impl RuntimeRuntimePayload {
         } else {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("no graph inports exist")));
         }
-    }
-
-    //TODO the payload has unusual type -> can we really re-use it? Unify these three: RuntimePacketRequestPayload, RuntimePacketResponsePayload, RuntimePacketsentResponsePayload?
-    fn packetsent(&mut self, payload: RuntimePacketRequestPayload) -> std::result::Result<(), std::io::Error> {
-        //TODO implement
-        //TODO confirm/correlate to any previously sent packet to the remote runtime, remote from list of awaiting packetsent confirmations
-        info!("runtime: got a packetsent confirmation: {:?}", payload);
-        Ok(())
     }
 
     //TODO return path: process that sends to an outport -> send to client. TODO clarify spec: which client should receive it?
