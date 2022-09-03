@@ -1164,7 +1164,7 @@ enum FBPMessage {
     #[serde(rename = "packet")]
     RuntimePacketRequest(RuntimePacketRequestPayload),
     #[serde(rename = "packetsent")]
-    RuntimePacketsentRequest(RuntimePacketRequestPayload), //TODO should be RuntimePacketsentRequestPayload?
+    RuntimePacketsentRequest(RuntimePacketsentPayload),
 
     // network:persist
     #[serde(rename = "persist")]
@@ -2236,11 +2236,16 @@ struct RuntimePacketsentMessage {
     payload: RuntimePacketsentPayload, // clarify spec: echo the full runtime:packet back, with the full payload?! protocol spec looks like runtime needs to echo back oll of runtime:packet except secret, but fbp-protocol schema only requires port, event, graph @ https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L194
 }
 
-#[derive(Serialize, Debug)]    //TODO Deserialize seems useless, we are not getting that from the client? unless the client is another runtime...?
+#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
+#[derive(Serialize, Deserialize, Debug)]    //TODO Deserialize seems useless, we are not getting that from the client? unless the client is another runtime maybe...?
 struct RuntimePacketsentPayload {
     port: String,
-    event: RuntimePacketEvent,
+    event: RuntimePacketEvent, //TODO spec what does this do? format? fbp-protocol says: string enum
+    #[serde(rename = "type")]
+    typ: Option<String>, // spec: the basic data type send, example "array" -- TODO which values are allowed here? TODO serde rename correct?
+    schema: Option<String>, // spec: URL to JSON schema describing the format of the data
     graph: String,
+    payload: Option<String>, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
 }
 
 impl RuntimePacketsentMessage {
@@ -2255,11 +2260,14 @@ impl RuntimePacketsentMessage {
 }
 
 impl From<RuntimePacketRequestPayload> for RuntimePacketsentPayload {
-    fn from(packet: RuntimePacketRequestPayload) -> Self {
-        RuntimePacketsentPayload {
-            port: packet.port,
-            event: packet.event,
-            graph: packet.graph,
+    fn from(payload: RuntimePacketRequestPayload) -> Self {
+        RuntimePacketsentPayload {  // we just leave away the field secret; and many fields can be None
+            port: payload.port,
+            event: payload.event,
+            typ: payload.typ,
+            schema: payload.schema,
+            graph: payload.graph,
+            payload: payload.payload,
         }
     }
 }
