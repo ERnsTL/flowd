@@ -5472,7 +5472,7 @@ struct LibComponent<'a> {
 
 [export: 'process']
 fn flowd_process(words string) u64 {
-        return u64(words.len)
+        return u64(words.len - 1)
 }
 
 // not sure who inserts this function into the library, either V or TCC, but it is undefined:
