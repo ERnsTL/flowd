@@ -67,6 +67,7 @@ fn main() {
         RepeatComponent::get_metadata(),
         DropComponent::get_metadata(),
         OutputComponent::get_metadata(),
+        LibComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1648,6 +1649,7 @@ impl RuntimeRuntimePayload {
                     "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
                     "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
                     "Output" => { OutputComponent::new(inports, outports, signalsource).run(); },
+                    "LibComponent" => { LibComponent::new(inports, outports, signalsource).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
