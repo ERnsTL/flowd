@@ -4851,6 +4851,9 @@ impl Graph {
         if let Some(node) = self.nodes.get_mut(&name) { //TODO optimize: borrowing a String here
             node.metadata.x = metadata.x;
             node.metadata.y = metadata.y;
+            // known additional fields from noflo-ui
+            node.metadata.width = Some(metadata.width);
+            node.metadata.height = Some(metadata.height);
             return Ok(());
         } else {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node by that name not found")));
