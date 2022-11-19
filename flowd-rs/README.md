@@ -42,7 +42,7 @@ Test suite of the FBP network protocol:
 * Several things to clarify with the developers of the test suite, especially error reporting is lacking.
 
 Graph support:
-* Full in-memory representation and serialization and deserialization to/from the FB PJSON Graph format is implemented.
+* Full in-memory representation and serialization and deserialization to/from the FBP JSON Graph format is implemented.
 * All properties of the FBP JSON Graph data format are defined.
 * Loading and saving to/from disk is unimplemented.
 * Subgraphs can be (de-)serialized but behavior is unimplemented.
