@@ -2,7 +2,7 @@ Re-implementation of the *flowd* FBP runtime in Rust.
 
 More on the idea and concepts of *flowd* [in its Github repository](https://github.com/ERnsTL/flowd).
 
-Once feature parity with the Go version has been achieved (note, the Go version does not support FBP Netork Protocol) then flowd-rs will become the main version.
+Once feature parity with the Go version has been achieved (note, the Go version does not support FBP Network Protocol) then flowd-rs will become the main version. (Existing components in Go will still be usable in *flowd-rs* through an adapter component.)
 
 
 ## Running
