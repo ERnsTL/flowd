@@ -23,9 +23,13 @@ use chrono::prelude::*;
 
 use rtrb;
 
+// for loading of C ABI components from libraries
 use libloading::{Library, Symbol};
 use std::ffi::{OsString, CString, CStr};
 use std::os::unix::ffi::{OsStringExt};
+
+// for UnixSocketServerComponent
+use std::io::{Write, Read};
 
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
@@ -68,6 +72,7 @@ fn main() {
         DropComponent::get_metadata(),
         OutputComponent::get_metadata(),
         LibComponent::get_metadata(),
+        UnixSocketServerComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1650,6 +1655,7 @@ impl RuntimeRuntimePayload {
                     "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
                     "Output" => { OutputComponent::new(inports, outports, signalsource).run(); },
                     "LibComponent" => { LibComponent::new(inports, outports, signalsource).run(); },
+                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -5590,6 +5596,134 @@ impl Component for LibComponent<'_> {
                     required: true,
                     is_arrayport: false,
                     description: String::from("processed data from IN port"),   //TODO
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+        }
+    }
+}
+
+
+struct UnixSocketServerComponent {
+    conf: ProcessEdgeSource,
+    resp: ProcessEdgeSource,
+    out: ProcessEdgeSink,
+    signals: ProcessSignalSource,
+}
+
+impl Component for UnixSocketServerComponent {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+        UnixSocketServerComponent {
+            conf: inports.remove("CONF").expect("found no CONF inport"),
+            resp: inports.remove("RESP").expect("found no RESP inport"),
+            out: outports.remove("OUT").expect("found no OUT outport"),
+            signals: signals,
+        }
+    }
+
+    fn run(&mut self) {
+        debug!("UnixSocketServer is now run()ning!");
+        let conf = &mut self.conf;
+        trace!("UnixSocketServer spinning for listen path on CONF...");
+        while conf.is_empty() {
+            thread::yield_now();
+        }
+        let listenpath = String::from_utf8(conf.pop().expect("not empty but still got an error on pop")).expect("could not parse listenpath as utf8");
+        debug!("got path {}", listenpath.clone());
+        std::fs::remove_file(&listenpath).ok();
+        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath.as_str())).expect("bind unix listener socket");
+        listener.set_nonblocking(true).expect("set listen socket to non-blocking");
+        let resp = &mut self.resp;
+        let out = &mut self.out.sink;
+        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+
+        let mut buf: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];   //TODO optimize with https://docs.rs/buffer/latest/buffer/
+        loop {
+            trace!("UnixSocketServer: begin of iteration");
+            // check signals
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals.try_recv() {
+                //TODO optimize string conversions
+                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                // stop signal
+                if ip == "stop".as_bytes().to_vec() {
+                    info!("UnixSocketServer: got stop signal, exiting");
+                    break;
+                }
+            }
+            // check in port
+            //TODO while !inn.is_empty() {
+            loop {
+                if let Ok(mut ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                    // output the packet data with newline
+                    debug!("got a packet, forwarding to unix socket...");
+
+                    // send into unix socket to peer
+                    //TODO implement
+                    debug!("done");
+                } else {
+                    break;
+                }
+            }
+            // check socket
+            //TODO this wont work ;-) re-accepts on every iteration and no receive loop ;-)
+            if let Ok((mut socket, addr)) = listener.accept() {
+                socket.write_all(b"test response");
+                if let Ok(bytes) = socket.read(&mut buf) {
+                    // got some bytes
+                    out.push(buf.as_slice().into());
+                }
+            } else {
+                //NOTE: error and "no new connection" unhandled
+                debug!("no new connection");
+            }
+            // end
+            trace!("UnixSocketServer: end of iteration");
+            //thread::park();   //TODO this would be proper way
+            thread::sleep(std::time::Duration::from_millis(500));
+        }
+        info!("cleaning up");
+        std::fs::remove_file(listenpath).unwrap();
+        info!("UnixSocketServer: exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("UnixSocketServer"),
+            description: String::from("Unix socket server"),
+            icon: String::from("bug"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("configuration value, currently the path to listen on"),
+                    values_allowed: vec![],
+                    value_default: String::from("/tmp/server.sock")
+                },
+                ComponentPort {
+                    name: String::from("RESP"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("response data from downstream proess for each connection"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
+                ComponentPort {
+                    name: String::from("OUT"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("signal and content data for Unix socket connections"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
