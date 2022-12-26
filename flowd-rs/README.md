@@ -120,4 +120,4 @@ Then add more components, port the Go components or add a wrapper for running th
 
 Create first applications using these and add features to support these use-cases and evolve in tandem with these.
 
-Finally, become production-ready with management, roles, ACLs, security and hardening overall.
+Finally, become production-ready with management, roles, ACLs, security, hardening overall, monitoring.
