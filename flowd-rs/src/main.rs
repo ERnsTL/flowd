@@ -5644,7 +5644,7 @@ impl Component for UnixSocketServerComponent {
         //TODO optimize string conversions to listen on a path
         let config = conf.pop().expect("not empty but still got an error on pop");
         let listenpath = str::from_utf8(&config).expect("could not parse listenpath as utf8");
-        debug!("got path {}", listenpath);
+        trace!("got path {}", listenpath);
         std::fs::remove_file(&listenpath).ok();
         let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
         let resp = &mut self.resp;
@@ -5656,10 +5656,10 @@ impl Component for UnixSocketServerComponent {
         let sockets_ref = Arc::clone(&sockets);
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = Arc::clone(&out_wakeup);
-        let listen_thread = thread::spawn(move || {
+        let listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+            let mut socketnum: u32 = 0;
             loop {
-                let mut socketnum: u32 = 0;
-                debug!("listening for a client...");
+                debug!("listening for a client");
                 match listener.accept() {
                     Ok((mut socket, addr)) => {
                         println!("handling client: {addr:?}");
@@ -5668,12 +5668,12 @@ impl Component for UnixSocketServerComponent {
                         let sockets_ref2 = Arc::clone(&sockets_ref);
                         let out_ref2 = Arc::clone(&out_ref);
                         let out_wakeup_ref2 = Arc::clone(&out_wakeup_ref);
-                        thread::spawn(move || {
+                        thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
                             let socketnum_inner = socketnum;
                             // receive loop and send to component OUT tagged with socketnum
                             debug!("handling client connection");
                             loop {
-                                debug!("reading from client...");
+                                trace!("reading from client");
                                 let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
                                 if let Ok(bytes) = socket.read(&mut buf) {
                                     if bytes == 0 {
@@ -5681,18 +5681,20 @@ impl Component for UnixSocketServerComponent {
                                         debug!("connection closed ok, exiting connection handler");
                                         break;
                                     }
-                                    debug!("pushing data to OUT...");
-                                    out_ref2.lock().expect("lock poisoned").push(buf);   //TODO optimize really consume here? //TODO this always hands over 1024 bytes (the size allocated)
-                                    debug!("unparking OUT thread...");
+                                    debug!("got data from client, pushing data to OUT");
+                                    buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
+                                    out_ref2.lock().expect("lock poisoned").push(buf);   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
+                                    trace!("unparking OUT thread");
                                     out_wakeup_ref2.unpark();
                                 } else {
                                     debug!("connection non-ok result, exiting connection handler");
                                     break;
                                 };
-                                debug!("-- end of iteration")
+                                trace!("-- end of iteration")
                             }
                             // when socket closed, remove myself from list of known/open sockets resp. socket handlers
                             sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                            debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
                         });
                     },
                     Err(e) => println!("accept failed: {e:?}"),
@@ -5721,11 +5723,11 @@ impl Component for UnixSocketServerComponent {
             loop {
                 if let Ok(mut ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
                     // output the packet data with newline
-                    debug!("got a packet, forwarding to unix socket...");
+                    debug!("got a packet, writing into unix socket...");
 
                     // send into unix socket to peer
                     //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip);   //TODO harden write_timeout()
+                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip);   //TODO harden write_timeout() //TODO optimize
                     debug!("done");
                 } else {
                     break;
@@ -5735,12 +5737,12 @@ impl Component for UnixSocketServerComponent {
             // check socket
             //NOTE: happens in connection handler threads, see above
 
-            trace!("UnixSocketServer: end of iteration");
+            trace!("end of iteration");
             thread::park();
         }
-        info!("cleaning up");
+        debug!("cleaning up");
         std::fs::remove_file(listenpath).unwrap();
-        info!("UnixSocketServer: exiting");
+        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
