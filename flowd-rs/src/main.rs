@@ -5191,7 +5191,7 @@ const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
-    fn run(&mut self);
+    fn run(self);   //NOTE: consume self because this method is not expected to return, and can hand over data from self to sub-threads
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
 
@@ -5210,7 +5210,7 @@ impl Component for RepeatComponent {
         }
     }
 
-    fn run(&mut self) {
+    fn run(mut self) {
         debug!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
@@ -5312,7 +5312,7 @@ impl Component for DropComponent {
         }
     }
 
-    fn run(&mut self) {
+    fn run(mut self) {
         debug!("Drop is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         loop {
@@ -5388,7 +5388,7 @@ impl Component for OutputComponent {
         }
     }
 
-    fn run(&mut self) {
+    fn run(mut self) {
         debug!("Output is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
@@ -5521,7 +5521,7 @@ impl Component for LibComponent<'_> {
     }
 
     // TODO refactor to receive on inports of the component in the shared library
-    fn run(&mut self) {
+    fn run(mut self) {
         debug!("LibComponent is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
@@ -5622,7 +5622,7 @@ impl Component for UnixSocketServerComponent {
         }
     }
 
-    fn run(&mut self) {
+    fn run(mut self) {
         debug!("UnixSocketServer is now run()ning!");
         let conf = &mut self.conf;
         trace!("UnixSocketServer spinning for listen path on CONF...");
