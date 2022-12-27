@@ -3,6 +3,7 @@
 #![feature(map_try_insert)]
 
 use std::net::{TcpListener, TcpStream};
+use std::str;
 use std::sync::{Arc, RwLock, Mutex};
 use std::thread::{self, Thread};
 use std::time::Duration;
@@ -1484,7 +1485,7 @@ impl RuntimeRuntimePayload {
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
-                sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");
+                sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");    //TODO optimize as_bytes() / clone or String in Edge struct
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
@@ -1714,9 +1715,9 @@ impl RuntimeRuntimePayload {
                         //TODO optimize, there is also try_recv() and recv_timeout()
                         if let Ok(ip) = signals.try_recv() {
                             //TODO optimize string conversions
-                            info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                            info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));    //TODO optimize conversion
                             // stop signal
-                            if ip == "stop".as_bytes().to_vec() {
+                            if ip == b"stop" {    //TODO optimize conversion
                                 info!("GraphOutports: got stop signal, exiting");
                                 break;
                             }
@@ -1728,7 +1729,7 @@ impl RuntimeRuntimePayload {
                                 if let Ok(ip) = inport.pop() {
                                     // output the packet data with newline
                                     debug!("got a packet for graph outport {}", port_name);
-                                    trace!("{}", String::from_utf8(ip.clone()).expect("non utf-8 data")); //TODO optimize avoid clone here
+                                    trace!("{}", str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid conversion here or use from_raw_parts?
 
                                     // send out to FBP network protocol client
                                     debug!("sending out to client...");
@@ -1743,7 +1744,8 @@ impl RuntimeRuntimePayload {
                                                 typ: None,   //TODO implement properly, OTOH it is an optional field
                                                 schema: None,
                                                 graph: graph_name.clone(),
-                                                payload: Some(String::from_utf8(ip.clone()).expect("non utf-8 data")),   //TODO optimize useless conversions here
+                                                payload: Some(str::from_utf8(&ip).expect("non utf-8 data").to_owned()),   //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
+                                                        // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
                                                 }))
                                                 .expect("failed to serialize runtime:packet response"),
                                             ))
@@ -1811,7 +1813,7 @@ impl RuntimeRuntimePayload {
         info!("stop: signaling all processes...");
         for (name, proc) in self.processes.iter() {
             info!("stop: signaling {}", name);
-            proc.signal.send("stop".as_bytes().to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability
+            proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
             proc.joinhandle.thread().unpark();  // wake up for reception
         }
         info!("done");
@@ -1906,7 +1908,8 @@ impl RuntimeRuntimePayload {
                     inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
                     thread::yield_now();
                 }
-                inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into()).expect("push packet from graph inport into component failed");
+                //TODO optimize String -> Vec<u8> conversion? is clone+into_bytes better or as_bytes+to_vec ?
+                inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes()).expect("push packet from graph inport into component failed");
                 inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
                 return Ok(());
             } else {
@@ -5184,6 +5187,16 @@ struct ProcessEdgeSink {
 }
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
+/*
+NOTE: Vec<u8> is growable; Box<[u8]> is decidedly not growable, which just brings limitations for forwarding IPs.
+Vec is just 1 machine word larger than Box. There is more convenience API and From implementations for Vec.
+In the wild, there also seems less use of Box<[u8]>.
+
+NOTE: Changing to [u8] here and then having &[u8] in ProcessEdges creates an avalanche of lifetime problems where something does not live long enough, 
+maybe there are some possibilities to state "this lifetime is equal to that one" but problem is that we are actually handing over 
+data from thread A to thread B, so we are not allowing thread B to have a temporary look at the data, but it is actual message passing.
+And there is no "master" who owns the data - then we could give threads A and B pointers and borrows into that data, but that is not the case.
+*/
 type MessageBuf = Vec<u8>;
 const PROCESSEDGE_BUFSIZE: usize = 7*7*7;
 const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
@@ -5191,7 +5204,7 @@ const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
-    fn run(self);   //NOTE: consume self because this method is not expected to return, and can hand over data from self to sub-threads
+    fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
 
@@ -5221,9 +5234,9 @@ impl Component for RepeatComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
-                if ip == "stop".as_bytes().to_vec() {
+                if ip == b"stop" {   //TODO optimize comparison
                     info!("Repeat: got stop signal, exiting");
                     break;
                 }
@@ -5320,9 +5333,9 @@ impl Component for DropComponent {
             // check signals
             if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
-                if ip == "stop".as_bytes().to_vec() {
+                if ip == b"stop" {   //TODO optimize comparison
                     info!("Drop: got stop signal, exiting");
                     break;
                 }
@@ -5399,9 +5412,9 @@ impl Component for OutputComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
-                if ip == "stop".as_bytes().to_vec() {
+                if ip == b"stop" {   //TODO optimize comparison
                     info!("Output: got stop signal, exiting");
                     break;
                 }
@@ -5412,7 +5425,7 @@ impl Component for OutputComponent {
                 if let Ok(ip) = inn.pop() {
                     // output the packet data with newline
                     debug!("got a packet, printing:");
-                    println!("{}", String::from_utf8(ip.clone()).expect("non utf-8 data")); //TODO optimize avoid clone here
+                    println!("{}", str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
 
                     // repeat
                     debug!("repeating packet...");
@@ -5526,7 +5539,6 @@ impl Component for LibComponent<'_> {
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
-        let mut nul_byte: Vec<u8> = vec![0];
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
@@ -5535,9 +5547,9 @@ impl Component for LibComponent<'_> {
                 //TODO optimize, there is also try_recv() and recv_timeout()
                 if let Ok(ip) = self.signals.try_recv() {
                     //TODO optimize string conversions
-                    info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                    info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                     // stop signal
-                    if ip == "stop".as_bytes().to_vec() {
+                    if ip == b"stop" {   //TODo optimize comparison
                         info!("LibComponent: got stop signal, exiting");
                         break;
                     }
@@ -5550,12 +5562,12 @@ impl Component for LibComponent<'_> {
                         debug!("got a packet, splitting words...");
 
                         //TODO call library
-                        ip.append(&mut nul_byte); //TODO optimize - just for the CStr conversion below that it finds its null byte
+                        ip.insert(ip.len(), 0); // insert null byte  //TODO optimize - just for the CStr conversion below that it finds its null byte
                         let res = fn_process(std::ffi::CStr::from_bytes_with_nul_unchecked(ip.as_slice())); //TODO fix this: take care of possible null bytes. Goal: ability to transfer any binary data, incl. null bytes. But then again, the FBP protocol is JSON so would need base64-encoding (CPU intensive!) -> any solution? do usual binary serialization formats use null byte?
 
                         // forward split words
                         //TODO maybe more than one
-                        out.push(res.to_string().into()).expect("could not push into OUT"); //TODO kludgy conversion
+                        out.push(res.to_string().into_bytes()).expect("could not push into OUT"); //TODO optimize kludgy conversion
                         out_wakeup.unpark();
                         debug!("done");
                     } else {
@@ -5629,10 +5641,12 @@ impl Component for UnixSocketServerComponent {
         while conf.is_empty() {
             thread::yield_now();
         }
-        let listenpath = String::from_utf8(conf.pop().expect("not empty but still got an error on pop")).expect("could not parse listenpath as utf8");
-        debug!("got path {}", listenpath.clone());
+        //TODO optimize string conversions to listen on a path
+        let config = conf.pop().expect("not empty but still got an error on pop");
+        let listenpath = str::from_utf8(&config).expect("could not parse listenpath as utf8");
+        debug!("got path {}", listenpath);
         std::fs::remove_file(&listenpath).ok();
-        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath.as_str())).expect("bind unix listener socket");
+        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
         let out_wakeup = Arc::new(self.out.wakeup.unwrap());
@@ -5658,10 +5672,9 @@ impl Component for UnixSocketServerComponent {
                             let socketnum_inner = socketnum;
                             // receive loop and send to component OUT tagged with socketnum
                             debug!("handling client connection");
-                            //let mut buf: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];   //TODO optimize with https://docs.rs/buffer/latest/buffer/ and/or socket.read_buf() -> BorrowedCursor and BorrowedBuf
-                            let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
                             loop {
                                 debug!("reading from client...");
+                                let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
                                 if let Ok(bytes) = socket.read(&mut buf) {
                                     if bytes == 0 {
                                         // correctly closed (or given buffer had size 0)
@@ -5695,9 +5708,9 @@ impl Component for UnixSocketServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", String::from_utf8(ip.clone()).expect("invalid utf-8"));
+                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
-                if ip == "stop".as_bytes().to_vec() {
+                if ip == b"stop" {
                     info!("UnixSocketServer: got stop signal, exiting");
                     break;
                 }
