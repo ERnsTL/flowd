@@ -5633,14 +5633,64 @@ impl Component for UnixSocketServerComponent {
         debug!("got path {}", listenpath.clone());
         std::fs::remove_file(&listenpath).ok();
         let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath.as_str())).expect("bind unix listener socket");
-        listener.set_nonblocking(true).expect("set listen socket to non-blocking");
         let resp = &mut self.resp;
-        let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out = Arc::new(Mutex::new(self.out.sink));
+        let out_wakeup = Arc::new(self.out.wakeup.unwrap());
 
-        let mut buf: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];   //TODO optimize with https://docs.rs/buffer/latest/buffer/
+        //listener.set_nonblocking(true).expect("set listen socket to non-blocking");
+        let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sockets_ref = Arc::clone(&sockets);
+        let out_ref = Arc::clone(&out);
+        let out_wakeup_ref = Arc::clone(&out_wakeup);
+        let listen_thread = thread::spawn(move || {
+            loop {
+                let mut socketnum: u32 = 0;
+                debug!("listening for a client...");
+                match listener.accept() {
+                    Ok((mut socket, addr)) => {
+                        println!("handling client: {addr:?}");
+                        socketnum += 1;
+                        sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
+                        let sockets_ref2 = Arc::clone(&sockets_ref);
+                        let out_ref2 = Arc::clone(&out_ref);
+                        let out_wakeup_ref2 = Arc::clone(&out_wakeup_ref);
+                        thread::spawn(move || {
+                            let socketnum_inner = socketnum;
+                            // receive loop and send to component OUT tagged with socketnum
+                            debug!("handling client connection");
+                            //let mut buf: [u8; 16] = [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0];   //TODO optimize with https://docs.rs/buffer/latest/buffer/ and/or socket.read_buf() -> BorrowedCursor and BorrowedBuf
+                            let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
+                            loop {
+                                debug!("reading from client...");
+                                if let Ok(bytes) = socket.read(&mut buf) {
+                                    if bytes == 0 {
+                                        // correctly closed (or given buffer had size 0)
+                                        debug!("connection closed ok, exiting connection handler");
+                                        break;
+                                    }
+                                    debug!("pushing data to OUT...");
+                                    out_ref2.lock().expect("lock poisoned").push(buf);   //TODO optimize really consume here? //TODO this always hands over 1024 bytes (the size allocated)
+                                    debug!("unparking OUT thread...");
+                                    out_wakeup_ref2.unpark();
+                                } else {
+                                    debug!("connection non-ok result, exiting connection handler");
+                                    break;
+                                };
+                                debug!("-- end of iteration")
+                            }
+                            // when socket closed, remove myself from list of known/open sockets resp. socket handlers
+                            sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                        });
+                    },
+                    Err(e) => println!("accept failed: {e:?}"),
+                }
+            }
+        });
+        debug!("entering main loop");
+
         loop {
             trace!("UnixSocketServer: begin of iteration");
+
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals.try_recv() {
@@ -5652,6 +5702,7 @@ impl Component for UnixSocketServerComponent {
                     break;
                 }
             }
+
             // check in port
             //TODO while !inn.is_empty() {
             loop {
@@ -5660,28 +5711,19 @@ impl Component for UnixSocketServerComponent {
                     debug!("got a packet, forwarding to unix socket...");
 
                     // send into unix socket to peer
-                    //TODO implement
+                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
+                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip);   //TODO harden write_timeout()
                     debug!("done");
                 } else {
                     break;
                 }
             }
+
             // check socket
-            //TODO this wont work ;-) re-accepts on every iteration and no receive loop ;-)
-            if let Ok((mut socket, addr)) = listener.accept() {
-                socket.write_all(b"test response");
-                if let Ok(bytes) = socket.read(&mut buf) {
-                    // got some bytes
-                    out.push(buf.as_slice().into());
-                }
-            } else {
-                //NOTE: error and "no new connection" unhandled
-                debug!("no new connection");
-            }
-            // end
+            //NOTE: happens in connection handler threads, see above
+
             trace!("UnixSocketServer: end of iteration");
-            //thread::park();   //TODO this would be proper way
-            thread::sleep(std::time::Duration::from_millis(500));
+            thread::park();
         }
         info!("cleaning up");
         std::fs::remove_file(listenpath).unwrap();
