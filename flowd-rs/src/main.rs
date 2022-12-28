@@ -1700,7 +1700,7 @@ impl RuntimeRuntimePayload {
                 // start thread, will move signalsource, inports
                 let graph_name = graph.properties.name.clone(); //TODO cannot change graph name during runtime because of this
                 //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
-                let mut inoutref = graph_inout_arc.clone();
+                let inoutref = graph_inout_arc.clone();
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
                     if inports.len() == 0 {
@@ -5318,7 +5318,7 @@ struct DropComponent {
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             signals: signals,
@@ -5695,7 +5695,7 @@ impl Component for UnixSocketServerComponent {
                             // when socket closed, remove myself from list of known/open sockets resp. socket handlers
                             sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
                             debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
-                        });
+                        }).expect("could not start connection handler thread");
                     },
                     Err(e) => println!("accept failed: {e:?}"),
                 }
@@ -5721,7 +5721,7 @@ impl Component for UnixSocketServerComponent {
             // check in port
             //TODO while !inn.is_empty() {
             loop {
-                if let Ok(mut ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
                     // output the packet data with newline
                     debug!("got a packet, writing into unix socket...");
 
