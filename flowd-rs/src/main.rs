@@ -5254,7 +5254,7 @@ impl ComponentLibrary {
         //TODO implement - ports are currently totally unconnected
         let inports = ProcessInports::new();
         let outports = ProcessOutports::new();
-        let (sink, source) = std::sync::mpsc::channel();
+        let (sink, source) = std::sync::mpsc::sync_channel(PROCESSEDGE_BUFSIZE);
         // TODO add dynamically-loaded components as well
         match name.as_str() {
             "Repeat" => {
