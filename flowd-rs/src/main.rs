@@ -5328,16 +5328,19 @@ impl Component for RepeatComponent {
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
-            trace!("Repeat: begin of iteration");
+            trace!("begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
-                    info!("Repeat: got stop signal, exiting");
+                    info!("got stop signal, exiting");
                     break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec());
                 }
             }
             // check in port
@@ -5431,15 +5434,20 @@ impl Component for DropComponent {
         debug!("Drop is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         loop {
-            trace!("Drop: begin of iteration");
+            trace!("begin of iteration");
             // check signals
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
-                    info!("Drop: got stop signal, exiting");
+                    info!("got stop signal, exiting");
                     break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
             // check in port
@@ -5512,16 +5520,21 @@ impl Component for OutputComponent {
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
-            trace!("Output: begin of iteration");
+            trace!("begin of iteration");
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
-                    info!("Output: got stop signal, exiting");
+                    info!("got stop signal, exiting");
                     break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
             // check in port
@@ -5650,16 +5663,21 @@ impl Component for LibComponent<'_> {
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
-                trace!("LibComponent: begin of iteration");
+                trace!("begin of iteration");
                 // check signals
                 //TODO optimize, there is also try_recv() and recv_timeout()
-                if let Ok(ip) = self.signals.try_recv() {
+                if let Ok(ip) = self.signals_in.try_recv() {
                     //TODO optimize string conversions
-                    info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                    trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                     // stop signal
                     if ip == b"stop" {   //TODo optimize comparison
-                        info!("LibComponent: got stop signal, exiting");
+                        info!("got stop signal, exiting");
                         break;
+                    } else if ip == b"ping" {
+                        trace!("got ping signal, responding");
+                        self.signals_out.send(b"pong".to_vec());
+                    } else {
+                        warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                     }
                 }
                 // check in port
@@ -5815,17 +5833,22 @@ impl Component for UnixSocketServerComponent {
         debug!("entering main loop");
 
         loop {
-            trace!("UnixSocketServer: begin of iteration");
+            trace!("begin of iteration");
 
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals.try_recv() {
+            if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
                 // stop signal
                 if ip == b"stop" {
-                    info!("UnixSocketServer: got stop signal, exiting");
+                    info!("got stop signal, exiting");
                     break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
 
