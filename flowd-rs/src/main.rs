@@ -1412,6 +1412,7 @@ impl RuntimeRuntimePayload {
 
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
     fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+        // get all graph in and out ports
         let mut graph_inout = graph_inout_arc.lock().expect("could not acquire lock for network start()");
         //TODO implement
         //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
