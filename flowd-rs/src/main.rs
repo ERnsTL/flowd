@@ -108,6 +108,7 @@ fn main() {
         }
     });
     graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(72), width: Some(72), label: Some("Repeat_31337".to_owned()) }).expect("add_node() failed");
+    //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
     graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
     graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(72), width: Some(72), label: Some("Repeat_31338".to_owned()) }).expect("add_node() failed");
     // add components required for test suite
