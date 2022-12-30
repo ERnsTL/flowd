@@ -1658,11 +1658,11 @@ impl RuntimeRuntimePayload {
                 //let component: Component where Component: Sized;
                 match component_name.as_str() {
                     // core components
-                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource).run(); },
-                    "Drop" => { DropComponent::new(inports, outports, signalsource).run(); },
-                    "Output" => { OutputComponent::new(inports, outports, signalsource).run(); },
-                    "LibComponent" => { LibComponent::new(inports, outports, signalsource).run(); },
-                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource).run(); },
+                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "Drop" => { DropComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "Output" => { OutputComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -5179,6 +5179,7 @@ impl ComponentLibrary {
                     inports,
                     outports,
                     source,
+                    sink,
                 )));
             },
             _ => {
@@ -5220,7 +5221,7 @@ const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
 const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized;
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized;
     fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
