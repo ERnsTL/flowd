@@ -32,6 +32,9 @@ use std::os::unix::ffi::{OsStringExt};
 // for UnixSocketServerComponent
 use std::io::{Write, Read};
 
+// configuration
+const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -1452,6 +1455,10 @@ impl RuntimeRuntimePayload {
 
         //TODO optimize: check performance, maybe this could be done easier using the signal channel sending (), but since the thread_handle already has blocking feature built-in...
 
+        // prepare holder of the signal back-channel for the caretaker thread
+        let mut caretaker_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
+        let (caretaker_signalsink, caretaker_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+
         // generate all connections
         struct ProcPorts {
             inports: ProcessInports,    // including ports with IIPs
@@ -1637,6 +1644,7 @@ impl RuntimeRuntimePayload {
             // process itself in thread
             let component_name = node.component.clone();
             let joinhandlesref = thread_handles.clone();
+            let caretaker_signalsink_clone = caretaker_signalsink.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
                 info!("this is process thread, waiting for Thread replacement");
                 thread::park();
@@ -1671,6 +1679,8 @@ impl RuntimeRuntimePayload {
 
             // store thread handle for wakeup in components
             thread_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
+            // store process signal channel and thread handle for caretaker thread
+            caretaker_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone()));
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
                 signal: signalsink,
@@ -1804,7 +1814,67 @@ impl RuntimeRuntimePayload {
             proc.1.joinhandle.thread().unpark();
         }
 
+        // start background thread for regular process health check
+        // not possible to kill a thread:  https://stackoverflow.com/questions/26199926/how-to-terminate-or-suspend-a-rust-thread-from-another-thread
+        // TODO optimize use condvar or mpsc channel?
+        //TODO add ability to change interval after network start
+        //TODO allow reconfiguration of network, currently this is basically a subset copy of self.processes (signal channel sink and thread handle)
+        //TODO use the Component.support_health bool there!
+        let (caretaker_signalsink2, caretaker_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+        let caretaker_thread = thread::Builder::new().name("caretaker".to_owned()).spawn( move || {
+            debug!("caretaker is running");
+            loop {
+                // TODO check the channel from master thread to us (caretaker_signalsource2)
+                //TODO optimize, there is also try_recv() and recv_timeout()
+                if let Ok(ip) = caretaker_signalsource2.try_recv() {
+                    if ip == b"stop" {
+                        debug!("got stop signal, exiting");
+                        break;
+                    }
+                }
+
+                // health check of all components
+                trace!("running health check...");
+                let mut now = chrono::Utc::now();   //TODO any way to not initialize this with a throwaway value?
+                let mut ok = true;
+                for (name, proc) in caretaker_threadandsignal.iter() {
+                    trace!("process {}...", name);
+                    // send query to process
+                    proc.0.send(b"ping".to_vec());  //TODO harden with try_send()
+                    // wake process
+                    proc.1.unpark();
+                    now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
+                    // read response
+                    match caretaker_signalsource.recv_timeout(core::time::Duration::from_millis(1000)) {
+                        Ok(ip) => {
+                            if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
+                                trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
+                                debug!("process {} OK", name);
+                            } else {
+                                warn!("process {} sent a spurious response: {}", name, str::from_utf8(&ip).expect("got non-utf8 data"));
+                                //TODO one spurious response currently trips up the logic
+                            }
+                        },
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            warn!("process {} failed to respond within 1000ms!", name);
+                            ok = false;
+                        },
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                            warn!("process {} disconnected signal channel!", name);
+                            ok = false;
+                        }
+                    }
+                }
+                if ok {
+                    debug!("process health check OK");
+                }
+                thread::sleep(PROCESS_HEALTHCHECK_DUR);
+            }
+        }).expect("failed to spawn caretaker thread");
+
         // return status
+        self.caretaker_thread = Some(caretaker_thread);
+        self.caretaker_channel = Some(caretaker_signalsink2);
         self.status.time_started = UtcTime(chrono::Utc::now());
         self.status.graph = self.graph.clone();
         self.status.started = true;
@@ -1822,6 +1892,11 @@ impl RuntimeRuntimePayload {
             proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
             proc.joinhandle.thread().unpark();  // wake up for reception
         }
+        // signal caretaker thread
+        info!("stop: signaling caretaker");
+        self.caretaker_channel.take().expect("caretaker channel is None? wtf").send(b"stop".to_vec());
+        let caretaker_thread = self.caretaker_thread.take().expect("caretaker thread is None? wtf");
+        caretaker_thread.thread().unpark();
         info!("done");
 
         // join all threads
@@ -1832,6 +1907,10 @@ impl RuntimeRuntimePayload {
             proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
         }
         info!("done");
+        // join caretaker thread
+        info!("stop: joining caretaker");
+        //TODO cannot wait for join because otherwise noflo-ui shows a timeout
+        //caretaker_thread.join().expect("caretaker thread join failed");
 
         // set status
         info!("network is shut down.");
