@@ -103,6 +103,12 @@ Deployment and reproducible setups:
 * Currently using plain Cargo, no ability to include or compile-in any external/additional components.
 * Planned.
 
+Signaling, Monitoring:
+* A background caretaker thread with ability to signal to and from all processes is implemented.
+* In addition, the main thread can issue one-way signaling to threads, eg. for a stop command.
+* The caretaker thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
+* Export of monitoring data, API server or visualization is currently not implemented.
+
 Checkpointing:
 * Planned, much later.
 
