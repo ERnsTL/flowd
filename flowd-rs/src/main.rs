@@ -1331,6 +1331,10 @@ struct RuntimeRuntimePayload {
     tracing: bool,  //TODO implement
     #[serde(skip)]
     processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
+    #[serde(skip)]
+    caretaker_thread: Option<std::thread::JoinHandle<()>>,
+    #[serde(skip)]
+    caretaker_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -1374,6 +1378,8 @@ impl Default for RuntimeRuntimePayload {
             status: NetworkStartedResponsePayload::default(),
             tracing: false,
             processes: ProcessManager::default(),
+            caretaker_thread: None,
+            caretaker_channel: None,
         }
     }
 }
