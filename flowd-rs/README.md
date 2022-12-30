@@ -35,6 +35,8 @@ FBP network protocol:
 * Delivery of IIPs is implemented.
 * IP transfer between components and bounded connections between them is implemented.
 * Much to clarify with developers of the protocol spec.
+* Ability to implement custom buffering and flushing strategies is implemented.
+* Bulk transfers and parallel send/receive are implemented.
 
 Test suite of the FBP network protocol:
 * One of the next milestones.
