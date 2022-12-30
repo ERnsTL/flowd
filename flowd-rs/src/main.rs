@@ -100,14 +100,16 @@ fn main() {
         }
     });
     graph.write().expect("lock poisoned").outports.insert("GRAPHOUT".to_owned(), GraphPort {
-        process: "Repeat_31337".to_owned(),
+        process: "Repeat_31338".to_owned(),
         port: "OUT".to_owned(),
         metadata: GraphPortMetadata {
-            x: 324,
+            x: 468,
             y: 72,
         }
     });
     graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(72), width: Some(72), label: Some("Repeat_31337".to_owned()) }).expect("add_node() failed");
+    graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(72), width: Some(72), label: Some("Repeat_31338".to_owned()) }).expect("add_node() failed");
     // add components required for test suite
     graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(72), width: Some(72), label: Some("Repeat_2ufmu".to_owned()) }).expect("add_node() failed");
     graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(72), width: Some(72), label: Some("Drop_raux7".to_owned()) }).expect("add_node() failed");
