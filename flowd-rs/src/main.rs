@@ -3007,6 +3007,14 @@ struct ComponentComponentPayload {
     subgraph: bool, // spec: is the component a subgraph?
     in_ports: Vec<ComponentPort>, // spec: array. TODO could be modelled as a hashmap/object
     out_ports: Vec<ComponentPort>, // spec: array. TODO clould be modelled as a hashmap/object ... OTOH, tere are usually not so many ports, can just as well iterate over 1/2/3/4 ports.
+    // flowd-specific
+    // TODO make extensible and versioned
+    #[serde(skip)]
+    support_health: bool,
+    #[serde(skip)]
+    support_perfdata: bool,
+    #[serde(skip)]
+    support_reconnect: bool,    //TODO should this belong to the ports (in_ports, out_ports fields)?
 }
 
 impl Default for ComponentComponentPayload {
@@ -3018,6 +3026,9 @@ impl Default for ComponentComponentPayload {
             subgraph: false,
             in_ports: vec![],
             out_ports: vec![],
+            support_health: false,
+            support_perfdata: false,
+            support_reconnect: false,
         }
     }
 }
@@ -5211,7 +5222,8 @@ trait Component {
 struct RepeatComponent {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
-    signals: ProcessSignalSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
 }
 
 impl Component for RepeatComponent {
