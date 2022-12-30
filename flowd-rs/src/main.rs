@@ -1724,21 +1724,21 @@ impl RuntimeRuntimePayload {
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
                     if inports.len() == 0 {
-                        error!("GraphOutports: no inports found, exiting");
+                        error!("no inports found, exiting");
                         return;
                     }
                     //let mut websocket = tungstenite::WebSocket::from_raw_socket(websocket_stream, tungstenite::protocol::Role::Server, None);
                     debug!("GraphOutports is now run()ning!");
                     loop {
-                        trace!("GraphOutports: begin of iteration");
+                        trace!("begin of iteration");
                         // check signals
                         //TODO optimize, there is also try_recv() and recv_timeout()
                         if let Ok(ip) = signals.try_recv() {
                             //TODO optimize string conversions
-                            info!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));    //TODO optimize conversion
+                            trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));    //TODO optimize conversion
                             // stop signal
                             if ip == b"stop" {    //TODO optimize conversion
-                                info!("GraphOutports: got stop signal, exiting");
+                                info!("got stop signal, exiting");
                                 break;
                             }
                         }
@@ -1778,10 +1778,10 @@ impl RuntimeRuntimePayload {
                                 }
                             }
                         }
-                        trace!("GraphOutports: -- end of iteration");
+                        trace!("-- end of iteration");
                         thread::park();
                     }
-                    info!("GraphOutports: exiting");
+                    info!("exiting");
                 }).expect("thread start failed");
 
                 // store thread handle for wakeup in components
