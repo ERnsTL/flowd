@@ -5234,11 +5234,12 @@ struct RepeatComponent {
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         RepeatComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
-            signals: signals,
+            signals_in: signals_in,
+            signals_out: signals_out,
         }
     }
 
@@ -5327,20 +5328,23 @@ impl Component for RepeatComponent {
                     value_default: String::from("")
                 }
             ],
+            ..Default::default()
         }
     }
 }
 
 struct DropComponent {
     inn: ProcessEdgeSource,
-    signals: ProcessSignalSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
-            signals: signals,
+            signals_in: signals_in,
+            signals_out: signals_out,
         }
     }
 
@@ -5401,6 +5405,7 @@ impl Component for DropComponent {
                 }
             ],
             out_ports: vec![],
+            ..Default::default()
         }
     }
 }
@@ -5408,15 +5413,17 @@ impl Component for DropComponent {
 struct OutputComponent {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
-    signals: ProcessSignalSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
 }
 
 impl Component for OutputComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         OutputComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
-            signals: signals,
+            signals_in: signals_in,
+            signals_out: signals_out,
         }
     }
 
@@ -5493,6 +5500,7 @@ impl Component for OutputComponent {
                     value_default: String::from("")
                 }
             ],
+            ..Default::default()
         }
     }
 }
@@ -5500,7 +5508,8 @@ impl Component for OutputComponent {
 struct LibComponent<'a> {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
-    signals: ProcessSignalSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
     fn_process: Option<libloading::Symbol<'a, unsafe extern fn(std::ffi::CString, u32) -> u32>>,
     lib: libloading::Library,
 }
@@ -5530,7 +5539,7 @@ fn flowd_init() {
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
 impl Component for LibComponent<'_> {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
             //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh
@@ -5545,7 +5554,8 @@ impl Component for LibComponent<'_> {
             LibComponent {
                 inn: inports.remove("IN").expect("found no IN inport"),
                 out: outports.remove("OUT").expect("found no OUT outport"),
-                signals: signals,
+                signals_in: signals_in,
+                signals_out: signals_out,
                 lib: lib,
                 fn_process: None,  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
@@ -5631,6 +5641,7 @@ impl Component for LibComponent<'_> {
                     value_default: String::from("")
                 }
             ],
+            ..Default::default()
         }
     }
 }
@@ -5640,16 +5651,18 @@ struct UnixSocketServerComponent {
     conf: ProcessEdgeSource,
     resp: ProcessEdgeSource,
     out: ProcessEdgeSink,
-    signals: ProcessSignalSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
 }
 
 impl Component for UnixSocketServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals: ProcessSignalSource) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         UnixSocketServerComponent {
             conf: inports.remove("CONF").expect("found no CONF inport"),
             resp: inports.remove("RESP").expect("found no RESP inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
-            signals: signals,
+            signals_in: signals_in,
+            signals_out: signals_out,
         }
     }
 
@@ -5804,6 +5817,7 @@ impl Component for UnixSocketServerComponent {
                     value_default: String::from("")
                 }
             ],
+            ..Default::default()
         }
     }
 }
