@@ -117,8 +117,61 @@ Signaling, Monitoring:
 Checkpointing:
 * Planned, much later.
 
+Present in Go version to reach feature parity:
+* TODO Sub-networks resp. composite components
+* TODO Can inspect, debug and interact with network components using standard Unix tools
+* TODO Can run a terminal UI component - and then bring it to the web using gotty :-)
+* TODO Delivery of program parameters to components (?)
+* TODO Connections between components in framed or raw way
+* TODO Basic array ports
+* TODO Broadcasting to multiple output ports, serializing only once
+* TODO Parsing of .fbp network specifications
+* TODO Parsing of .drw network specifications made using DrawFBP
+* TODO Closing of ports (implemented) and close detection
+* TODO Gracelful shutdown once all data has been processed and all components shut down
+* TODO Visualization of the given network in GraphViz format
+* TODO Display of required components and file dependencies of the given network for deployment
+* TODO Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice
+
 Everything else:
 * Maybe I forgot about something important, please post it as a Github issue.
+
+
+## Included Components
+
+* Repeat
+* Drop
+* Output
+* LibComponent (work in progress - for loading components from C API libraries)
+* Unix socket server
+* File reader
+* Trim
+* Split lines
+* Count
+
+TODO (copy from Go version):
+
+* TCP client and server
+* Unix domain client and server (abstract and path-based)
+* TLS client and server
+* SSH client
+* Simple HTTP server and client
+* Re-use of any existing programs and their output or for transformation of data (cmd component)
+* Bridges between different network parts, and thus...
+* Distribution of the network across multiple machines
+* File writing
+* File tailing resp. following
+* Modification of frame headers (?)
+* Extraction of data from frame body
+* Routing based on frame contents or header values (?)
+* Time-based events with cron expressions
+* Counter for packets (done), packet sizes and packets matching by header field (?)
+* Example login prompt and command-line interaction component
+* Example terminal UI component sending messages into the network
+* Compression and decompression in XZ/LZMA2 and Brotli formats
+* Load balancing components with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
+* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
+* WebSocket server and client with retry on connection establishment
 
 
 ## Next Steps
