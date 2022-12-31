@@ -30,16 +30,17 @@ FBP network protocol:
 * Full serialization and deserialization of all specified messages in both directions.
 * Runtime behaviors are in mock stage, working with in-memory state and actual components.
 * Adding components, removing components, changing components and their connections is implemented.
-* Starting and stopping the network is implemented.
+* Starting and stopping the network is implemented (graph traversal, connection setup, component instantiation, thread start/stop, background watchdog, signaling).
 * Sending and receiving IPs to/from graph inports and outports is implemented. So, it is possible to send data into/out of the network directly using FBP Network Protocol (besides the possibility to create components which input/output on TCP or any other channel).
 * Delivery of IIPs is implemented.
 * IP transfer between components and bounded connections between them is implemented.
 * Much to clarify with developers of the protocol spec.
 * Ability to implement custom buffering and flushing strategies is implemented.
 * Bulk transfers and parallel send/receive are implemented.
+* No bounds on the size of each information packet (limitation: system memory size, ulimits).
 
 Test suite of the FBP network protocol:
-* One of the next milestones.
+* One of the next milestones (TODO).
 * Currently more focusing on practical usability via noflo-ui.
 * Several things to clarify with the developers of the test suite, especially error reporting is lacking.
 
@@ -59,15 +60,17 @@ Online editing:
 * Supported based on the FBP network protocol.
 * Currently used user interface us noflo-ui.
 * Currently only 1 graph inside the runtime is implemented, though the data structures are there to support multiple.
+* TODO Support for multiple graphs inside the runtime, managed completely separately.
+* TODO Support for multiple FBP network protocol clients in parallel (?)
 * Much to clarify with developers of noflo-ui, status messages and documentation are terse.
 
 Security:
 * Currently unimplemented.
-* Basic token-based security and TLS support would be easy to add.
-* User and ACL management as well as ACL checking currently unimplemented.
+* Basic token-based security and TLS support would be easy to add (TODO).
+* User and ACL management as well as ACL checking currently unimplemented (TODO).
 
 Multi-language feature:
-* Part of the next milestone.
+* Part of the next milestone (TODO).
 * Basic loading and unloading of a dlopen()'ed component is there (LibComponent).
 
 Multiple component APIs, component data formats:
@@ -75,16 +78,16 @@ Multiple component APIs, component data formats:
 * Will likely develop in the direction of having
   1. core components written in Rust working directly with the in-memory data structures and
   2. components which accept the internal data structures but present different API and data formats when talking with the loaded external components (shared library, scripts, components communicating over STDIN/STDOUT)
-* Planned: Support for multiple component APIs:
+* Planned: Support for multiple component APIs: (TODO)
   * passive component driven by process(), both stateful and stateless (needs a scratch space somehow)
   * active component that is run inside an own thread (question of 2 intermixed memory allocators?)
   * active component that can do callbacks and feedback into flowd
   * components that can/cannot handle re-connection and state changes
-* Planned: Support for multiple network graph backends: Internal Rust, GStreamer-based, MQTT-based etc.
-* Planned: Support for multiple data formats when communicating with the components: JSON, CBOR, ASN.1, netstrings etc.
+* Planned: Support for multiple network graph backends: Internal Rust, GStreamer-based, MQTT-based etc. (TODO)
+* Planned: Support for multiple data formats when communicating with the components: JSON, CBOR, ASN.1, netstrings etc. (TODO)
 
 Online network changes:
-* Currently unimplemented, the network has to be stopped and restarted for changes to take effect.
+* Currently unimplemented, the network has to be stopped and restarted for changes to take effect. (TODO)
 
 Component library:
 * Management of in-memory compiled-in Rust components is implemented.
@@ -95,15 +98,15 @@ Debugging, tracing:
 * Currently responds with mock responses but does not send any tracing data.
 
 Component repository from local files:
-* Planned, one of the next milestones.
+* Planned, one of the next milestones (TODO).
 
 Component hub/repository in the internet:
 * Planned: Integration/registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))?
-* Planned, much later.
+* Planned, much later (TODO).
 
 Deployment and reproducible setups:
 * Currently using plain Cargo, no ability to include or compile-in any external/additional components.
-* Planned.
+* Planned (TODO).
 
 Signaling, Monitoring:
 * A background caretaker thread with ability to signal to and from all processes is implemented.
