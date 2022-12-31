@@ -5386,10 +5386,10 @@ impl Component for RepeatComponent {
                     break;
                 }
             }
-            trace!("Repeat: -- end of iteration");
+            trace!("-- end of iteration");
             thread::park();
         }
-        info!("Repeat: exiting");
+        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
@@ -5479,10 +5479,10 @@ impl Component for DropComponent {
                 debug!("got {} packets, dropping them.", inn.slots());
                 inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
             }
-            trace!("Drop: -- end of iteration");
+            trace!("-- end of iteration");
             thread::park();
         }
-        info!("Drop: exiting");
+        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
@@ -5566,10 +5566,10 @@ impl Component for OutputComponent {
                     break;
                 }
             }
-            trace!("Output: -- end of iteration");
+            trace!("-- end of iteration");
             thread::park();
         }
-        info!("Output: exiting");
+        info!("exiting");
     }
 
     // modeled after https://github.com/noflo/noflo-core/blob/master/components/Output.js
@@ -5712,11 +5712,11 @@ impl Component for LibComponent<'_> {
                         break;
                     }
                 }
-                trace!("LibComponent: -- end of iteration");
+                trace!("-- end of iteration");
                 thread::park();
             }
         }
-        info!("LibComponent: exiting");
+        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
@@ -5778,7 +5778,7 @@ impl Component for UnixSocketServerComponent {
     fn run(mut self) {
         debug!("UnixSocketServer is now run()ning!");
         let conf = &mut self.conf;
-        trace!("UnixSocketServer spinning for listen path on CONF...");
+        trace!("spinning for listen path on CONF...");
         while conf.is_empty() {
             thread::yield_now();
         }
