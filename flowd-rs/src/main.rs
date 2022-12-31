@@ -1342,9 +1342,9 @@ struct RuntimeRuntimePayload {
     #[serde(skip)]
     processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
     #[serde(skip)]
-    caretaker_thread: Option<std::thread::JoinHandle<()>>,
+    watchdog_thread: Option<std::thread::JoinHandle<()>>,
     #[serde(skip)]
-    caretaker_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
+    watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -1388,8 +1388,8 @@ impl Default for RuntimeRuntimePayload {
             status: NetworkStartedResponsePayload::default(),
             tracing: false,
             processes: ProcessManager::default(),
-            caretaker_thread: None,
-            caretaker_channel: None,
+            watchdog_thread: None,
+            watchdog_channel: None,
         }
     }
 }
@@ -1463,9 +1463,9 @@ impl RuntimeRuntimePayload {
 
         //TODO optimize: check performance, maybe this could be done easier using the signal channel sending (), but since the thread_handle already has blocking feature built-in...
 
-        // prepare holder of the signal back-channel for the caretaker thread
-        let mut caretaker_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
-        let (caretaker_signalsink, caretaker_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+        // prepare holder of the signal back-channel for the watchdog thread
+        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
+        let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
         // generate all connections
         struct ProcPorts {
@@ -1652,7 +1652,7 @@ impl RuntimeRuntimePayload {
             // process itself in thread
             let component_name = node.component.clone();
             let joinhandlesref = thread_handles.clone();
-            let caretaker_signalsink_clone = caretaker_signalsink.clone();
+            let watchdog_signalsink_clone = watchdog_signalsink.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
                 info!("this is process thread, waiting for Thread replacement");
                 thread::park();
@@ -1674,15 +1674,15 @@ impl RuntimeRuntimePayload {
                 //let component: Component where Component: Sized;
                 match component_name.as_str() {
                     // core components
-                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "Drop" => { DropComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "Output" => { OutputComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "Trim" => { TrimComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
-                    "Count" => { CountComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -1691,8 +1691,8 @@ impl RuntimeRuntimePayload {
 
             // store thread handle for wakeup in components
             thread_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
-            // store process signal channel and thread handle for caretaker thread
-            caretaker_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone()));
+            // store process signal channel and thread handle for watchdog thread
+            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone()));
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
                 signal: signalsink,
@@ -1832,13 +1832,13 @@ impl RuntimeRuntimePayload {
         //TODO add ability to change interval after network start
         //TODO allow reconfiguration of network, currently this is basically a subset copy of self.processes (signal channel sink and thread handle)
         //TODO use the Component.support_health bool there!
-        let (caretaker_signalsink2, caretaker_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
-        let caretaker_thread = thread::Builder::new().name("caretaker".to_owned()).spawn( move || {
-            debug!("caretaker is running");
+        // sink2 and source2 are separate for signaling between runtime and watchdog thread only so that there can be no mixup between runtime<->watchdog and watchdog<->processes communication
+        let (watchdog_signalsink2, watchdog_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+        let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
+            debug!("wathdog is running");
             loop {
-                // TODO check the channel from master thread to us (caretaker_signalsource2)
                 //TODO optimize, there is also try_recv() and recv_timeout()
-                if let Ok(ip) = caretaker_signalsource2.try_recv() {
+                if let Ok(ip) = watchdog_signalsource2.try_recv() {
                     if ip == b"stop" {
                         debug!("got stop signal, exiting");
                         break;
@@ -1849,7 +1849,7 @@ impl RuntimeRuntimePayload {
                 trace!("running health check...");
                 let mut now = chrono::Utc::now();   //TODO any way to not initialize this with a throwaway value?
                 let mut ok = true;
-                for (name, proc) in caretaker_threadandsignal.iter() {
+                for (name, proc) in watchdog_threadandsignal.iter() {
                     trace!("process {}...", name);
                     // send query to process
                     proc.0.send(b"ping".to_vec());  //TODO harden with try_send()
@@ -1857,7 +1857,7 @@ impl RuntimeRuntimePayload {
                     proc.1.unpark();
                     now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
                     // read response
-                    match caretaker_signalsource.recv_timeout(core::time::Duration::from_millis(1000)) {
+                    match watchdog_signalsource.recv_timeout(core::time::Duration::from_millis(1000)) {
                         Ok(ip) => {
                             if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
                                 trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
@@ -1882,11 +1882,11 @@ impl RuntimeRuntimePayload {
                 }
                 thread::sleep(PROCESS_HEALTHCHECK_DUR);
             }
-        }).expect("failed to spawn caretaker thread");
+        }).expect("failed to spawn watchdog thread");
 
         // return status
-        self.caretaker_thread = Some(caretaker_thread);
-        self.caretaker_channel = Some(caretaker_signalsink2);
+        self.watchdog_thread = Some(watchdog_thread);
+        self.watchdog_channel = Some(watchdog_signalsink2);
         self.status.time_started = UtcTime(chrono::Utc::now());
         self.status.graph = self.graph.clone();
         self.status.started = true;
@@ -1904,11 +1904,11 @@ impl RuntimeRuntimePayload {
             proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
             proc.joinhandle.thread().unpark();  // wake up for reception
         }
-        // signal caretaker thread
-        info!("stop: signaling caretaker");
-        self.caretaker_channel.take().expect("caretaker channel is None? wtf").send(b"stop".to_vec());
-        let caretaker_thread = self.caretaker_thread.take().expect("caretaker thread is None? wtf");
-        caretaker_thread.thread().unpark();
+        // signal watchdog thread
+        info!("stop: signaling watchdog");
+        self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec());
+        let watchdog_thread = self.watchdog_thread.take().expect("watchdog thread is None? wtf");
+        watchdog_thread.thread().unpark();
         info!("done");
 
         // join all threads
@@ -1919,10 +1919,10 @@ impl RuntimeRuntimePayload {
             proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
         }
         info!("done");
-        // join caretaker thread
-        info!("stop: joining caretaker");
+        // join watchdog thread
+        //info!("stop: joining watchdog");
         //TODO cannot wait for join because otherwise noflo-ui shows a timeout
-        //caretaker_thread.join().expect("caretaker thread join failed");
+        //watchdog_thread.join().expect("watchdog thread join failed");
 
         // set status
         info!("network is shut down.");
