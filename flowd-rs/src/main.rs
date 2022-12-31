@@ -5216,6 +5216,24 @@ impl From<GraphNodeSpecNetwork> for GraphNodeSpec {
 }
 
 // ----------
+// processes
+// ----------
+
+struct Process {
+    signal: ProcessSignalSink,    // signalling channel, uses mpsc channel which is lower performance but shareable and ok for signalling
+    joinhandle: std::thread::JoinHandle<()>,    // for waiting for thread exit TODO what is its generic parameter?
+    //TODO detect process exit
+}
+
+type ProcessManager = HashMap<String, Process>;
+
+impl std::fmt::Debug for Process {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Process").field("signal", &self.signal).field("joinhandle", &self.joinhandle).finish()
+    }
+}
+
+// ----------
 // component library
 // ----------
 
@@ -5933,24 +5951,6 @@ impl Component for UnixSocketServerComponent {
             ],
             ..Default::default()
         }
-    }
-}
-
-// ----------
-// processes
-// ----------
-
-struct Process {
-    signal: ProcessSignalSink,    // signalling channel, uses mpsc channel which is lower performance but shareable and ok for signalling
-    joinhandle: std::thread::JoinHandle<()>,    // for waiting for thread exit TODO what is its generic parameter?
-    //TODO detect process exit
-}
-
-type ProcessManager = HashMap<String, Process>;
-
-impl std::fmt::Debug for Process {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Process").field("signal", &self.signal).field("joinhandle", &self.joinhandle).finish()
     }
 }
 
