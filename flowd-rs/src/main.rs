@@ -79,6 +79,7 @@ fn main() {
         UnixSocketServerComponent::get_metadata(),
         FileReaderComponent::get_metadata(),
         TrimComponent::get_metadata(),
+        SplitLinesComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1679,6 +1680,7 @@ impl RuntimeRuntimePayload {
                     "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
                     "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
                     "Trim" => { TrimComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
+                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, caretaker_signalsink_clone).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -6146,6 +6148,118 @@ impl Component for TrimComponent {
                     required: true,
                     is_arrayport: false,
                     description: String::from("trimmed strings"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            ..Default::default()
+        }
+    }
+}
+
+struct SplitLinesComponent {
+    inn: ProcessEdgeSource,
+    out: ProcessEdgeSink,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
+}
+
+impl Component for SplitLinesComponent {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+        SplitLinesComponent {
+            inn: inports.remove("IN").expect("found no IN inport"),
+            out: outports.remove("OUT").expect("found no OUT outport"),
+            signals_in: signals_in,
+            signals_out: signals_out,
+        }
+    }
+
+    fn run(mut self) {
+        debug!("SplitLines is now run()ning!");
+        let inn = &mut self.inn;    //TODO optimize
+        let out = &mut self.out.sink;
+        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        loop {
+            trace!("begin of iteration");
+            // check signals
+            if let Ok(ip) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));
+                // stop signal
+                if ip == b"stop" {   //TODO optimize comparison
+                    info!("got stop signal, exiting");
+                    break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
+            // check in port
+            loop {
+                if let Ok(ip) = inn.pop() {
+                    // read packet - expecting UTF-8 string
+                    let mut text = str::from_utf8(&ip).expect("non utf-8 data");
+                    debug!("got a text to split");
+
+                    // split into lines and send them
+                    //TODO split by \r\n as well?
+                    let mut split = text.split("\n");
+
+                    // send it
+                    debug!("forwarding lines...");
+                    for line in split {
+                        //TODO optimize handover handling - maybe unpark every x lines?
+                        //TODO optimize error handling, all these Ok, or_else() seem unefficient
+                        out.push(Vec::from(line)).or_else(|_| {
+                            // wake up output component
+                            out_wakeup.unpark();
+                            while out.is_full() {
+                                // wait
+                            }
+                            // send nao
+                            out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
+                            Ok::<(), rtrb::PushError<MessageBuf>>(())
+                        });
+                    }
+                    out_wakeup.unpark();
+                    debug!("done");
+                } else {
+                    break;
+                }
+            }
+            trace!("-- end of iteration");
+            thread::park();
+        }
+        info!("exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("SplitLines"),
+            description: String::from("Splits IP contents by newline (\\n) and forwards the parts in separate IPs."),
+            icon: String::from("cut"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("IN"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("IPs with text to split"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
+                ComponentPort {
+                    name: String::from("OUT"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("split lines"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
