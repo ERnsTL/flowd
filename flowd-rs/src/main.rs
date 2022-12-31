@@ -24,10 +24,9 @@ use chrono::prelude::*;
 
 use rtrb;
 
-// for loading of C ABI components from libraries
+// for LibComponent
 use libloading::{Library, Symbol};
-use std::ffi::{OsString, CString, CStr};
-use std::os::unix::ffi::{OsStringExt};
+use std::ffi::{OsString};
 
 // for UnixSocketServerComponent
 use std::io::{Write, Read};
@@ -1852,7 +1851,7 @@ impl RuntimeRuntimePayload {
                 for (name, proc) in watchdog_threadandsignal.iter() {
                     trace!("process {}...", name);
                     // send query to process
-                    proc.0.send(b"ping".to_vec());  //TODO harden with try_send()
+                    proc.0.send(b"ping".to_vec()).expect("cloud not send ping");  //TODO harden with try_send()
                     // wake process
                     proc.1.unpark();
                     now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
@@ -1906,7 +1905,7 @@ impl RuntimeRuntimePayload {
         }
         // signal watchdog thread
         info!("stop: signaling watchdog");
-        self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec());
+        self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec()).expect("could not send stop signal to watchdog thread");
         let watchdog_thread = self.watchdog_thread.take().expect("watchdog thread is None? wtf");
         watchdog_thread.thread().unpark();
         info!("done");
@@ -2812,6 +2811,8 @@ impl Default for NetworkStartedResponse<'_> {
         NetworkStartedResponse {
             protocol: String::from("network"),
             command: String::from("started"),
+            //TODO fix; using recursive Default::default() because the following does not work:
+            //payload: &NetworkStartedResponsePayload::default(),
             ..Default::default()
         }
     }
@@ -3080,6 +3081,8 @@ impl Default for ComponentComponentMessage<'_> {
         ComponentComponentMessage {
             protocol: String::from("component"),
             command: String::from("component"),
+            //TODO fix, using reursive Default::default() because the following does not work:
+            //payload: &ComponentComponentPayload::default(),
             ..Default::default()
         }
     }
@@ -5354,7 +5357,7 @@ impl Component for RepeatComponent {
 
     fn run(mut self) {
         debug!("Repeat is now run()ning!");
-        let inn = &mut self.inn;    //TODO optimize
+        let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
@@ -5370,7 +5373,7 @@ impl Component for RepeatComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
                 }
             }
             // check in port
@@ -5452,7 +5455,7 @@ struct DropComponent {
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             signals_in: signals_in,
@@ -5475,7 +5478,7 @@ impl Component for DropComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -5562,7 +5565,7 @@ impl Component for OutputComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -5705,7 +5708,7 @@ impl Component for LibComponent<'_> {
                         break;
                     } else if ip == b"ping" {
                         trace!("got ping signal, responding");
-                        self.signals_out.send(b"pong".to_vec());
+                        self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
                     } else {
                         warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                     }
@@ -5718,6 +5721,7 @@ impl Component for LibComponent<'_> {
                         debug!("got a packet, splitting words...");
 
                         //TODO call library
+                        //TODO what is CStr, CString, OsStringExt used for?
                         ip.insert(ip.len(), 0); // insert null byte  //TODO optimize - just for the CStr conversion below that it finds its null byte
                         let res = fn_process(std::ffi::CStr::from_bytes_with_nul_unchecked(ip.as_slice())); //TODO fix this: take care of possible null bytes. Goal: ability to transfer any binary data, incl. null bytes. But then again, the FBP protocol is JSON so would need base64-encoding (CPU intensive!) -> any solution? do usual binary serialization formats use null byte?
 
@@ -5842,7 +5846,7 @@ impl Component for UnixSocketServerComponent {
                                     }
                                     debug!("got data from client, pushing data to OUT");
                                     buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
-                                    out_ref2.lock().expect("lock poisoned").push(buf);   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
+                                    out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
                                     trace!("unparking OUT thread");
                                     out_wakeup_ref2.unpark();
                                 } else {
@@ -5856,10 +5860,13 @@ impl Component for UnixSocketServerComponent {
                             debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
                         }).expect("could not start connection handler thread");
                     },
-                    Err(e) => println!("accept failed: {e:?}"),
+                    Err(e) => {
+                        error!("accept failed: {e:?} - exiting");
+                        break;
+                    },
                 }
             }
-        });
+        }); //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
         debug!("entering main loop");
 
         loop {
@@ -5876,7 +5883,7 @@ impl Component for UnixSocketServerComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -5891,7 +5898,7 @@ impl Component for UnixSocketServerComponent {
 
                     // send into unix socket to peer
                     //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip);   //TODO harden write_timeout() //TODO optimize
+                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
                     debug!("done");
                 } else {
                     break;
@@ -5989,7 +5996,7 @@ impl Component for FileReaderComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -6091,7 +6098,7 @@ impl Component for TrimComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -6192,7 +6199,7 @@ impl Component for SplitLinesComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -6201,12 +6208,12 @@ impl Component for SplitLinesComponent {
             loop {
                 if let Ok(ip) = inn.pop() {
                     // read packet - expecting UTF-8 string
-                    let mut text = str::from_utf8(&ip).expect("non utf-8 data");
+                    let text = str::from_utf8(&ip).expect("non utf-8 data");
                     debug!("got a text to split");
 
                     // split into lines and send them
                     //TODO split by \r\n as well?
-                    let mut split = text.split("\n");
+                    let split = text.split("\n");
 
                     // send it
                     debug!("forwarding lines...");
@@ -6222,7 +6229,7 @@ impl Component for SplitLinesComponent {
                             // send nao
                             out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
                             Ok::<(), rtrb::PushError<MessageBuf>>(())
-                        });
+                        }).expect("could not push into OUT");
                     }
                     out_wakeup.unpark();
                     debug!("done");
@@ -6294,7 +6301,7 @@ impl Component for CountComponent {
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         let mut packets: usize = 0;
-        let mut now = chrono::Utc::now();
+        let now = chrono::Utc::now();
         loop {
             trace!("begin of iteration");
             // check for shutdown of input -> send final report
@@ -6315,7 +6322,7 @@ impl Component for CountComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec());
+                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
                 } else {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -6326,8 +6333,8 @@ impl Component for CountComponent {
             //TODO add ability to forward as well (output count on separate port?)
             //TODO add counting of packet sizes, certain metadata etc.
             loop {
-                if let Ok(ip) = inn.pop() {
-                    // count packet
+                // drop IP and count it
+                if let Ok(_) = inn.pop() {
                     packets += 1;
                 } else {
                     break;
