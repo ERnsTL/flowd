@@ -2561,6 +2561,32 @@ impl Default for NetworkOutputResponse {
     }
 }
 
+impl NetworkOutputResponse {
+    fn new(msg: String) -> Self {
+        NetworkOutputResponse {
+            protocol: String::from("network"),
+            command: String::from("output"),
+            payload: NetworkOutputResponsePayload {
+                typ: String::from("message"),   //TODO optimize can we &str into a const maybe instead of always generating these String::from()?
+                message: Some(msg),
+                url: None,
+            },
+        }
+    }
+
+    fn new_previewurl(url: String) -> Self {
+        NetworkOutputResponse {
+            protocol: String::from("network"),
+            command: String::from("output"),
+            payload: NetworkOutputResponsePayload {
+                typ: String::from("previewurl"),
+                url: Some(url),
+                message: None,
+            },
+        }
+    }
+}
+
 #[skip_serializing_none]
 #[derive(Serialize, Debug)]
 struct NetworkOutputResponsePayload {
