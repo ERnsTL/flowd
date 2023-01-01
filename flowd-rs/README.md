@@ -106,7 +106,7 @@ Component hub/repository in the internet:
 
 Deployment and reproducible setups:
 * Currently using plain Cargo, no ability to include or compile-in any external/additional components.
-* Planned (TODO).
+* Planned (TODO). Goal is to easily load components from a Github repository, build them and use them in a network. Naming and referencing to such external components by git repository.
 
 Signaling, Monitoring:
 * A background caretaker thread with ability to signal to and from all processes is implemented.

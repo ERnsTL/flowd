@@ -1007,7 +1007,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         //TODO print incoming packet
                     }
 
-                    // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined)
+                    // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined) (TODO clarify with flowbased-devs)
                     //TODO maybe handle this a level higher in list of FBPMessage variants?
                     FBPMessage::RuntimePacketsentRequest(payload) => {
                         info!("got runtime:packetsent message");
