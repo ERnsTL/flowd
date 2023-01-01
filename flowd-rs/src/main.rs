@@ -91,6 +91,7 @@ fn main() {
         String::from("basic description"),
         String::from("usd")
     )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
+    // holder for a copy of the TcpStreams = connections of the clients and the graph exported inports and outports (for the graph inport and graph outport handler threads)
     let graph_inout: Arc<Mutex<GraphInportOutportHolder>> = Arc::new(Mutex::new(GraphInportOutportHolder { inports: None, outports: None, websockets: HashMap::new() }));
     info!("graph initialized");
 
@@ -170,7 +171,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
     */
     let peer_addr = stream.peer_addr().expect("could not get peer socketaddr");
     {
-        graph_inout.lock().expect("could not acquire lock for saving TcpStream for graph outport process").websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(stream.try_clone().expect("could not try_clone() TcpStream"), tungstenite::protocol::Role::Server, None));
+        graph_inout.lock().expect(r#"could not acquire lock for saving TcpStream for graph outport process"#).websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(stream.try_clone().expect("could not try_clone() TcpStream"), tungstenite::protocol::Role::Server, None));
     }
 
     let callback = |req: &Request, mut response: Response| {
@@ -1746,7 +1747,7 @@ impl RuntimeRuntimePayload {
                 // start thread, will move signalsource, inports
                 let graph_name = graph.properties.name.clone(); //TODO cannot change graph name during runtime because of this
                 //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
-                let inoutref = graph_inout_arc.clone();
+                let graph_inoutref = graph_inout_arc.clone();
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
                     if inports.len() == 0 {
@@ -1779,25 +1780,15 @@ impl RuntimeRuntimePayload {
 
                                     // send out to FBP network protocol client
                                     debug!("sending out to client...");
-                                    {
-                                        let mut websockets = inoutref.lock().unwrap();
-                                        for client in websockets.websockets.iter_mut() {
-                                        client.1
-                                            .write_message(Message::text(
-                                            serde_json::to_string(&RuntimePacketResponse::new(RuntimePacketResponsePayload {
-                                                port: port_name.clone(),    //TODO optimize
-                                                event: RuntimePacketEvent::Data,
-                                                typ: None,   //TODO implement properly, OTOH it is an optional field
-                                                schema: None,
-                                                graph: graph_name.clone(),
-                                                payload: Some(str::from_utf8(&ip).expect("non utf-8 data").to_owned()),   //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
-                                                        // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
-                                                }))
-                                                .expect("failed to serialize runtime:packet response"),
-                                            ))
-                                            .expect("failed to write message into websocket");
-                                        }
-                                    }
+                                    graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new(RuntimePacketResponsePayload {
+                                        port: port_name.clone(),    //TODO optimize
+                                        event: RuntimePacketEvent::Data,
+                                        typ: None,   //TODO implement properly, OTOH it is an optional field
+                                        schema: None,
+                                        graph: graph_name.clone(),
+                                        payload: Some(str::from_utf8(&ip).expect("non utf-8 data").to_owned()),   //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
+                                                // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
+                                    }));
                                     debug!("done");
                                 } else {
                                     break;
@@ -2053,6 +2044,19 @@ struct GraphInportOutportHolder {
 
     // connected client websockets ready to send responses to connected clients, for graphout process
     websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>
+}
+
+impl GraphInportOutportHolder {
+    fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
+        //let mut websockets = graph_inoutref.lock().unwrap();
+        for client in self.websockets.iter_mut() {
+            client.1.write_message(Message::text(
+                serde_json::to_string(packet)
+                .expect("failed to serialize runtime:packet response"),
+            ))
+            .expect("failed to write message into websocket");
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
