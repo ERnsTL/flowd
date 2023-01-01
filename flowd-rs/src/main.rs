@@ -1845,7 +1845,7 @@ impl RuntimeRuntimePayload {
         // sink2 and source2 are separate for signaling between runtime and watchdog thread only so that there can be no mixup between runtime<->watchdog and watchdog<->processes communication
         let (watchdog_signalsink2, watchdog_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
         let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
-            debug!("wathdog is running");
+            debug!("watchdog is running");
             loop {
                 //TODO optimize, there is also try_recv() and recv_timeout()
                 if let Ok(ip) = watchdog_signalsource2.try_recv() {
