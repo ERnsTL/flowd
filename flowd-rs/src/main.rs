@@ -1673,6 +1673,7 @@ impl RuntimeRuntimePayload {
             let component_name = node.component.clone();
             let joinhandlesref = thread_handles.clone();
             let watchdog_signalsink_clone = watchdog_signalsink.clone();
+            let graph_inout_ref = graph_inout_arc.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
                 info!("this is process thread, waiting for Thread replacement");
                 thread::park();
@@ -1694,15 +1695,15 @@ impl RuntimeRuntimePayload {
                 //let component: Component where Component: Sized;
                 match component_name.as_str() {
                     // core components
-                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
-                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone).run(); },
+                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -2049,7 +2050,6 @@ struct GraphInportOutportHolder {
 
 impl GraphInportOutportHolder {
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
-        //let mut websockets = graph_inoutref.lock().unwrap();
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)
@@ -5355,15 +5355,20 @@ impl ComponentLibrary {
         //TODO implement - ports are currently totally unconnected
         let inports = ProcessInports::new();
         let outports = ProcessOutports::new();
-        let (sink, source) = std::sync::mpsc::sync_channel(PROCESSEDGE_BUFSIZE);
+        let (signal_sink, signal_source) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
         // TODO add dynamically-loaded components as well
         match name.as_str() {
             "Repeat" => {
-                return Ok(Box::new(RepeatComponent::new(
+                return Ok(Box::new(RepeatComponent::new(  //TODO implement - parameters are fake
                     inports,
                     outports,
-                    source,
-                    sink,
+                    signal_source,
+                    signal_sink,
+                    Arc::new(Mutex::new(GraphInportOutportHolder{  //TODO implement - parameters are fake
+                        inports: None,
+                        outports: None,
+                        websockets: HashMap::new(),
+                    })),
                 )));
             },
             _ => {
@@ -5415,15 +5420,17 @@ struct RepeatComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         RepeatComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -5524,14 +5531,16 @@ struct DropComponent {
     inn: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -5607,15 +5616,17 @@ struct OutputComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for OutputComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         OutputComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -5707,6 +5718,7 @@ struct LibComponent<'a> {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
     fn_process: Option<libloading::Symbol<'a, unsafe extern fn(std::ffi::CString, u32) -> u32>>,
     lib: libloading::Library,
 }
@@ -5736,7 +5748,7 @@ fn flowd_init() {
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
 impl Component for LibComponent<'_> {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
             //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh
@@ -5753,6 +5765,7 @@ impl Component for LibComponent<'_> {
                 out: outports.remove("OUT").expect("found no OUT outport"),
                 signals_in: signals_in,
                 signals_out: signals_out,
+                graph_inout: graph_inout,
                 lib: lib,
                 fn_process: None,  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
@@ -5856,16 +5869,18 @@ struct UnixSocketServerComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for UnixSocketServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         UnixSocketServerComponent {
             conf: inports.remove("CONF").expect("found no CONF inport"),
             resp: inports.remove("RESP").expect("found no RESP inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -6038,15 +6053,17 @@ struct FileReaderComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for FileReaderComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         FileReaderComponent {
             inn: inports.remove("NAMES").expect("found no NAMES inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -6142,15 +6159,17 @@ struct TrimComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for TrimComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         TrimComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -6243,15 +6262,17 @@ struct SplitLinesComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for SplitLinesComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         SplitLinesComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout: graph_inout,
         }
     }
 
@@ -6355,15 +6376,17 @@ struct CountComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for CountComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CountComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
+            graph_inout,
         }
     }
 
