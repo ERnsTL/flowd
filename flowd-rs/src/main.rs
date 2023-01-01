@@ -990,7 +990,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 websocket
                                     .write_message(Message::text(
                                         serde_json::to_string(&RuntimePacketsentMessage::new(RuntimePacketsentPayload::from(payload)))
-                                            .expect("failed to serialize network:packetsent response"),
+                                            .expect("failed to serialize runtime:packetsent response"),
                                     ))
                                     .expect("failed to write message into websocket");
                             },
