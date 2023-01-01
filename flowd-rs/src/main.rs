@@ -2627,13 +2627,15 @@ impl Default for NetworkConnectResponse {
     }
 }
 
+#[skip_serializing_none]
 #[derive(Serialize, Debug)]
 struct NetworkTransmissionPayload {
     id: String, // spec: textual edge identifier, usually in form of a FBP language line
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
     graph: String,
-    subgraph: Vec<String>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
+    subgraph: Option<Vec<String>>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
+    data: Option<String>,   //TODO only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
 }
 
 impl Default for NetworkTransmissionPayload {
@@ -2643,7 +2645,8 @@ impl Default for NetworkTransmissionPayload {
             src: GraphNodeSpecNetwork::default(),
             tgt: GraphNodeSpecNetwork::default(),
             graph: String::from("main_graph"),
-            subgraph: vec![String::from("Repeater.OUT -> Display.IN")], //TODO not sure of this is correct, most likely not
+            subgraph: Some(vec![String::from("Repeater.OUT -> Display.IN")]), //TODO not sure of this is correct, most likely not
+            data: None,
         }
     }
 }
