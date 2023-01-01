@@ -97,6 +97,11 @@ Debugging, tracing:
 * Serialization and deserialization of the accoding messages is fully implemented.
 * Currently responds with mock responses but does not send any tracing data.
 
+Logging:
+* Runtime logging facilities to STDOUT with multiple levels, mentioning the thread name is implemented.
+* TODO logging to logfiles and syslog (-> log rotation)
+* Processes can send STDOUT- and STDERR-like information to the runtime logfile and/or to FBP Network Protocol client(s).
+
 Component repository from local files:
 * Planned, one of the next milestones (TODO).
 

@@ -2050,6 +2050,7 @@ struct GraphInportOutportHolder {
 
 impl GraphInportOutportHolder {
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
+        //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)
@@ -2060,6 +2061,7 @@ impl GraphInportOutportHolder {
     }
 
     fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
+        //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)
@@ -2070,6 +2072,7 @@ impl GraphInportOutportHolder {
     }
 
     fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
+        //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)
@@ -2080,6 +2083,8 @@ impl GraphInportOutportHolder {
     }
 
     fn send_network_data(&mut self, packet: &NetworkDataResponse) {
+        //TODO add capabilities check for each client!
+        //TODO add debug mode check for the graph/runtime
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)
