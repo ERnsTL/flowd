@@ -5405,7 +5405,7 @@ const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
 const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink) -> Self where Self: Sized;
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized;
     fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
