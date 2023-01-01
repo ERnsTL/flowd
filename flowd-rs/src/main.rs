@@ -2426,11 +2426,86 @@ impl Default for RuntimePacketResponsePayload {
 }
 
 impl RuntimePacketResponse {
-    fn new(payload: RuntimePacketResponsePayload) -> Self {
+    fn new (payload: RuntimePacketResponsePayload) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
             payload: payload,
+        }
+    }
+
+    fn new_connect (graph: String, port: String, typ: Option<String>, schema: Option<String>) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload {
+                graph: graph,
+                port: port,
+                event: RuntimePacketEvent::Connect,
+                typ: typ,
+                schema: schema,
+                payload: None,
+            },
+        }
+    }
+
+    fn new_begingroup (graph: String, port: String, typ: Option<String>, schema: Option<String>, group_name: String) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload {
+                graph: graph,
+                port: port,
+                event: RuntimePacketEvent::BeginGroup,
+                typ: typ,
+                schema: schema,
+                payload: Some(group_name),
+            },
+        }
+    }
+
+    fn new_data (graph: String, port: String, typ: Option<String>, schema: Option<String>, payload: String) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload {
+                graph: graph,
+                port: port,
+                event: RuntimePacketEvent::Connect,
+                typ: typ,
+                schema: schema,
+                payload: Some(payload),
+            },
+        }
+    }
+
+    fn new_endgroup (graph: String, port: String, typ: Option<String>, schema: Option<String>, group_name: String) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload {
+                graph: graph,
+                port: port,
+                event: RuntimePacketEvent::EndGroup,
+                typ: typ,
+                schema: schema,
+                payload: Some(group_name),
+            },
+        }
+    }
+
+    fn new_disconnect (graph: String, port: String, typ: Option<String>, schema: Option<String>) -> Self {
+        RuntimePacketResponse {
+            protocol: String::from("runtime"),
+            command: String::from("packet"),
+            payload: RuntimePacketResponsePayload {
+                graph: graph,
+                port: port,
+                event: RuntimePacketEvent::Disconnect,
+                typ: typ,
+                schema: schema,
+                payload: None,
+            },
         }
     }
 }
