@@ -27,7 +27,7 @@ use rtrb;
 
 // for LibComponent
 use libloading::{Library, Symbol};
-use std::ffi::{OsString};
+use std::ffi::OsString;
 
 // for UnixSocketServerComponent
 use std::io::{Write, Read};
