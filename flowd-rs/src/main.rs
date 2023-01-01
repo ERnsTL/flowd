@@ -1064,6 +1064,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
+                                /*TODO implement network debugging, see https://github.com/ERnsTL/flowd/issues/193
                                 websocket
                                     .write_message(Message::text(serde_json::to_string(&NetworkDataResponse::new(
                                         NetworkTransmissionPayload {
@@ -1078,6 +1079,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to serialize network:data response"),
                                     ))
                                     .expect("failed to write message into websocket");
+                                */
                                 },
                             Err(err) => {
                                 error!("runtime.start() failed: {}", err);
