@@ -1773,7 +1773,7 @@ impl RuntimeRuntimePayload {
                         }
                         // receive on all inports
                         for (port_name, inport) in inports.iter_mut() {
-                            //TODO while !inn.is_empty() {
+                            //TODO while !inport.is_empty() {
                             loop {
                                 if let Ok(ip) = inport.pop() {
                                     // output the packet data with newline
@@ -1782,6 +1782,7 @@ impl RuntimeRuntimePayload {
 
                                     // send out to FBP network protocol client
                                     debug!("sending out to client...");
+                                    //TODO optimize lock only once for all packets available in inport buffer
                                     graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new(RuntimePacketResponsePayload {
                                         port: port_name.clone(),    //TODO optimize
                                         event: RuntimePacketEvent::Data,
@@ -1793,6 +1794,7 @@ impl RuntimeRuntimePayload {
                                     }));
                                     debug!("done");
                                 } else {
+                                    //TODO optimize unlock graph_inout here
                                     break;
                                 }
                             }
@@ -2049,6 +2051,7 @@ struct GraphInportOutportHolder {
 }
 
 impl GraphInportOutportHolder {
+    // should not be used by components but only by GraphOutHandler (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
@@ -2060,6 +2063,7 @@ impl GraphInportOutportHolder {
         }
     }
 
+    // like STDOUT.println() - to be used by processes
     fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
@@ -2071,6 +2075,7 @@ impl GraphInportOutportHolder {
         }
     }
 
+    // like STDERR.println() - to be used by processes
     fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
@@ -2082,9 +2087,11 @@ impl GraphInportOutportHolder {
         }
     }
 
+    // inform client(s) about IP transfer on an edge, with copy of data - to be used by processes (TODO maybe later runtime for mandatory debugging?)
     fn send_network_data(&mut self, packet: &NetworkDataResponse) {
         //TODO add capabilities check for each client!
-        //TODO add debug mode check for the graph/runtime
+        //TODO add debug mode check for the graph (network:debug)
+        //TODO add check if edge was selected for debugging (network:edges)
         for client in self.websockets.iter_mut() {
             client.1.write_message(Message::text(
                 serde_json::to_string(packet)

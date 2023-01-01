@@ -96,6 +96,8 @@ Component library:
 Debugging, tracing:
 * Serialization and deserialization of the accoding messages is fully implemented.
 * Currently responds with mock responses but does not send any tracing data.
+* Processes can send copies of received and/or sent IPs out to FBP Network Protocol client(s) for debugging.
+* TODO mandatory debugging of all transmitted packets (TODO performance implications? per-process basis or graph-based or whole runtime?)
 
 Logging:
 * Runtime logging facilities to STDOUT with multiple levels, mentioning the thread name is implemented.
