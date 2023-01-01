@@ -487,12 +487,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::GraphAddedgeRequest(payload) => {
                         info!("got graph:addedge message");
                         //TODO optimize clone here
-                        match graph.write().expect("lock poisoned").add_edge(payload.graph.clone(), GraphEdge::from(payload)) {
+                        match graph.write().expect("lock poisoned").add_edge(payload.graph.clone(), GraphEdge::from(payload.clone())) {
                             Ok(_) => {
                                 info!("response: sending graph:addedge response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&GraphAddedgeResponse::default())
+                                        serde_json::to_string(&GraphAddedgeResponse::from_request(payload))
                                             .expect("failed to serialize graph:addedge response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -512,12 +512,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::GraphRemoveedgeRequest(payload) => {
                         info!("got graph:removeedge message");
-                        match graph.write().expect("lock poisoned").remove_edge(payload.graph, payload.src, payload.tgt) {
+                        match graph.write().expect("lock poisoned").remove_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone()) {  //TODO optimize any way to avoid these clones?
                             Ok(_) => {
                                 info!("response: sending graph:removeedge response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&GraphRemoveedgeResponse::default())
+                                        serde_json::to_string(&GraphRemoveedgeResponse::from_request(payload))
                                             .expect("failed to serialize graph:removeedge response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -537,12 +537,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     FBPMessage::GraphChangeedgeRequest(payload) => {
                         info!("got graph:changeedge message");
-                        match graph.write().expect("lock poisoned").change_edge(payload.graph, payload.src, payload.tgt, payload.metadata) {
+                        match graph.write().expect("lock poisoned").change_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone(), payload.metadata.clone()) {    //TODO optimize any way to avoid these clones here?
                             Ok(_) => {
                                 info!("response: sending graph:changeedge response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&GraphChangeedgeResponse::default())
+                                        serde_json::to_string(&GraphChangeedgeResponse::from_request(payload))  //TODO optimize clone
                                             .expect("failed to serialize graph:changeedge response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -1025,12 +1025,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // network:data
                     FBPMessage::NetworkEdgesRequest(payload) => {
                         info!("got network:edges message");
-                        match runtime.write().expect("lock poisoned").set_debug_edges(&payload.graph, payload.edges) {
+                        match runtime.write().expect("lock poisoned").set_debug_edges(&payload.graph, &payload.edges) {
                             Ok(_) => {
                                 info!("response: sending network:edges response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&NetworkEdgesResponse::default())
+                                        serde_json::to_string(&NetworkEdgesResponse::from_request(payload))
                                             .expect("failed to serialize network:edges response"),
                                     ))
                                     .expect("failed to write message into websocket");
@@ -1984,7 +1984,7 @@ impl RuntimeRuntimePayload {
     }
 
     //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
-    fn set_debug_edges(&mut self, graph: &str, edges: Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
+    fn set_debug_edges(&mut self, graph: &str, edges: &Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
         //TODO clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
         //TODO implement
         info!("got following debug edges:");
@@ -2694,7 +2694,10 @@ struct NetworkEdgesResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct NetworkEdgesResponsePayload {} //TODO spec: is a confirmative response of type network:edges enough or should all values be echoed beck?
+struct NetworkEdgesResponsePayload {    //TODO spec: is a confirmative response of type network:edges enough or should all values be echoed back? noflo-ui definitely complains about an empty payload on a confirmative network:edges response.
+    graph: String,
+    edges: Vec<GraphEdgeSpec>,
+}   //TODO optimize senseless duplication of structs, use serde_partial (or so?) for sending the response
 
 impl Default for NetworkEdgesResponse {
     fn default() -> Self {
@@ -2708,7 +2711,23 @@ impl Default for NetworkEdgesResponse {
 
 impl Default for NetworkEdgesResponsePayload {
     fn default() -> Self {
-        NetworkEdgesResponsePayload {}
+        NetworkEdgesResponsePayload {
+            graph: String::from("default_graph"),
+            edges: vec!(),
+        }
+    }
+}
+
+impl NetworkEdgesResponse {
+    fn from_request(payload: NetworkEdgesRequestPayload) -> Self {
+        NetworkEdgesResponse {
+            protocol: String::from("network"),
+            command: String::from("edges"),
+            payload: NetworkEdgesResponsePayload {
+                graph: payload.graph,
+                edges: payload.edges,
+            },
+        }
     }
 }
 
@@ -3876,7 +3895,7 @@ struct GraphAddedgeRequest {
     payload: GraphAddedgeRequestPayload,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct GraphAddedgeRequestPayload {
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
@@ -3887,7 +3906,7 @@ struct GraphAddedgeRequestPayload {
 
 #[skip_serializing_none]
 //NOTE: PartialEq is for graph.remove_edge() and graph.change_edge()
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 struct GraphNodeSpecNetwork {
     node: String,
     port: String,
@@ -3905,7 +3924,7 @@ impl Default for GraphNodeSpecNetwork {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct GraphEdgeMetadata {
     route: Option<i32>, //TODO clarify spec: Route identifier of a graph edge
     schema: Option<String>, //TODO clarify spec: JSON schema associated with a graph edge (TODO check schema)
@@ -3940,7 +3959,27 @@ struct GraphAddedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough?
+struct GraphAddedgeResponsePayload {    //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? sending no response -> timeout and sending graph:addedge with empty payload -> error.
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
+    metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    graph: String,
+}   //TODO optimize struct duplication with GraphAddedgeRequestPayload
+
+impl GraphAddedgeResponse {
+    fn from_request(payload: GraphAddedgeRequestPayload) -> Self {
+        GraphAddedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("addedge"),
+            payload: GraphAddedgeResponsePayload {
+                src: payload.src,
+                tgt: payload.tgt,
+                metadata: payload.metadata,
+                graph: payload.graph,
+            },
+        }
+    }
+}
 
 impl Default for GraphAddedgeResponse {
     fn default() -> Self {
@@ -3954,7 +3993,12 @@ impl Default for GraphAddedgeResponse {
 
 impl Default for GraphAddedgeResponsePayload {
     fn default() -> Self {
-        GraphAddedgeResponsePayload {}
+        GraphAddedgeResponsePayload {
+            src: GraphNodeSpecNetwork::default(),
+            tgt: GraphNodeSpecNetwork::default(),
+            metadata: GraphEdgeMetadata::default(),
+            graph: String::from("default_graph"),
+        }
     }
 }
 
@@ -3982,7 +4026,11 @@ struct GraphRemoveedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphRemoveedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough?
+struct GraphRemoveedgeResponsePayload { //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? if not sending a response, then comes a timeout. sending empty payload gives an error.
+    graph: String, //TODO spec: for graph:addedge the graph attricbute is after src,tgt but for removeedge it is first
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
+}   //TODO optimize useless duplication
 
 impl Default for GraphRemoveedgeResponse {
     fn default() -> Self {
@@ -3996,7 +4044,25 @@ impl Default for GraphRemoveedgeResponse {
 
 impl Default for GraphRemoveedgeResponsePayload {
     fn default() -> Self {
-        GraphRemoveedgeResponsePayload {}
+        GraphRemoveedgeResponsePayload {
+            graph: String::from("default_graph"),
+            src: GraphNodeSpecNetwork::default(),
+            tgt: GraphNodeSpecNetwork::default(),
+        }
+    }
+}
+
+impl GraphRemoveedgeResponse {
+    fn from_request(payload: GraphRemoveedgeRequestPayload) -> Self {
+        GraphRemoveedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("removeedge"),
+            payload: GraphRemoveedgeResponsePayload {
+                graph: payload.graph,
+                src: payload.src,
+                tgt: payload.tgt,
+            },
+        }
     }
 }
 
@@ -4008,7 +4074,7 @@ struct GraphChangeedgeRequest {
     payload: GraphChangeedgeRequestPayload,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct GraphChangeedgeRequestPayload {
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
@@ -4025,7 +4091,12 @@ struct GraphChangeedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphChangeedgeResponsePayload {} //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough?
+struct GraphChangeedgeResponsePayload { //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough? dont know if a response is expected, but sending one with an empty payload gives an error.
+    graph: String,
+    metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
+    src: GraphNodeSpecNetwork,
+    tgt: GraphNodeSpecNetwork,
+}   //TODO optimize struct duplication from GraphChangeedgeRequestPayload
 
 impl Default for GraphChangeedgeResponse {
     fn default() -> Self {
@@ -4039,7 +4110,27 @@ impl Default for GraphChangeedgeResponse {
 
 impl Default for GraphChangeedgeResponsePayload {
     fn default() -> Self {
-        GraphChangeedgeResponsePayload {}
+        GraphChangeedgeResponsePayload {
+            graph: String::from("default_graph"),
+            metadata: GraphEdgeMetadata::default(),
+            src: GraphNodeSpecNetwork::default(),
+            tgt: GraphNodeSpecNetwork::default(),
+        }
+    }
+}
+
+impl GraphChangeedgeResponse {
+    fn from_request(payload: GraphChangeedgeRequestPayload) -> Self {
+        GraphChangeedgeResponse {
+            protocol: String::from("graph"),
+            command: String::from("changeedge"),
+            payload: GraphChangeedgeResponsePayload {
+                graph: payload.graph,
+                src: payload.src,
+                tgt: payload.tgt,
+                metadata: payload.metadata,
+            },
+        }
     }
 }
 
