@@ -161,7 +161,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
         .expect("set_write_timeout call failed");
     //stream.set_nodelay(true).expect("set_nodelay call failed");
 
-    // save stream clone/dup for graph outports process and pack into "cloned" WebSocket
+    //TODO save stream clone/dup for graph outports process and pack into "cloned" WebSocket
     /*
     tungstenite::WebSocket::from_raw_socket(
     websocket.get_mut().try_clone().expect("clone of tcp stream failed for graph outports handler thread"),
@@ -1303,6 +1303,8 @@ impl Default for RuntimeRuntimeMessage<'_> {
         RuntimeRuntimeMessage {
             protocol: String::from("runtime"),
             command: String::from("runtime"),
+            //TODO fix - currently using recursive Default::default() because the following does not work:
+            //payload: &RuntimeRuntimePayload::default(),
             ..Default::default()
         }
     }
@@ -2969,6 +2971,8 @@ impl Default for NetworkStatusMessage<'_> {
         NetworkStatusMessage {
             protocol: String::from("network"),
             command: String::from("status"),
+            //TODO fix - currently using recursive Default::default() because the following does not work:
+            //payload: &NetworkStatusPayload::default(),
             ..Default::default()
         }
     }
