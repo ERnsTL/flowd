@@ -1103,7 +1103,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStopRequest(payload) => {
                         info!("got network:stop message");
                         //TODO check secret
-                        match runtime.write().expect("lock poisoned").stop() {
+                        match runtime.write().expect("lock poisoned").stop(graph_inout.clone()) {   //TODO optimize avoid clone here? (but it is just an Arc clone)
                             Ok(status) => {
                                 info!("response: sending network:stop response");
                                 websocket
@@ -1753,11 +1753,19 @@ impl RuntimeRuntimePayload {
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
                     if inports.len() == 0 {
-                        error!("no inports found, exiting");
+                        error!("no graph inports found, exiting");
                         return;
                     }
                     //let mut websocket = tungstenite::WebSocket::from_raw_socket(websocket_stream, tungstenite::protocol::Role::Server, None);
                     debug!("GraphOutports is now run()ning!");
+
+                    // inform FBP Network Protocol clients that graphout ports are now connected (runtime:packet event type = connect)
+                    //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
+                    for port_name in inports.keys() {
+                        graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new_connect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
+                    }
+
+                    // read IPs
                     loop {
                         trace!("begin of iteration");
                         // check signals
@@ -1802,6 +1810,14 @@ impl RuntimeRuntimePayload {
                         trace!("-- end of iteration");
                         thread::park();
                     }
+
+                    // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
+                    //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
+                    info!("notifying clients of graph outports disconnect");
+                    for port_name in inports.keys() {
+                        graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new_disconnect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
+                    }
+
                     info!("exiting");
                 }).expect("thread start failed");
 
@@ -1897,6 +1913,11 @@ impl RuntimeRuntimePayload {
             }
         }).expect("failed to spawn watchdog thread");
 
+        // all set, now "open the doors" = inform FBP Network Protocol clients / remote runtimes that the graph inports are now connected as well (runtime:packet event type = connect)
+        for port_name in graph_inout.inports.as_ref().expect("graph_inout.inports is None wtf").keys().cloned().collect::<Vec<_>>() {  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+            graph_inout.send_runtime_packet(&RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
+        }
+
         // return status
         self.watchdog_thread = Some(watchdog_thread);
         self.watchdog_channel = Some(watchdog_signalsink2);
@@ -1907,8 +1928,17 @@ impl RuntimeRuntimePayload {
         Ok(&self.status)
     }
 
-    fn stop(&mut self) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement in full detail
+
+        // close front door early - inform FBP Network Protocol clients that graph inports are now disconnected (runtime:packet event type = connect)
+        //NOTE: this happens before the GraphOutports handler thread is notified below among all the processes, so processing can be finished but no new packets are sent in anymore by the FBP client(s)
+        info!("notifying clients of graph outports disconnect");
+        let mut graph_inout_inner = graph_inout.lock().expect("lock poisoned");
+        let keys = graph_inout_inner.inports.as_ref().expect("graph_inout.inports is None wtf").keys().cloned().collect::<Vec<_>>();  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+        for port_name in keys {
+            graph_inout_inner.send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+        }
 
         // signal all threads
         info!("stop: signaling all processes...");
