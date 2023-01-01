@@ -1064,6 +1064,20 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
+                                websocket
+                                    .write_message(Message::text(serde_json::to_string(&NetworkDataResponse::new(
+                                        NetworkTransmissionPayload {
+                                            id: String::from("Repeater.OUT -> Display.IN"),
+                                            src: GraphNodeSpecNetwork { node: "Repeater".to_owned(), port: "OUT".to_owned(), index: None },
+                                            tgt: GraphNodeSpecNetwork { node: "Display".to_owned(), port: "IN".to_owned(), index: None },
+                                            graph: String::from("main_graph"),
+                                            subgraph: None,
+                                            data: Some(String::from("testdata"))
+                                        }
+                                    ))
+                                    .expect("failed to serialize network:data response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
                                 },
                             Err(err) => {
                                 error!("runtime.start() failed: {}", err);
