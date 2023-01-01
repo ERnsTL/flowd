@@ -121,6 +121,9 @@ Signaling, Monitoring:
 * The caretaker thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
 * Export of monitoring data, API server or visualization is currently not implemented.
 
+Testing:
+* Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
+
 Checkpointing:
 * Planned, much later.
 
