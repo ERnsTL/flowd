@@ -1019,6 +1019,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to serialize runtime:error response"),
                             ))
                             .expect("failed to write message into websocket");
+                        warn!("got runtime:packetsent message from FBP network protocol client - unexpected!");
                     }
 
                     // network:data
