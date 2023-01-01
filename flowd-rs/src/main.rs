@@ -2669,6 +2669,20 @@ impl Default for NetworkDataResponse {
     }
 }
 
+impl NetworkDataResponse {
+    fn new(payload: NetworkTransmissionPayload) -> Self {
+        //TODO solve in a better way using the type system
+        if payload.data == None {
+            error!("constructing a NetworkDataResponse with empty data field");
+        }
+        NetworkDataResponse {
+            protocol: String::from("network"),
+            command: String::from("data"),
+            payload: payload,
+        }
+    }
+}
+
 // network:begingroup response
 #[derive(Serialize, Debug)]
 struct NetworkBegingroupResponse {
