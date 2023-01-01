@@ -2643,13 +2643,13 @@ impl Default for NetworkConnectResponse {
 
 #[skip_serializing_none]
 #[derive(Serialize, Debug)]
-struct NetworkTransmissionPayload {
+struct NetworkTransmissionPayload { //TODO rename to NetworkEventPayload? In FBP network protocol spec the base fields (id, sr, tgt, graph, subgraph) are referenced ad "network/event":  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/network.yml#L246
     id: String, // spec: textual edge identifier, usually in form of a FBP language line
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
     graph: String,
     subgraph: Option<Vec<String>>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
-    data: Option<String>,   //TODO only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
+    data: Option<String>,   //TODO fix do this using type system (composable traits? "inheritance"?) data is only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
 }
 
 impl Default for NetworkTransmissionPayload {
