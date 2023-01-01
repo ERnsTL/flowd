@@ -2058,6 +2058,36 @@ impl GraphInportOutportHolder {
             .expect("failed to write message into websocket");
         }
     }
+
+    fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
+        for client in self.websockets.iter_mut() {
+            client.1.write_message(Message::text(
+                serde_json::to_string(packet)
+                .expect("failed to serialize network:output response"),
+            ))
+            .expect("failed to write message into websocket");
+        }
+    }
+
+    fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
+        for client in self.websockets.iter_mut() {
+            client.1.write_message(Message::text(
+                serde_json::to_string(packet)
+                .expect("failed to serialize network:error response"),
+            ))
+            .expect("failed to write message into websocket");
+        }
+    }
+
+    fn send_network_data(&mut self, packet: &NetworkDataResponse) {
+        for client in self.websockets.iter_mut() {
+            client.1.write_message(Message::text(
+                serde_json::to_string(packet)
+                .expect("failed to serialize network:data response"),
+            ))
+            .expect("failed to write message into websocket");
+        }
+    }
 }
 
 #[derive(Serialize, Debug)]
