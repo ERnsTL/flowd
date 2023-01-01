@@ -2650,7 +2650,7 @@ struct NetworkTransmissionPayload { //TODO rename to NetworkEventPayload? In FBP
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
     graph: String,
-    subgraph: Option<Vec<String>>, // spec: Subgraph identifier for the event. An array of node IDs. TODO what does it mean? why a list of node IDs?
+    subgraph: Option<Vec<String>>, // spec: Subgraph identifier for the event. An array of node IDs. optional according to schema. TODO what does it mean? why a list of node IDs? - check schema:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/shared.yml#L193
     data: Option<String>,   //TODO fix do this using type system (composable traits? "inheritance"?) data is only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
 }
 
