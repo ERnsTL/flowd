@@ -1926,20 +1926,29 @@ impl RuntimeRuntimePayload {
                 }
                 if ok {
                     debug!("process health check OK");
+                } else if exited_count == watchdog_threadandsignal.len() {
+                    // network has effectively shut down
+                    info!("process health check: all processes exited");
+                    //TODO signal runtime
+                    //self.stop(graph);
+                    //self.status.running = false;//###
                 }
                 thread::sleep(PROCESS_HEALTHCHECK_DUR);
             }
         }).expect("failed to spawn watchdog thread");
 
         // all set, now "open the doors" = inform FBP Network Protocol clients / remote runtimes that the graph inports are now connected as well (runtime:packet event type = connect)
-        for port_name in graph_inout.inports.as_ref().expect("graph_inout.inports is None wtf").keys().cloned().collect::<Vec<_>>() {  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
-            graph_inout.send_runtime_packet(&RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
+        // check if graph has inports
+        if let Some(inports) = &graph_inout.inports {
+            for port_name in inports.keys().cloned().collect::<Vec<_>>() {  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+                graph_inout.send_runtime_packet(&RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
+            }
         }
 
         // return status
         self.watchdog_thread = Some(watchdog_thread);
         self.watchdog_channel = Some(watchdog_signalsink2);
-        self.status.time_started = UtcTime(chrono::Utc::now());
+        self.status.time_started = UtcTime(chrono::Utc::now()); //TODO why convert to UtcTime?
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = true;
