@@ -6618,6 +6618,25 @@ impl Component for SplitLinesComponent {
                             out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
                             Ok::<(), rtrb::PushError<MessageBuf>>(())
                         }).expect("could not push into OUT");
+                        */
+                        if let Err(_) = out.push(Vec::from(line)) {
+                            // full, so wake up output-side component
+                            out_wakeup.unpark();
+                            while out.is_full() {
+                                // wait     //TODO optimize
+                            }
+                            // send nao
+                            out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
+                        }
+
+                        // wake up the output-side process once there is some data to work on
+                        //TODO optimize - but incremend and bitwise equality should be cheap?
+                        /*
+                        iterations += 1;
+                        if iterations == 50 {
+                            out_wakeup.unpark();
+                        }
+                        */
                     }
                     out_wakeup.unpark();
                     debug!("done");
