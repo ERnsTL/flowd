@@ -6794,7 +6794,7 @@ impl Component for CountComponent {
                 debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
                 out_wakeup.unpark();
-                debug!("done");
+                break;
             }
 
             trace!("-- end of iteration");
