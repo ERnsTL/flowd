@@ -983,7 +983,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     // protocol:runtime
                     FBPMessage::RuntimePacketRequest(payload) => {
                         info!("got runtime:packet message");
-                        //TODO or maybe better send this to graph?
+                        //TODO or maybe better send this to graph instead of runtime? in future for multi-graph support, yes.
                         match runtime.write().expect("lock poisoned").packet(&payload, &mut graph_inout.lock().expect("lock poisoned")) {
                             Ok(_) => {
                                 info!("response: sending runtime:packetsent response");
@@ -1005,21 +1005,19 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     .expect("failed to write message into websocket");
                             }
                         }
-                        //TODO print incoming packet
                     }
 
                     // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined) (TODO clarify with flowbased-devs)
                     //TODO maybe handle this a level higher in list of FBPMessage variants?
                     FBPMessage::RuntimePacketsentRequest(payload) => {
                         info!("got runtime:packetsent message");
-                        info!("response: sending runtime:error response");
+                        warn!("response: sending runtime:error response (error case, unexpected from FBP network protocol client)");
                         websocket
                             .write_message(Message::text(
                                 serde_json::to_string(&RuntimeErrorResponse::new(String::from("runtime:packetsent from client is an error")))
                                     .expect("failed to serialize runtime:error response"),
                             ))
                             .expect("failed to write message into websocket");
-                        warn!("got runtime:packetsent message from FBP network protocol client - unexpected!");
                     }
 
                     // network:data
