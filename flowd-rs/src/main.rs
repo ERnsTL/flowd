@@ -1877,13 +1877,32 @@ impl RuntimeRuntimePayload {
                 trace!("running health check...");
                 let mut now = chrono::Utc::now();   //TODO any way to not initialize this with a throwaway value?
                 let mut ok = true;
+                let mut exited_count: usize = 0;
                 for (name, proc) in watchdog_threadandsignal.iter() {
                     trace!("process {}...", name);
                     // send query to process
-                    proc.0.send(b"ping".to_vec()).expect("cloud not send ping");  //TODO harden with try_send()
+                    match proc.0.try_send(b"ping".to_vec()) {
+                        Ok(_) => {},
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            warn!("process {} signal channel full", name);
+                            ok = false;
+                            continue;
+                        },
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            warn!("process {} signal channel disconnected", name);
+                            exited_count += 1;
+                            ok = false;
+                            continue;
+                        },
+                    }
+
+                    // check if process is still running
+                    //TODO currently we have only Thread, not a JoinHandle here -> is it possible to get a JoinHandle here, then it would be directly possible to check.
+
                     // wake process
                     proc.1.unpark();
                     now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
+
                     // read response
                     match watchdog_signalsource.recv_timeout(core::time::Duration::from_millis(1000)) {
                         Ok(ip) => {
