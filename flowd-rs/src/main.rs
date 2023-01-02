@@ -6718,8 +6718,8 @@ impl Component for CountComponent {
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         let mut packets: usize = 0;
-        let now = chrono::Utc::now();
-        let mut now2 = chrono::Utc::now();
+        let start = chrono::Utc::now();
+        let mut start_1st = chrono::Utc::now();
         loop {
             trace!("begin of iteration");
 
@@ -6744,7 +6744,7 @@ impl Component for CountComponent {
             //TODO add ability to forward as well (output count on separate port?)
             //TODO add counting of packet sizes, certain metadata etc.
             if packets == 0 {
-                now2 = chrono::Utc::now();
+                start_1st = chrono::Utc::now();
             }
             while !inn.is_empty() {
                 // drop IP and count it
@@ -6763,7 +6763,7 @@ impl Component for CountComponent {
                 // send final report
                 info!("EOF on inport, shutting down");
                 let end = chrono::Utc::now();
-                debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - now, end - now2);
+                debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
                 out_wakeup.unpark();
                 debug!("done");
