@@ -6597,13 +6597,17 @@ impl Component for SplitLinesComponent {
 
                     // split into lines and send them
                     //TODO split by \r\n as well?
-                    let split = text.split("\n");
+                    //let split = text.split("\n"); //TODO optimize what is faster - this or text.lines() ?
 
                     // send it
                     debug!("forwarding lines...");
-                    for line in split {
+                    let mut iterations: usize = 0;
+                    //for line in split {
+                    for line in text.lines() {
+                        //TODO optimize - next process gets woken up only once outport is full
                         //TODO optimize handover handling - maybe unpark every x lines?
                         //TODO optimize error handling, all these Ok, or_else() seem unefficient
+                        /*
                         out.push(Vec::from(line)).or_else(|_| {
                             // wake up output component
                             out_wakeup.unpark();
