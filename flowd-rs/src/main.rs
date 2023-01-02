@@ -1531,7 +1531,8 @@ impl RuntimeRuntimePayload {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
                 }
                 // assign into outports of source process
-                // nothing to do in case of IIP
+                // nothing to do in case of IIP - this also means that sink will go ouf ot scope and that source.is_abandoned() = Arc::strong_count() will be 1
+                // in summary: IIP ports are closed/abandoned
             } else {
                 // prepare edge
                 info!("preparing edge from {}.{} to {}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
@@ -5644,7 +5645,7 @@ data from thread A to thread B, so we are not allowing thread B to have a tempor
 And there is no "master" who owns the data - then we could give threads A and B pointers and borrows into that data, but that is not the case.
 */
 type MessageBuf = Vec<u8>;
-const PROCESSEDGE_BUFSIZE: usize = 7*7*7;
+const PROCESSEDGE_BUFSIZE: usize = 7*7*7*7;
 const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
 const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
@@ -5680,6 +5681,7 @@ impl Component for RepeatComponent {
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         loop {
             trace!("begin of iteration");
+
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
@@ -5694,6 +5696,7 @@ impl Component for RepeatComponent {
                     self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
                 }
             }
+
             // check in port
             loop {
                 if let Ok(ip) = inn.pop() {
@@ -5725,6 +5728,15 @@ impl Component for RepeatComponent {
                     break;
                 }
             }
+
+            // are we done?
+            if inn.is_abandoned() {
+                // input closed, nothing more to do
+                info!("EOF on inport, shutting down");
+                out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -5788,6 +5800,7 @@ impl Component for DropComponent {
         let inn = &mut self.inn;    //TODO optimize
         loop {
             trace!("begin of iteration");
+
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
@@ -5803,6 +5816,7 @@ impl Component for DropComponent {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
+
             // check in port
             /*
             loop {
@@ -5820,6 +5834,14 @@ impl Component for DropComponent {
                 debug!("got {} packets, dropping them.", inn.slots());
                 inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
             }
+
+            // are we done?
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                //out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -5909,6 +5931,12 @@ impl Component for OutputComponent {
                     break;
                 }
             }
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -6058,6 +6086,14 @@ impl Component for LibComponent<'_> {
                         break;
                     }
                 }
+
+                // are we done?
+                if inn.is_abandoned() {
+                    info!("EOF on inport, shutting down");
+                    out_wakeup.unpark();
+                    break;
+                }
+
                 trace!("-- end of iteration");
                 thread::park();
             }
@@ -6352,6 +6388,14 @@ impl Component for FileReaderComponent {
                     break;
                 }
             }
+
+            // are we done?
+            if filenames.is_abandoned() {
+                info!("EOF on inport NAMES, shutting down");
+                out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -6455,6 +6499,14 @@ impl Component for TrimComponent {
                     break;
                 }
             }
+
+            // are we done?
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -6569,6 +6621,14 @@ impl Component for SplitLinesComponent {
                     break;
                 }
             }
+
+            // are we done?
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                out_wakeup.unpark();
+                break;
+            }
+
             trace!("-- end of iteration");
             thread::park();
         }
@@ -6636,16 +6696,9 @@ impl Component for CountComponent {
         let out_wakeup = self.out.wakeup.as_ref().unwrap();
         let mut packets: usize = 0;
         let now = chrono::Utc::now();
+        let mut now2 = chrono::Utc::now();
         loop {
             trace!("begin of iteration");
-            // check for shutdown of input -> send final report
-            if inn.is_abandoned() {
-                // send final report
-                debug!("got EOF on input, sending final report");
-                out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
-                out_wakeup.unpark();
-                debug!("done");
-            }
 
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
@@ -6661,23 +6714,38 @@ impl Component for CountComponent {
                     warn!("received unknown signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
+
             // check in port
             //TODO add reset port
             //TODO add triggered report by sending something into REPORT port
             //TODO add ability to forward as well (output count on separate port?)
             //TODO add counting of packet sizes, certain metadata etc.
-            loop {
+            if packets == 0 {
+                now2 = chrono::Utc::now();
+            }
+            while !inn.is_empty() {
                 // drop IP and count it
-                if let Ok(_) = inn.pop() {
-                    packets += 1;
+                if let Ok(chunk) = inn.read_chunk(inn.slots()) {
+                    //debug!("got {} packets", chunk.len());
+                    packets += chunk.len();
+                    chunk.commit_all();
+                    // TODO optimize, when we got a full buffer, we could assume there is more coming and wait a bit longer
                 } else {
                     break;
                 }
             }
-            //TODO detect EOF on in port
-            if packets % 1000000 == 0 {
-                info!("got 1M packets, duration: {}", chrono::Utc::now() - now);
+
+            // check for EOF on input
+            if inn.is_abandoned() {
+                // send final report
+                info!("EOF on inport, shutting down");
+                let end = chrono::Utc::now();
+                debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - now, end - now2);
+                out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
+                out_wakeup.unpark();
+                debug!("done");
             }
+
             trace!("-- end of iteration");
             thread::park();
         }
