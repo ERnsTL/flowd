@@ -1961,12 +1961,15 @@ impl RuntimeRuntimePayload {
         // close front door early - inform FBP Network Protocol clients that graph inports are now disconnected (runtime:packet event type = connect)
         //NOTE: this happens before the GraphOutports handler thread is notified below among all the processes, so processing can be finished but no new packets are sent in anymore by the FBP client(s)
         //NOTE: this is inside a scope so that the lock goes out of scope and thus unlocks before the GraphOutHandler thread is signaled to shut down and notifies all FBP lients and therefore tries to lock graph_inout also
-        info!("notifying clients of graph outports disconnect");
         {
             let mut graph_inout_inner = graph_inout.lock().expect("lock poisoned");
-            let keys = graph_inout_inner.inports.as_ref().expect("notify clients that graph outports disconnected: graph_inout.inports is None wtf").keys().cloned().collect::<Vec<_>>();  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
-            for port_name in keys {
-                graph_inout_inner.send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+            // check if this graph actually has graph inports
+            if let Some(inports) = &graph_inout_inner.inports {
+                info!("notifying clients of graph inports disconnect");
+                let keys = inports.keys().cloned().collect::<Vec<_>>();  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+                for port_name in keys {
+                    graph_inout_inner.send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+                }
             }
         }
 
