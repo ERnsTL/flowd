@@ -1820,13 +1820,15 @@ impl RuntimeRuntimePayload {
                         trace!("-- end of iteration");
                         //###thread::park();
                         {
-                            // block on condvar
+                            trace!("blocking on condvar...");
                             let (lock, cvar) = &*ports_this_wake_notify;
                             let mut gotdata = lock.lock().unwrap();
                             while !*gotdata {   // while false ... wait
-                                println!("waiting for condvar = true...");
+                                trace!("waiting for condvar = true...");
                                 gotdata = cvar.wait(gotdata).unwrap();
                             }
+                            *gotdata = false;
+                            trace!("got condvar notification");
                         }
                     }
                     // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
@@ -5825,13 +5827,15 @@ impl Component for RepeatComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -5941,13 +5945,15 @@ impl Component for DropComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -6061,13 +6067,15 @@ impl Component for OutputComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -6243,13 +6251,14 @@ impl Component for LibComponent<'_> {
                 trace!("-- end of iteration");
                 //###thread::park();
                 {
-                    // block on condvar
+                    trace!("blocking on condvar...");
                     let (lock, cvar) = &*self.wakeup_notify;
                     let mut gotdata = lock.lock().unwrap();
                     while !*gotdata {   // while false ... wait
-                        println!("waiting for condvar = true...");
+                        trace!("waiting for condvar = true...");
                         gotdata = cvar.wait(gotdata).unwrap();
                     }
+                    trace!("got condvarnotification");
                 }
             }
         }
@@ -6437,13 +6446,15 @@ impl Component for UnixSocketServerComponent {
             trace!("end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         debug!("cleaning up");
@@ -6588,13 +6599,15 @@ impl Component for FileReaderComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -6724,13 +6737,15 @@ impl Component for TrimComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -6901,13 +6916,15 @@ impl Component for SplitLinesComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
@@ -7036,13 +7053,15 @@ impl Component for CountComponent {
             trace!("-- end of iteration");
             //###thread::park();
             {
-                // block on condvar
+                trace!("blocking on condvar...");
                 let (lock, cvar) = &*self.wakeup_notify;
                 let mut gotdata = lock.lock().unwrap();
                 while !*gotdata {   // while false ... wait
-                    println!("waiting for condvar = true...");
+                    trace!("waiting for condvar = true...");
                     gotdata = cvar.wait(gotdata).unwrap();
                 }
+                *gotdata = false;
+                trace!("got condvar notification");
             }
         }
         info!("exiting");
