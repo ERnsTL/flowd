@@ -4,7 +4,7 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::str;
-use std::sync::{Arc, RwLock, Mutex};
+use std::sync::{Arc, RwLock, Mutex, Condvar};
 use std::thread::{self, Thread};
 use std::time::Duration;
 
@@ -1489,12 +1489,14 @@ impl RuntimeRuntimePayload {
         struct ProcPorts {
             inports: ProcessInports,    // including ports with IIPs
             outports: ProcessOutports,
+            wake_notify: Arc<(Mutex<bool>, Condvar)>,    // for notification of this process
         }
         impl Default for ProcPorts {
             fn default() -> Self {
                 ProcPorts {
                     inports: ProcessInports::new(),
                     outports: ProcessOutports::new(),
+                    wake_notify: Arc::new((Mutex::new(false), Condvar::new())),
                 }
             }
         }
@@ -1540,12 +1542,13 @@ impl RuntimeRuntimePayload {
 
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
+                let targetproc_wake_notify = Arc::clone(&targetproc.wake_notify);
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process target inport insert failed, key exists")));
                 }
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
-                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.target.process.clone()) } ) {
+                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wake_notify: targetproc_wake_notify, proc_name: edge.target.process.clone() } ) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
                 }
             }
@@ -1557,13 +1560,14 @@ impl RuntimeRuntimePayload {
 
             // insert into inports of target process
             let targetproc = ports_all.get_mut(&edge.process).expect("graph target assignment process not found");
+            let targetproc_wake_notify = Arc::clone(&targetproc.wake_notify);
             if let Some(_) = targetproc.inports.insert(edge.port.clone(), source) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target inport insert failed, key exists")));
             }
             // assign into outports of source process
             // source process name = graphname-IN
-            let sourceproc = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
-            if let Some(_) = sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(edge.process.clone()) } ) {
+            let sourceproc: &mut ProcPorts = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
+            if let Some(_) = sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wake_notify: targetproc_wake_notify, proc_name: edge.process.clone() } ) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source inport insert failed, key exists")));
             }
         }
@@ -1575,18 +1579,19 @@ impl RuntimeRuntimePayload {
             // insert into inports of target process
             // target process name = graphname-OUT
             let targetproc = ports_all.get_mut(format!("{}-OUT", graph.properties.name).as_str()).expect("graph target assignment process not found");
+            let targetproc_wake_notify = Arc::clone(&targetproc.wake_notify);
             if let Some(_) = targetproc.inports.insert(public_name.clone(), source) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target outport insert failed, key exists")));
             }
             // assign into outports of source process
             let sourceproc = ports_all.get_mut(&edge.process).expect("graph source assignment process not found");
-            if let Some(_) = sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wakeup: None, proc_name: Some(format!("{}-OUT", graph.properties.name)) } ) {
+            if let Some(_) = sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wake_notify: targetproc_wake_notify, proc_name: format!("{}-OUT", graph.properties.name) } ) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source outport insert failed, key exists")));
             }
         }
 
         // generate processes and assign prepared connections
-        let thread_handles: Arc<std::sync::Mutex<HashMap<String, Thread>>> = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let mut thread_wake_handles: HashMap<String, Arc<(Mutex<bool>, Condvar)>> = HashMap::new(); // these already exist in ports_all but they get consumed and removed so for the -IN and -OUT they wont exist anymore
         let mut found: bool;
         let mut found2: bool;
         for (proc_name, node) in graph.nodes.iter() {
@@ -1598,7 +1603,7 @@ impl RuntimeRuntimePayload {
             //TODO would be great to have the port name here for diagnostics
             let inports: ProcessInports = ports_this.inports;
             //TODO would be great to have the port name here for diagnostics
-            let mut outports: ProcessOutports = ports_this.outports;
+            let outports: ProcessOutports = ports_this.outports;
 
             // check if all ports exist
             found = false;
@@ -1670,16 +1675,18 @@ impl RuntimeRuntimePayload {
 
             // process itself in thread
             let component_name = node.component.clone();
-            let joinhandlesref = thread_handles.clone();
+            //###let joinhandlesref = thread_wake_handles.clone();
+            let ports_this_wake_notify = Arc::clone(&ports_this.wake_notify);
             let watchdog_signalsink_clone = watchdog_signalsink.clone();
             let graph_inout_ref = graph_inout_arc.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
-                info!("this is process thread, waiting for Thread replacement");
-                thread::park();
-                info!("replacing Thread objects and starting component");
+                //info!("this is process thread, waiting for Thread replacement");//###
+                //thread::park();
+                //info!("replacing Thread objects and starting component");//###
 
                 // replace all process names with Thread handles
                 // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
+                /*###
                 for outport in outports.iter_mut() {
                     let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
                     let joinhandles_tmp = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
@@ -1688,21 +1695,22 @@ impl RuntimeRuntimePayload {
                     outport.1.proc_name = None; // before this was Some(String), now replaced with None
                 }
                 drop(joinhandlesref);   // not needed anymore, we got the handles
+                */
 
                 // component
                 //TODO make it generic instead of if
                 //let component: Component where Component: Sized;
                 match component_name.as_str() {
                     // core components
-                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
@@ -1710,7 +1718,8 @@ impl RuntimeRuntimePayload {
             }).expect("thread start failed");
 
             // store thread handle for wakeup in components
-            thread_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
+            //###thread_wake_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
+            thread_wake_handles.insert(proc_name.clone(), ports_this.wake_notify);
             // store process signal channel and thread handle for watchdog thread
             watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone()));
             // store process signal channel and join handle
@@ -1724,6 +1733,7 @@ impl RuntimeRuntimePayload {
         graph_inout.inports = None;
         graph_inout.outports = None;
         if ports_all.len() > 0 {
+            // insert graph inport handler
             if ports_all.contains_key(format!("{}-IN", graph.properties.name).as_str()) {
                 // target datastructure
                 let mut outports: HashMap<String, ProcessEdgeSink> = HashMap::new();
@@ -1731,10 +1741,10 @@ impl RuntimeRuntimePayload {
                 let ports_this: ProcPorts = ports_all.remove(format!("{}-IN", graph.properties.name).as_str()).expect("prepared connections for graph inports not found");
                 // add wakeup handles and sinks of all target processes (translate target proc_name into join_handle)
                 for (port_name, edge) in ports_this.outports {
-                    // get joinhandle
-                    let thr = thread_handles.lock().expect("acquire lock for graph inport Thread handle replacement").get(edge.proc_name.unwrap().as_str()).expect("target process for graph inport not found").clone();
+                    // get targetproc
+                    let targetproc_wake_notify = thread_wake_handles.get(edge.proc_name.as_str()).expect("target process for graph inport not found").clone();
                     // insert that port
-                    outports.insert(port_name, ProcessEdgeSink { sink: edge.sink, wakeup: Some(thr), proc_name: None });
+                    outports.insert(port_name, ProcessEdgeSink { sink: edge.sink, wake_notify: targetproc_wake_notify, proc_name: edge.proc_name });
                 }
                 // save the inports (where we put packets into) as the graph inport channel handles; they are "outport handles" because they are being written into (packet sink)
                 graph_inout.inports = Some(outports);
@@ -1749,6 +1759,7 @@ impl RuntimeRuntimePayload {
                 let graph_name = graph.properties.name.clone(); //TODO cannot change graph name during runtime because of this
                 //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
                 let graph_inoutref = graph_inout_arc.clone();
+                let ports_this_wake_notify = Arc::clone(&ports_this.wake_notify);
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
                     if inports.len() == 0 {
@@ -1807,9 +1818,17 @@ impl RuntimeRuntimePayload {
                             }
                         }
                         trace!("-- end of iteration");
-                        thread::park();
+                        //###thread::park();
+                        {
+                            // block on condvar
+                            let (lock, cvar) = &*ports_this_wake_notify;
+                            let mut gotdata = lock.lock().unwrap();
+                            while !*gotdata {   // while false ... wait
+                                println!("waiting for condvar = true...");
+                                gotdata = cvar.wait(gotdata).unwrap();
+                            }
+                        }
                     }
-
                     // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
                     //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
                     info!("notifying clients of graph outports disconnect");
@@ -1821,7 +1840,8 @@ impl RuntimeRuntimePayload {
                 }).expect("thread start failed");
 
                 // store thread handle for wakeup in components
-                thread_handles.lock().expect("failed to get lock posting graph outport thread handle").insert(format!("{}-OUT", graph.properties.name), joinhandle.thread().clone());
+                //###thread_wake_handles.lock().expect("failed to get lock posting graph outport thread handle").insert(format!("{}-OUT", graph.properties.name), joinhandle.thread().clone());
+                thread_wake_handles.insert(format!("{}-OUT", graph.properties.name), ports_this.wake_notify);
                 // store process signal channel and join handle so that the other processes writing into this graph outport component can find it
                 self.processes.insert(format!("{}-OUT", graph.properties.name), Process {
                     signal: signalsink,
@@ -2078,12 +2098,29 @@ impl RuntimeRuntimePayload {
                 while inport.sink.is_full() {
                     // wait until non-full
                     //TODO optimize
-                    inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
+
+                    {
+                        // notify process
+                        let (lock, cvar) = &*inport.wake_notify;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
+
+                    // sleep some time resp. give up CPU timeslot
                     thread::yield_now();
                 }
                 //TODO optimize String -> Vec<u8> conversion? is clone+into_bytes better or as_bytes+to_vec ?
                 inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes()).expect("push packet from graph inport into component failed");
-                inport.wakeup.as_ref().unwrap().unpark();   //TODO optimize
+                {
+                    // notify process
+                    let (lock, cvar) = &*inport.wake_notify;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 return Ok(());
             } else {
                 return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph inport with that name not found")));
@@ -5640,6 +5677,7 @@ impl ComponentLibrary {
                         outports: None,
                         websockets: HashMap::new(),
                     })),
+                    Arc::new((Mutex::new(false), Condvar::new())),  //TODO implement - fake parameter
                 )));
             },
             _ => {
@@ -5660,8 +5698,8 @@ type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
 #[derive(Debug)]
 struct ProcessEdgeSink {
     sink: rtrb::Producer<MessageBuf>,
-    wakeup: Option<Thread>,
-    proc_name: Option<String>,
+    wake_notify: Arc<(Mutex<bool>, Condvar)>,
+    proc_name: String,
 }
 type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
 type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
@@ -5681,7 +5719,7 @@ const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
 const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 
 trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized;
+    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized;
     fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
 }
@@ -5692,16 +5730,18 @@ struct RepeatComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         RepeatComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -5709,7 +5749,7 @@ impl Component for RepeatComponent {
         debug!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         loop {
             trace!("begin of iteration");
 
@@ -5733,11 +5773,18 @@ impl Component for RepeatComponent {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     debug!("done");
 
                     // small benchmark
-                    // (2022-08-28) at commit 561927 currently 2x as fast as latest Go flowd, with perfect scheduling situation even 6x as fast
+                    // (2022-08-28) at commit 561927 currently at least 2x as fast as latest Go flowd, with perfect scheduling situation even 6x as fast
                     /*
                     info!("sending 1M packets...");
                     let now1 = chrono::Utc::now();
@@ -5764,12 +5811,28 @@ impl Component for RepeatComponent {
             if inn.is_abandoned() {
                 // input closed, nothing more to do
                 info!("EOF on inport, shutting down");
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -5814,15 +5877,17 @@ struct DropComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -5874,7 +5939,16 @@ impl Component for DropComponent {
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -5909,16 +5983,18 @@ struct OutputComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for OutputComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         OutputComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -5926,7 +6002,7 @@ impl Component for OutputComponent {
         debug!("Output is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -5956,7 +6032,14 @@ impl Component for OutputComponent {
                     // repeat
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     debug!("done");
                 } else {
                     break;
@@ -5964,12 +6047,28 @@ impl Component for OutputComponent {
             }
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -6017,6 +6116,7 @@ struct LibComponent<'a> {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
     fn_process: Option<libloading::Symbol<'a, unsafe extern fn(std::ffi::CString, u32) -> u32>>,
     lib: libloading::Library,
 }
@@ -6046,7 +6146,7 @@ fn flowd_init() {
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
 impl Component for LibComponent<'_> {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
             //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh
@@ -6064,6 +6164,7 @@ impl Component for LibComponent<'_> {
                 signals_in: signals_in,
                 signals_out: signals_out,
                 graph_inout: graph_inout,
+                wakeup_notify: wakeup_notify,
                 lib: lib,
                 fn_process: None,  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
@@ -6075,7 +6176,7 @@ impl Component for LibComponent<'_> {
         debug!("LibComponent is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
@@ -6111,7 +6212,14 @@ impl Component for LibComponent<'_> {
                         // forward split words
                         //TODO maybe more than one
                         out.push(res.to_string().into_bytes()).expect("could not push into OUT"); //TODO optimize kludgy conversion
-                        out_wakeup.unpark();
+                        {
+                            // notify target process
+                            let (lock, cvar) = &*out_wakeup;
+                            let mut gotdata = lock.lock().unwrap();
+                            *gotdata = true;
+                            // notify the condvar = receiver that the value has changed.
+                            cvar.notify_one();
+                        }
                         debug!("done");
                     } else {
                         break;
@@ -6121,12 +6229,28 @@ impl Component for LibComponent<'_> {
                 // are we done?
                 if inn.is_abandoned() {
                     info!("EOF on inport, shutting down");
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     break;
                 }
 
                 trace!("-- end of iteration");
-                thread::park();
+                //###thread::park();
+                {
+                    // block on condvar
+                    let (lock, cvar) = &*self.wakeup_notify;
+                    let mut gotdata = lock.lock().unwrap();
+                    while !*gotdata {   // while false ... wait
+                        println!("waiting for condvar = true...");
+                        gotdata = cvar.wait(gotdata).unwrap();
+                    }
+                }
             }
         }
         info!("exiting");
@@ -6176,10 +6300,11 @@ struct UnixSocketServerComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for UnixSocketServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         UnixSocketServerComponent {
             conf: inports.remove("CONF").expect("found no CONF inport"),
             resp: inports.remove("RESP").expect("found no RESP inport"),
@@ -6187,6 +6312,7 @@ impl Component for UnixSocketServerComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -6205,7 +6331,7 @@ impl Component for UnixSocketServerComponent {
         let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = Arc::new(self.out.wakeup.unwrap());
+        let out_wakeup = self.out.wake_notify;
 
         //listener.set_nonblocking(true).expect("set listen socket to non-blocking");
         let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -6241,7 +6367,14 @@ impl Component for UnixSocketServerComponent {
                                     buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
                                     out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
                                     trace!("unparking OUT thread");
-                                    out_wakeup_ref2.unpark();
+                                    {
+                                        // notify target process
+                                        let (lock, cvar) = &*out_wakeup_ref2;
+                                        let mut gotdata = lock.lock().unwrap();
+                                        *gotdata = true;
+                                        // notify the condvar = receiver that the value has changed.
+                                        cvar.notify_one();
+                                    }
                                 } else {
                                     debug!("connection non-ok result, exiting connection handler");
                                     break;
@@ -6302,7 +6435,16 @@ impl Component for UnixSocketServerComponent {
             //NOTE: happens in connection handler threads, see above
 
             trace!("end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         debug!("cleaning up");
         std::fs::remove_file(listenpath).unwrap();
@@ -6360,16 +6502,18 @@ struct FileReaderComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for FileReaderComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         FileReaderComponent {
             inn: inports.remove("NAMES").expect("found no NAMES inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -6377,7 +6521,7 @@ impl Component for FileReaderComponent {
         debug!("FileReader is now run()ning!");
         let filenames = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -6413,7 +6557,14 @@ impl Component for FileReaderComponent {
                     // send it
                     debug!("forwarding file contents...");
                     out.push(contents).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     debug!("done");
                 } else {
                     break;
@@ -6423,12 +6574,28 @@ impl Component for FileReaderComponent {
             // are we done?
             if filenames.is_abandoned() {
                 info!("EOF on inport NAMES, shutting down");
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -6474,16 +6641,18 @@ struct TrimComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for TrimComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         TrimComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -6491,7 +6660,7 @@ impl Component for TrimComponent {
         debug!("Trim is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -6524,7 +6693,14 @@ impl Component for TrimComponent {
                     debug!("forwarding trimmed string...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
                     out.push(Vec::from(text)).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     debug!("done");
                 } else {
                     break;
@@ -6534,12 +6710,28 @@ impl Component for TrimComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -6585,16 +6777,18 @@ struct SplitLinesComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for SplitLinesComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         SplitLinesComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout: graph_inout,
+            wakeup_notify: wakeup_notify,
         }
     }
 
@@ -6602,7 +6796,7 @@ impl Component for SplitLinesComponent {
         debug!("SplitLines is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -6652,7 +6846,14 @@ impl Component for SplitLinesComponent {
                         */
                         if let Err(_) = out.push(Vec::from(line)) {
                             // full, so wake up output-side component
-                            out_wakeup.unpark();
+                            {
+                                // notify target process
+                                let (lock, cvar) = &*out_wakeup;
+                                let mut gotdata = lock.lock().unwrap();
+                                *gotdata = true;
+                                // notify the condvar = receiver that the value has changed.
+                                cvar.notify_one();
+                            }
                             while out.is_full() {
                                 // wait     //TODO optimize
                             }
@@ -6669,7 +6870,14 @@ impl Component for SplitLinesComponent {
                         }
                         */
                     }
-                    out_wakeup.unpark();
+                    {
+                        // notify target process
+                        let (lock, cvar) = &*out_wakeup;
+                        let mut gotdata = lock.lock().unwrap();
+                        *gotdata = true;
+                        // notify the condvar = receiver that the value has changed.
+                        cvar.notify_one();
+                    }
                     debug!("done");
                 } else {
                     break;
@@ -6679,12 +6887,28 @@ impl Component for SplitLinesComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
@@ -6730,16 +6954,18 @@ struct CountComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl Component for CountComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
         CountComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout,
+            wakeup_notify,
         }
     }
 
@@ -6747,7 +6973,7 @@ impl Component for CountComponent {
         debug!("Count is now run()ning!");
         let inn = &mut self.inn;
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.as_ref().unwrap();
+        let out_wakeup = self.out.wake_notify;
         let mut packets: usize = 0;
         let start = chrono::Utc::now();
         let mut start_1st = chrono::Utc::now();
@@ -6796,12 +7022,28 @@ impl Component for CountComponent {
                 let end = chrono::Utc::now();
                 debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
-                out_wakeup.unpark();
+                {
+                    // notify target process
+                    let (lock, cvar) = &*out_wakeup;
+                    let mut gotdata = lock.lock().unwrap();
+                    *gotdata = true;
+                    // notify the condvar = receiver that the value has changed.
+                    cvar.notify_one();
+                }
                 break;
             }
 
             trace!("-- end of iteration");
-            thread::park();
+            //###thread::park();
+            {
+                // block on condvar
+                let (lock, cvar) = &*self.wakeup_notify;
+                let mut gotdata = lock.lock().unwrap();
+                while !*gotdata {   // while false ... wait
+                    println!("waiting for condvar = true...");
+                    gotdata = cvar.wait(gotdata).unwrap();
+                }
+            }
         }
         info!("exiting");
     }
