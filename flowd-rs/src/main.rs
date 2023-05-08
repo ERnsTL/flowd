@@ -32,6 +32,41 @@ use std::ffi::OsString;
 // for UnixSocketServerComponent
 use std::io::{Write, Read};
 
+// macro shorthands
+// block on condvar
+macro_rules! condvar_block {
+    ( $( $x:expr ),* ) => {
+        {
+            trace!("blocking on condvar...");
+            $(
+                let (lock, cvar) = &*$x;
+            )*
+            let mut gotdata = lock.lock().unwrap();
+            while !*gotdata {   // while false ... wait
+                //trace!("waiting for condvar = true...");
+                gotdata = cvar.wait(gotdata).unwrap();
+            }
+            *gotdata = false;
+            trace!("got condvar notification");
+        }
+    };
+}
+// notify target process
+macro_rules! condvar_notify {
+    ( $( $x:expr ),* ) => {
+        {
+            $(
+                let (lock, cvar) = &*$x;
+            )*
+            let mut gotdata = lock.lock().unwrap();
+            *gotdata = true;
+            // notify the condvar = receiver that the value has changed.
+            cvar.notify_one();
+        }
+    };
+}
+
+
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
 
@@ -7039,30 +7074,13 @@ impl Component for CountComponent {
                 let end = chrono::Utc::now();
                 debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }
