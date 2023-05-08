@@ -47,7 +47,7 @@ fn main() {
 
     //NOTE: important to show the thread name = the FBP process name
     simplelog::TermLogger::init(
-        simplelog::LevelFilter::Debug,   // can locally increase this for dev, TODO make configurable via args
+        simplelog::LevelFilter::Trace,   // can locally increase this for dev, TODO make configurable via args - but better configure this in Cargo.toml
         simplelog::ConfigBuilder::default()
             .set_time_level(simplelog::LevelFilter::Off)
             .set_thread_level(simplelog::LevelFilter::Info)
