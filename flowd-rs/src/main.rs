@@ -1907,9 +1907,11 @@ impl RuntimeRuntimePayload {
         }
 
         // unpark all processes since all joinhandles are now known and so that they can replace the process names with the join handles and instantiate their components
+        /*
         for proc in self.processes.iter() {
             proc.1.joinhandle.thread().unpark();
         }
+        */
 
         // start background thread for regular process health check
         // not possible to kill a thread:  https://stackoverflow.com/questions/26199926/how-to-terminate-or-suspend-a-rust-thread-from-another-thread
