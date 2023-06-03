@@ -46,7 +46,7 @@ macro_rules! condvar_block {
                 //trace!("waiting for condvar = true...");
                 gotdata = cvar.wait(gotdata).unwrap();
             }
-            *gotdata = false;
+            //*gotdata = false;
             trace!("got condvar notification");
         }
     };
