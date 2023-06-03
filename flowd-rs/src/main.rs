@@ -161,7 +161,7 @@ fn main() {
 
     let bind_addr = "localhost:3569";
     let server = TcpListener::bind(bind_addr).unwrap();
-    info!("management listening on {}", bind_addr);
+    info!("management listening on {} - manage via GUI at https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569", bind_addr);   //TODO URL escape of bind_addr in URL - currently static
 
     for stream_res in server.incoming() {
         if let Ok(stream) = stream_res {
