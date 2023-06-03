@@ -7074,7 +7074,7 @@ impl Component for CountComponent {
                 // send final report
                 info!("EOF on inport, shutting down");
                 let end = chrono::Utc::now();
-                debug!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
+                info!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
                 condvar_notify!(out_wakeup);
                 break;
