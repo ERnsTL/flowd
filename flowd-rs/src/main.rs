@@ -1854,17 +1854,7 @@ impl RuntimeRuntimePayload {
                         }
                         trace!("-- end of iteration");
                         //###thread::park();
-                        {
-                            trace!("blocking on condvar...");
-                            let (lock, cvar) = &*ports_this_wake_notify;
-                            let mut gotdata = lock.lock().unwrap();
-                            while !*gotdata {   // while false ... wait
-                                trace!("waiting for condvar = true...");
-                                gotdata = cvar.wait(gotdata).unwrap();
-                            }
-                            *gotdata = false;
-                            trace!("got condvar notification");
-                        }
+                        condvar_block!(&*ports_this_wake_notify);
                     }
                     // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
                     //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
@@ -2137,29 +2127,14 @@ impl RuntimeRuntimePayload {
                 while inport.sink.is_full() {
                     // wait until non-full
                     //TODO optimize
-
-                    {
-                        // notify process
-                        let (lock, cvar) = &*inport.wake_notify;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*inport.wake_notify);
 
                     // sleep some time resp. give up CPU timeslot
                     thread::yield_now();
                 }
                 //TODO optimize String -> Vec<u8> conversion? is clone+into_bytes better or as_bytes+to_vec ?
                 inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes()).expect("push packet from graph inport into component failed");
-                {
-                    // notify process
-                    let (lock, cvar) = &*inport.wake_notify;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*inport.wake_notify);
                 return Ok(());
             } else {
                 return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph inport with that name not found")));
@@ -5812,14 +5787,7 @@ impl Component for RepeatComponent {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     debug!("done");
 
                     // small benchmark
@@ -5850,30 +5818,13 @@ impl Component for RepeatComponent {
             if inn.is_abandoned() {
                 // input closed, nothing more to do
                 info!("EOF on inport, shutting down");
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
@@ -5981,17 +5932,7 @@ impl Component for DropComponent {
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
@@ -6075,14 +6016,7 @@ impl Component for OutputComponent {
                     // repeat
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     debug!("done");
                 } else {
                     break;
@@ -6090,30 +6024,13 @@ impl Component for OutputComponent {
             }
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
@@ -6257,14 +6174,7 @@ impl Component for LibComponent<'_> {
                         // forward split words
                         //TODO maybe more than one
                         out.push(res.to_string().into_bytes()).expect("could not push into OUT"); //TODO optimize kludgy conversion
-                        {
-                            // notify target process
-                            let (lock, cvar) = &*out_wakeup;
-                            let mut gotdata = lock.lock().unwrap();
-                            *gotdata = true;
-                            // notify the condvar = receiver that the value has changed.
-                            cvar.notify_one();
-                        }
+                        condvar_notify!(&*out_wakeup);
                         debug!("done");
                     } else {
                         break;
@@ -6274,29 +6184,13 @@ impl Component for LibComponent<'_> {
                 // are we done?
                 if inn.is_abandoned() {
                     info!("EOF on inport, shutting down");
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     break;
                 }
 
                 trace!("-- end of iteration");
                 //###thread::park();
-                {
-                    trace!("blocking on condvar...");
-                    let (lock, cvar) = &*self.wakeup_notify;
-                    let mut gotdata = lock.lock().unwrap();
-                    while !*gotdata {   // while false ... wait
-                        trace!("waiting for condvar = true...");
-                        gotdata = cvar.wait(gotdata).unwrap();
-                    }
-                    trace!("got condvarnotification");
-                }
+                condvar_block!(&*self.wakeup_notify);
             }
         }
         info!("exiting");
@@ -6413,14 +6307,7 @@ impl Component for UnixSocketServerComponent {
                                     buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
                                     out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
                                     trace!("unparking OUT thread");
-                                    {
-                                        // notify target process
-                                        let (lock, cvar) = &*out_wakeup_ref2;
-                                        let mut gotdata = lock.lock().unwrap();
-                                        *gotdata = true;
-                                        // notify the condvar = receiver that the value has changed.
-                                        cvar.notify_one();
-                                    }
+                                    condvar_notify!(&*out_wakeup_ref2);
                                 } else {
                                     debug!("connection non-ok result, exiting connection handler");
                                     break;
@@ -6482,17 +6369,7 @@ impl Component for UnixSocketServerComponent {
 
             trace!("end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         debug!("cleaning up");
         std::fs::remove_file(listenpath).unwrap();
@@ -6605,14 +6482,7 @@ impl Component for FileReaderComponent {
                     // send it
                     debug!("forwarding file contents...");
                     out.push(contents).expect("could not push into OUT");
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     debug!("done");
                 } else {
                     break;
@@ -6622,30 +6492,13 @@ impl Component for FileReaderComponent {
             // are we done?
             if filenames.is_abandoned() {
                 info!("EOF on inport NAMES, shutting down");
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
@@ -6743,14 +6596,7 @@ impl Component for TrimComponent {
                     debug!("forwarding trimmed string...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
                     out.push(Vec::from(text)).expect("could not push into OUT");
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     debug!("done");
                 } else {
                     break;
@@ -6760,30 +6606,13 @@ impl Component for TrimComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
@@ -6898,14 +6727,7 @@ impl Component for SplitLinesComponent {
                         */
                         if let Err(_) = out.push(Vec::from(line)) {
                             // full, so wake up output-side component
-                            {
-                                // notify target process
-                                let (lock, cvar) = &*out_wakeup;
-                                let mut gotdata = lock.lock().unwrap();
-                                *gotdata = true;
-                                // notify the condvar = receiver that the value has changed.
-                                cvar.notify_one();
-                            }
+                            condvar_notify!(&*out_wakeup);
                             while out.is_full() {
                                 // wait     //TODO optimize
                             }
@@ -6922,14 +6744,7 @@ impl Component for SplitLinesComponent {
                         }
                         */
                     }
-                    {
-                        // notify target process
-                        let (lock, cvar) = &*out_wakeup;
-                        let mut gotdata = lock.lock().unwrap();
-                        *gotdata = true;
-                        // notify the condvar = receiver that the value has changed.
-                        cvar.notify_one();
-                    }
+                    condvar_notify!(&*out_wakeup);
                     debug!("done");
                 } else {
                     break;
@@ -6939,30 +6754,13 @@ impl Component for SplitLinesComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                {
-                    // notify target process
-                    let (lock, cvar) = &*out_wakeup;
-                    let mut gotdata = lock.lock().unwrap();
-                    *gotdata = true;
-                    // notify the condvar = receiver that the value has changed.
-                    cvar.notify_one();
-                }
+                condvar_notify!(&*out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            {
-                trace!("blocking on condvar...");
-                let (lock, cvar) = &*self.wakeup_notify;
-                let mut gotdata = lock.lock().unwrap();
-                while !*gotdata {   // while false ... wait
-                    trace!("waiting for condvar = true...");
-                    gotdata = cvar.wait(gotdata).unwrap();
-                }
-                *gotdata = false;
-                trace!("got condvar notification");
-            }
+            condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }
