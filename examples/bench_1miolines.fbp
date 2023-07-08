@@ -1,7 +1,0 @@
-Reader(bin/file-read) OUT -> IN LineSplitter(bin/split-lines) OUT -> IN Counter(bin/counter) OUT -> IN Display(bin/display)
-
-# comment in/out as needed
-#'testdata-1M-zeilen' -> CONF Reader
-#'-packets -quiet' -> CONF Counter
-'testdata-1M-zeilen' -> ARGS Reader
-'-packets -quiet' -> ARGS Counter

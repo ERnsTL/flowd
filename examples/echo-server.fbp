@@ -1,7 +1,0 @@
-# TCP echo server
-# start using:
-# bin/flowd -debug src/github.com/ERnsTL/flowd/examples/echo-server.fbp
-
-tcp(bin/tcp-server) OUT -> IN copy(bin/copy) OUT1 -> IN tcp
-'tcp4://localhost:4000' -> ARGS tcp
-'OUT1' -> ARGS copy

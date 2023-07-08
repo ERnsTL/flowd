@@ -1,8 +1,0 @@
-# NOTE: This is only an example; the file-read component can already read multiple files serially
-Reader1(bin/file-read) OUT -> IN1 Cat(bin/concatenate) OUT -> IN Display(bin/display)
-Reader2(bin/file-read) OUT -> IN2 Cat
-
-# configuration
-'IN1,IN2' -> ARGS Cat
-'/proc/version' -> ARGS Reader1
-'/proc/uptime' -> ARGS Reader2

@@ -1,5 +1,0 @@
-File(bin/file-read) OUT -> IN Decompresser(bin/lzma-read) OUT -> IN Display(bin/display)
-
-'-debug' -> ARGS Decompresser
-
-'-debug -framed=false /dev/shm/testdata.xz' -> ARGS File
