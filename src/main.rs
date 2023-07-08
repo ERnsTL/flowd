@@ -1052,7 +1052,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
 
                     // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined) (TODO clarify with flowbased-devs)
                     //TODO maybe handle this a level higher in list of FBPMessage variants?
-                    FBPMessage::RuntimePacketsentRequest(payload) => {
+                    FBPMessage::RuntimePacketsentRequest(_payload) => {
                         info!("got runtime:packetsent message");
                         warn!("response: sending runtime:error response (error case, unexpected from FBP network protocol client)");
                         websocket
