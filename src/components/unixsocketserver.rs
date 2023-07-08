@@ -50,7 +50,8 @@ impl Component for UnixSocketServerComponent {
         let sockets_ref = Arc::clone(&sockets);
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = Arc::clone(&out_wakeup);
-        let listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+        //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
+        let _listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             let mut socketnum: u32 = 0;
             loop {
                 debug!("listening for a client");
@@ -97,7 +98,7 @@ impl Component for UnixSocketServerComponent {
                     },
                 }
             }
-        }); //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
+        });
         debug!("entering main loop");
 
         loop {
