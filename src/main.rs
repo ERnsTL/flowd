@@ -38,9 +38,9 @@ macro_rules! condvar_block {
             let mut gotdata = lock.lock().unwrap();
             while !*gotdata {   // while false ... wait
                 //trace!("waiting for condvar = true...");
-                gotdata = cvar.wait(gotdata).unwrap();
+                gotdata = cvar.wait(gotdata).unwrap();  //TODO optimize: use condvar.wait_while?
             }
-            //*gotdata = false;
+            *gotdata = false;
             trace!("got condvar notification");
         }
     };
