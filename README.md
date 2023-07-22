@@ -185,6 +185,7 @@ Everything else:
 * Trim
 * Split lines
 * Count
+* Cron with extended 7-parameter form and granularity up to seconds
 
 TODO (copy from Go version):
 
