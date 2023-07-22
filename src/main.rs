@@ -45,6 +45,27 @@ macro_rules! condvar_block {
         }
     };
 }
+// block on condvar with timeout
+#[macro_export]
+macro_rules! condvar_block_timeout {
+    ( $( $x:expr, $y:expr ),* ) => {
+        {
+            trace!("blocking on condvar with timeout...");
+            $(
+                let (lock, cvar) = &*$x;
+                let dur = $y;
+            )*
+            let mut gotdata = lock.lock().unwrap();
+            //TODO this will wait forever if nobody sends notify
+            //while !*gotdata {   // while false ... wait
+                //trace!("waiting for condvar = true...");
+                (gotdata, _) = cvar.wait_timeout(gotdata, dur).unwrap();  //TODO optimize: use condvar.wait_while?
+            //}
+            *gotdata = false;
+            trace!("got condvar notification|timeout");
+        }
+    };
+}
 // notify target process
 #[macro_export]
 macro_rules! condvar_notify {
