@@ -105,6 +105,7 @@ use components::filereader::FileReaderComponent;
 use components::trim::TrimComponent;
 use components::splitlines::SplitLinesComponent;
 use components::count::CountComponent;
+use components::cron::CronComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -145,6 +146,7 @@ fn main() {
         TrimComponent::get_metadata(),
         SplitLinesComponent::get_metadata(),
         CountComponent::get_metadata(),
+        CronComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1775,6 +1777,7 @@ impl RuntimeRuntimePayload {
                     "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
                     "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
                     "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
+                    "Cron" => { CronComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref, ports_this_wake_notify).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
