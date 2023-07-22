@@ -259,7 +259,7 @@ Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesou
 
 ## Documentation
 
-* [Problems with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
+* [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
 
 
 
