@@ -81,7 +81,7 @@ impl Component for OutputComponent {
         ComponentComponentPayload {
             name: String::from("Output"),
             description: String::from("Prints packet data to stdout and repeats packet."),
-            icon: String::from("bug"),
+            icon: String::from("eye"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {

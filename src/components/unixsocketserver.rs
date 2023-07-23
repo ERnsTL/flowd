@@ -153,7 +153,7 @@ impl Component for UnixSocketServerComponent {
         ComponentComponentPayload {
             name: String::from("UnixSocketServer"),
             description: String::from("Unix socket server"),
-            icon: String::from("bug"),
+            icon: String::from("server"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {

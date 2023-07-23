@@ -96,7 +96,7 @@ impl Component for RepeatComponent {
         ComponentComponentPayload {
             name: String::from("Repeat"),
             description: String::from("Copies data as-is from IN port to OUT port."),
-            icon: String::from("fa-copy"),
+            icon: String::from("arrow-right"),  // or "copy"
             subgraph: false,
             in_ports: vec![
                 ComponentPort {

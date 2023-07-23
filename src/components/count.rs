@@ -90,7 +90,7 @@ impl Component for CountComponent {
         ComponentComponentPayload {
             name: String::from("Count"),
             description: String::from("Counts the number of packets, discarding them, and sending the packet count every 1M packets."), //TODO
-            icon: String::from("cut"),
+            icon: String::from("bar-chart"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
