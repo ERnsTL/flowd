@@ -50,7 +50,7 @@ impl Component for RepeatComponent {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    condvar_notify!(&*out_wakeup);
+                    condvar_notify!(out_wakeup);
                     debug!("done");
 
                     // small benchmark
@@ -87,7 +87,7 @@ impl Component for RepeatComponent {
 
             trace!("-- end of iteration");
             //###thread::park();
-            condvar_block!(&*self.wakeup_notify);
+            condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

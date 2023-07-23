@@ -56,7 +56,7 @@ impl Component for OutputComponent {
                     // repeat
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    condvar_notify!(&*out_wakeup);
+                    condvar_notify!(out_wakeup);
                     debug!("done");
                 } else {
                     break;
@@ -64,13 +64,13 @@ impl Component for OutputComponent {
             }
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                condvar_notify!(&*out_wakeup);
+                condvar_notify!(out_wakeup);
                 break;
             }
 
             trace!("-- end of iteration");
             //###thread::park();
-            condvar_block!(&*self.wakeup_notify);
+            condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }
