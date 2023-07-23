@@ -38,6 +38,7 @@ impl Component for CronComponent {
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         if let Ok(ip) = when.pop() {
+            //TODO the cron crate has a non-standard 7-parameter form ranging down to seconds and up to years, is that good? cron-parser has POSIX 5-parameter format
             schedule = Some(Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8")).unwrap().upcoming_owned(Local)); //TODO error handling
         } else {
             error!("no config IP received - exiting");
@@ -73,19 +74,25 @@ impl Component for CronComponent {
 
                 let dur_to_next = next - Local::now();
 
-                // cannot get woken by the condvar
-                //std::thread::sleep(dur_to_next.to_std().unwrap());
-                // can get woken by timeout or watchdog
-                condvar_block_timeout!(&*self.wakeup_notify, dur_to_next.to_std().unwrap());    //TODO error handling
-                //TODO warn of spurious wakeup
-
-                // send notification downstream
-                //TODO really send an empty IP or just wake the downstream component? how could the receiver differentiate?
-                tick.push(vec![]).unwrap();
-                condvar_notify!(&*tick_wakeup);
-
-                trace!("-- end of inner iteration");
+                if let Ok(dur_to_next_std) = dur_to_next.to_std() {
+                    // cannot get woken by the condvar
+                    //std::thread::sleep(dur_to_next.to_std().unwrap());
+                    // can get woken by timeout or watchdog
+                    condvar_block_timeout!(&*self.wakeup_notify, dur_to_next_std);    //TODO error handling
+                } else {
+                    // out of range = negative -> we are after next already
+                    //TODO optimize this actually happens sometimes
+                    break;
+                }
             }
+            trace!("-- end of inner iteration");
+
+            // send notification downstream
+            debug!("sending tick");
+            //TODO really send an empty IP or just wake the downstream component? how could the receiver differentiate?
+            tick.push(vec![]).unwrap();
+            condvar_notify!(tick_wakeup);
+
             trace!("-- end of outer iteration");
             // we are not blocking on input, but on time
             //###thread::park();
