@@ -59,7 +59,7 @@ macro_rules! condvar_block_timeout {
             //TODO this will wait forever if nobody sends notify
             //while !*gotdata {   // while false ... wait
                 //trace!("waiting for condvar = true...");
-                (gotdata, _) = cvar.wait_timeout(gotdata, dur).unwrap();  //TODO optimize: use condvar.wait_while?
+                (gotdata, _) = cvar.wait_timeout(gotdata, dur).unwrap();  //TODO optimize: use condvar.wait_timeout_while?
             //}
             *gotdata = false;
             trace!("got condvar notification|timeout");
