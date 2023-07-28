@@ -5,13 +5,13 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 use libloading::{Library, Symbol};
 use std::ffi::OsString;
 
-pub struct LibComponent<'a> {
+pub struct LibComponent { //<'a> {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    fn_process: Option<libloading::Symbol<'a, unsafe extern fn(std::ffi::CString, u32) -> u32>>,
+    //fn_process: Option<libloading::Symbol<'a, unsafe extern fn(&std::ffi::CStr) -> u32>>,
     lib: libloading::Library,
 }
 
@@ -39,7 +39,7 @@ fn flowd_init() {
 
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
-impl Component for LibComponent<'_> {
+impl Component for LibComponent { //<'_> {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
@@ -47,7 +47,9 @@ impl Component for LibComponent<'_> {
             let lib = Library::new(libloading::library_filename("wordcounter")).expect("failed to load library 'wordcounter'");
             //TODO give the process function some shared state that it can mutate
             //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
-            let func: Symbol<unsafe extern fn(OsString) -> u32> = lib.get(b"process").expect("failed to get symbol 'process'");
+            //TODO find way to prepare the function already here at this point
+            let _func: Symbol<unsafe extern fn(OsString) -> u32> = lib.get(b"process").expect("failed to get symbol 'process'");
+            //self.fn_process = func;
 
             //TODO get metadata from a global variable in the shared library
 
@@ -59,7 +61,7 @@ impl Component for LibComponent<'_> {
                 signals_out: signals_out,
                 //graph_inout: graph_inout,
                 lib: lib,
-                fn_process: None,  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
+                //fn_process: Some(func),  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
         }
     }
