@@ -31,17 +31,16 @@ impl Component for CronComponent {
         let when = &mut self.when;
         let tick = &mut self.tick.sink;
         let tick_wakeup = self.tick.wakeup.expect("got no wakeup notify handle for outport TICK");
-        let mut schedule: Option<OwnedScheduleIterator<Local>> = None;  //TODO is there a better way instead of Option?
+        let mut schedule: OwnedScheduleIterator<Local>;
 
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         if let Ok(ip) = when.pop() {
             //TODO the cron crate has a non-standard 7-parameter form ranging down to seconds and up to years, is that good? cron-parser has POSIX 5-parameter format
-            schedule = Some(Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8")).unwrap().upcoming_owned(Local)); //TODO error handling
+            schedule = Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8")).unwrap().upcoming_owned(Local); //TODO error handling
         } else {
             error!("no config IP received - exiting");
-            //TODO send shutdown signal upstream
             return;
         }
 
@@ -49,7 +48,7 @@ impl Component for CronComponent {
             trace!("begin of outer iteration");
 
             // calculate next fire
-            let next = schedule.as_mut().unwrap().next().unwrap();
+            let next = schedule.next().unwrap();
             info!("Next fire time: {}", next);
 
             // sleep again in case we get woken up by watchdog
