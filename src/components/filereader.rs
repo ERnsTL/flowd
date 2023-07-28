@@ -1,24 +1,22 @@
-use std::sync::{Condvar, Arc, Mutex};
-use crate::{condvar_block, condvar_notify, ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use std::sync::{Arc, Mutex};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct FileReaderComponent {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for FileReaderComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         FileReaderComponent {
             inn: inports.remove("NAMES").expect("found no NAMES inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
-            graph_inout: graph_inout,
-            wakeup_notify: wakeup_notify,
+            //graph_inout: graph_inout,
         }
     }
 
@@ -26,7 +24,7 @@ impl Component for FileReaderComponent {
         debug!("FileReader is now run()ning!");
         let filenames = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wake_notify;
+        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -62,7 +60,8 @@ impl Component for FileReaderComponent {
                     // send it
                     debug!("forwarding file contents...");
                     out.push(contents).expect("could not push into OUT");
-                    condvar_notify!(&*out_wakeup);
+                    //condvar_notify!(&*out_wakeup);
+                    out_wakeup.unpark();
                     debug!("done");
                 } else {
                     break;
@@ -72,13 +71,15 @@ impl Component for FileReaderComponent {
             // are we done?
             if filenames.is_abandoned() {
                 info!("EOF on inport NAMES, shutting down");
-                condvar_notify!(&*out_wakeup);
+                drop(out);
+                //condvar_notify!(&*out_wakeup);
+                out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
-            //###thread::park();
-            condvar_block!(&*self.wakeup_notify);
+            std::thread::park();
+            //condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }

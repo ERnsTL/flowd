@@ -1,22 +1,20 @@
-use std::sync::{Condvar, Arc, Mutex};
-use crate::{condvar_block, ProcessEdgeSource, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use std::sync::{Arc, Mutex};
+use crate::{ProcessEdgeSource, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct DropComponent {
     inn: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         DropComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             signals_in: signals_in,
             signals_out: signals_out,
-            graph_inout: graph_inout,
-            wakeup_notify: wakeup_notify,
+            //graph_inout: graph_inout,
         }
     }
 
@@ -68,8 +66,8 @@ impl Component for DropComponent {
             }
 
             trace!("-- end of iteration");
-            //###thread::park();
-            condvar_block!(self.wakeup_notify);
+            std::thread::park();
+            //condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

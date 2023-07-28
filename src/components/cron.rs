@@ -1,5 +1,6 @@
-use std::sync::{Condvar, Arc, Mutex};
-use crate::{condvar_block_timeout, condvar_notify, ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort, UtcTime};
+use std::sync::{Arc, Mutex};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+
 // component-specific
 use cron::{Schedule, OwnedScheduleIterator};
 //use chrono::prelude::*;   //TODO is this necessary?
@@ -11,19 +12,17 @@ pub struct CronComponent {
     tick: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
 impl Component for CronComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CronComponent {
             when: inports.remove("WHEN").expect("found no WHEN inport"),
             tick: outports.remove("TICK").expect("found no TICK outport"),
             signals_in: signals_in,
             signals_out: signals_out,
-            graph_inout,
-            wakeup_notify,
+            //graph_inout,
         }
     }
 
@@ -31,7 +30,7 @@ impl Component for CronComponent {
         debug!("Count is now run()ning!");
         let when = &mut self.when;
         let tick = &mut self.tick.sink;
-        let tick_wakeup = self.tick.wake_notify;
+        let tick_wakeup = self.tick.wakeup.expect("got no wakeup notify handle for outport TICK");
         let mut schedule: Option<OwnedScheduleIterator<Local>> = None;  //TODO is there a better way instead of Option?
 
         // check config port
@@ -76,9 +75,9 @@ impl Component for CronComponent {
 
                 if let Ok(dur_to_next_std) = dur_to_next.to_std() {
                     // cannot get woken by the condvar
-                    //std::thread::sleep(dur_to_next.to_std().unwrap());
+                    std::thread::sleep(dur_to_next_std);
                     // can get woken by timeout or watchdog
-                    condvar_block_timeout!(&*self.wakeup_notify, dur_to_next_std);    //TODO error handling
+                    //condvar_block_timeout!(&*self.wakeup_notify, dur_to_next_std);    //TODO error handling
                 } else {
                     // out of range = negative -> we are after next already
                     //TODO optimize this actually happens sometimes
@@ -91,7 +90,8 @@ impl Component for CronComponent {
             debug!("sending tick");
             //TODO really send an empty IP or just wake the downstream component? how could the receiver differentiate?
             tick.push(vec![]).unwrap();
-            condvar_notify!(tick_wakeup);
+            //condvar_notify!(tick_wakeup);
+            tick_wakeup.unpark();
 
             trace!("-- end of outer iteration");
             // we are not blocking on input, but on time

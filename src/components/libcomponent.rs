@@ -1,6 +1,7 @@
-use std::sync::{Condvar, Arc, Mutex};
-use crate::{condvar_block, condvar_notify, ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use std::sync::{Arc, Mutex};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+//component-specific
 use libloading::{Library, Symbol};
 use std::ffi::OsString;
 
@@ -9,8 +10,7 @@ pub struct LibComponent<'a> {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    wakeup_notify: Arc<(Mutex<bool>, Condvar)>,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
     fn_process: Option<libloading::Symbol<'a, unsafe extern fn(std::ffi::CString, u32) -> u32>>,
     lib: libloading::Library,
 }
@@ -40,7 +40,7 @@ fn flowd_init() {
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
 impl Component for LibComponent<'_> {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>, wakeup_notify: Arc<(Mutex<bool>, Condvar)>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
             //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh
@@ -57,8 +57,7 @@ impl Component for LibComponent<'_> {
                 out: outports.remove("OUT").expect("found no OUT outport"),
                 signals_in: signals_in,
                 signals_out: signals_out,
-                graph_inout: graph_inout,
-                wakeup_notify: wakeup_notify,
+                //graph_inout: graph_inout,
                 lib: lib,
                 fn_process: None,  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
@@ -70,7 +69,7 @@ impl Component for LibComponent<'_> {
         debug!("LibComponent is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wake_notify;
+        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
@@ -106,7 +105,8 @@ impl Component for LibComponent<'_> {
                         // forward split words
                         //TODO maybe more than one
                         out.push(res.to_string().into_bytes()).expect("could not push into OUT"); //TODO optimize kludgy conversion
-                        condvar_notify!(&*out_wakeup);
+                        //condvar_notify!(&*out_wakeup);
+                        out_wakeup.unpark();
                         debug!("done");
                     } else {
                         break;
@@ -116,13 +116,15 @@ impl Component for LibComponent<'_> {
                 // are we done?
                 if inn.is_abandoned() {
                     info!("EOF on inport, shutting down");
-                    condvar_notify!(&*out_wakeup);
+                    drop(out);
+                    //condvar_notify!(&*out_wakeup);
+                    out_wakeup.unpark();
                     break;
                 }
 
                 trace!("-- end of iteration");
-                //###thread::park();
-                condvar_block!(&*self.wakeup_notify);
+                std::thread::park();
+                //condvar_block!(&*self.wakeup_notify);
             }
         }
         info!("exiting");
