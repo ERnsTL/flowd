@@ -1426,7 +1426,7 @@ impl RuntimeRuntimePayload {
         RuntimeRuntimePayload{
             graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
             status: NetworkStartedResponsePayload {
-                time_started: UtcTime(chrono::DateTime::<Utc>::MIN_UTC), // zero value
+                time_started: UtcTime(chrono::DateTime::<Utc>::MIN_UTC), // zero value - //TODO rather use None
                 graph: active_graph,
                 started: false,
                 running: false,
