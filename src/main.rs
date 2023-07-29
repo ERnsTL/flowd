@@ -208,12 +208,12 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
     //TODO wss
     //TODO check secret
 
-    info!("entering receive loop");
+    debug!("entering receive loop");
     loop {
-        info!("waiting for next message");
+        debug!("waiting for next message");
         match websocket.read_message()? {
             msg @ Message::Text(_) | msg @ Message::Binary(_) => {
-                info!("got a text|binary message");
+                debug!("got a text|binary message");
                 //debug!("message data: {}", msg.clone().into_text().unwrap());
 
                 let fbpmsg: FBPMessage = serde_json::from_slice(msg.into_data().as_slice())
@@ -1443,6 +1443,7 @@ impl RuntimeRuntimePayload {
 
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
     fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+        info!("starting network for graph {}", graph.properties.name);
         // get all graph in and out ports
         let mut graph_inout = graph_inout_arc.lock().expect("could not acquire lock for network start()");
         //TODO implement
@@ -1531,7 +1532,7 @@ impl RuntimeRuntimePayload {
         for edge in graph.edges.iter() {
             if let Some(iip) = &edge.data {
                 // prepare IIP edge
-                info!("preparing edge from IIP to {}.{}", edge.target.process, edge.target.port);
+                debug!("preparing edge from IIP to {}.{}", edge.target.process, edge.target.port);
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
@@ -1546,7 +1547,7 @@ impl RuntimeRuntimePayload {
                 // in summary: IIP ports are closed/abandoned
             } else {
                 // prepare edge
-                info!("preparing edge from {}.{} to {}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
+                debug!("preparing edge from {}.{} to {}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
                 let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
                 // insert into inports of target process
@@ -1564,7 +1565,7 @@ impl RuntimeRuntimePayload {
         }
         for (public_name, edge) in graph.inports.iter() {
             // prepare edge
-            info!("preparing edge from graph {} to {}.{}", public_name, edge.process, edge.port);
+            debug!("preparing edge from graph {} to {}.{}", public_name, edge.process, edge.port);
             let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
             // insert into inports of target process
@@ -1582,7 +1583,7 @@ impl RuntimeRuntimePayload {
         }
         for (public_name, edge) in graph.outports.iter() {
             // prepare edge
-            info!("preparing edge from {}.{} to graph {}", edge.process, edge.port, public_name);
+            debug!("preparing edge from {}.{} to graph {}", edge.process, edge.port, public_name);
             let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
             // insert into inports of target process
@@ -1604,7 +1605,7 @@ impl RuntimeRuntimePayload {
         let mut found: bool;
         let mut found2: bool;
         for (proc_name, node) in graph.nodes.iter() {
-            info!("setting up process name={} component={}", proc_name, node.component);
+            debug!("setting up process name={} component={}", proc_name, node.component);
             //TODO is there anything in .metadata that affects process setup?
 
             // get prepared ports for this process
@@ -1689,9 +1690,9 @@ impl RuntimeRuntimePayload {
             let watchdog_signalsink_clone = watchdog_signalsink.clone();
             let graph_inout_ref = graph_inout_arc.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
-                info!("this is process thread, waiting for Thread replacement");
+                debug!("this is process thread, waiting for Thread replacement");
                 thread::park();
-                info!("replacing Thread objects and starting component");
+                debug!("replacing Thread objects");
 
                 // replace all process names with Thread handles
                 // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
@@ -1705,6 +1706,7 @@ impl RuntimeRuntimePayload {
                 drop(joinhandlesref);   // not needed anymore, we got the handles
 
                 // component
+                info!("starting");
                 //TODO make it generic instead of if
                 //let component: Component where Component: Sized;
                 match component_name.as_str() {
