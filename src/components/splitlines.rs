@@ -87,7 +87,8 @@ impl Component for SplitLinesComponent {
                         }
 
                         // wake up the output-side process once there is some data to work on
-                        //TODO optimize - but incremend and bitwise equality should be cheap?
+                        // NOTE: This is an important optimization as otherwise the process on OUT port will only be woken up when the connection becomes full (see above)
+                        //TODO optimize - but increment and bitwise equality should be cheap?
                         iterations += 1;
                         if iterations == 50 {
                             out_wakeup.unpark();
