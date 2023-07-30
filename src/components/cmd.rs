@@ -55,6 +55,8 @@ impl Component for CmdComponent {
                     debug!("got a packet, starting sub-process:");
                     //println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
 
+                    //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
+                    //TODO add ability to send signal to sub-process (HUP, KILL, TERM etc.)
                     let stdout = Command::new("bash")
                         .args(["-c", "a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
                     //let stdout = Command::new("recsel")
