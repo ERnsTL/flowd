@@ -186,6 +186,7 @@ Everything else:
 * Split lines
 * Count
 * Cron with extended 7-parameter form and granularity up to seconds
+* Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc.
 
 TODO (copy from Go version):
 
@@ -194,7 +195,6 @@ TODO (copy from Go version):
 * TLS client and server
 * SSH client
 * Simple HTTP server and client
-* Re-use of any existing programs and their output or for transformation of data (cmd component)
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
 * File writing
