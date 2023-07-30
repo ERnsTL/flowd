@@ -1974,6 +1974,7 @@ impl RuntimeRuntimePayload {
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = true;
+        info!("network started");
         Ok(&self.status)
     }
 
