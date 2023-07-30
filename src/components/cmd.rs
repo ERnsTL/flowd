@@ -3,7 +3,7 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 
 //component-specific
 use std::process::{Command, Stdio};
-use std::io::{BufRead, BufReader, Error, ErrorKind};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 
 pub struct CmdComponent {
     //TODO differentiate between trigger inport and STDIN inport?
@@ -57,19 +57,34 @@ impl Component for CmdComponent {
 
                     //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
                     //TODO add ability to send signal to sub-process (HUP, KILL, TERM etc.)
-                    let stdout = Command::new("bash")
-                        .args(["-c", "a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
-                    //let stdout = Command::new("recsel")
+                    let mut child = Command::new("bash")
+                        .args(["-c", "IFS= read -r -d '' input ; echo stdin is \"$input\" ; a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
+                    //let mut child = Command::new("recsel")
                     //    .args(["-p","name", "/dev/shm/test.rec"])
+                        .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
                         .spawn()
-                        .expect("could not start sub-process")
+                        .expect("could not start sub-process");
+
+                    // set up reader from child STDOUT
+                    let reader = BufReader::new(child
                         .stdout
                         .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
-                        .expect("could not construct Command");
+                        .expect("could not get standard output")    //TODO optimize looks like duplication from above line
+                    );
+                    // set up writer into child STDIN
+                    let mut writer = child
+                        .stdin
+                        //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
+                        //.expect("could not get standard input")    //TODO optimize looks like duplication from above line
+                        .take()
+                        .expect("could not get standard input");
 
-                    let reader = BufReader::new(stdout);
+                    // deliver the trigger IP contents into child STDIN
+                    writer.write(ip.as_slice()).expect("could not write into child STDIN");
+                    drop(writer);   // close STDIN
 
+                    // read child STDOUT until closed
                     reader
                         .lines()
                         .filter_map(|line| line.ok())
