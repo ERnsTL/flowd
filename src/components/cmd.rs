@@ -57,6 +57,8 @@ impl Component for CmdComponent {
 
                     //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
                     //TODO add ability to send signal to sub-process (HUP, KILL, TERM etc.)
+                    // NOTE: Alternative to IFS for reading all of STDIN:
+                    //   input=$(cat)
                     let mut child = Command::new("bash")
                         .args(["-c", "IFS= read -r -d '' input ; echo stdin is \"$input\" ; a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
                     //let mut child = Command::new("recsel")
