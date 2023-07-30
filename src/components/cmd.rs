@@ -64,7 +64,7 @@ impl Component for CmdComponent {
                     //let mut child = Command::new("recsel")
                     //    .args(["-p","name", "/dev/shm/test.rec"])
                     let mut child = Command::new("bash")
-                        .args(["-c", "nc -l -n 127.0.0.1 8080 | grep 'GET'"])
+                        .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
                         .spawn()
