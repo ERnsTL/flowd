@@ -1,3 +1,4 @@
+use std::ffi::{OsStr,OsString};
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
@@ -8,6 +9,7 @@ use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 pub struct CmdComponent {
     //TODO differentiate between trigger inport and STDIN inport?
     inn: ProcessEdgeSource,
+    cmd: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
@@ -18,6 +20,7 @@ impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CmdComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
+            cmd: inports.remove("CMD").expect("found no CMD inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -28,8 +31,24 @@ impl Component for CmdComponent {
     fn run(mut self) {
         debug!("Cmd is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
+        let cmd = &mut self.cmd;
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+
+        // read configuration
+        let cmd_ip = cmd.pop().expect("could not read IP from CMD configuration inport");
+        let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
+        let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
+        let mut cmd_args: Vec<OsString> = vec![];
+        if cmd_words.len() > 0 {
+            let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
+            cmd_args = cmd_args1.iter().map(|x| OsString::from(x)).collect();
+        }
+        let cmd_program1 = cmd_words.pop().expect("could not pop program name");
+        let cmd_program = OsStr::new(cmd_program1.as_str());
+        debug!("got program {} with arguments {:?}", cmd_program.to_str().expect("could not convert OsStr to &str"), cmd_args);
+
+        // main loop
         loop {
             trace!("begin of iteration");
             // check signals
@@ -63,8 +82,10 @@ impl Component for CmdComponent {
                     //    .args(["-c", "IFS= read -r -d '' input ; echo stdin is \"$input\" ; a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
                     //let mut child = Command::new("recsel")
                     //    .args(["-p","name", "/dev/shm/test.rec"])
-                    let mut child = Command::new("bash")
-                        .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
+                    //let mut child = Command::new("bash")
+                    //    .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
+                    let mut child = Command::new(cmd_program)   //TODO optimize pre-construct Command once
+                        .args(&cmd_args)    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
                         .spawn()
@@ -137,6 +158,16 @@ impl Component for CmdComponent {
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be sent to the sub-process STDIN"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                },
+                ComponentPort {
+                    name: String::from("CMD"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("POSIX shell-compatible path and arguments for the sub-process"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
