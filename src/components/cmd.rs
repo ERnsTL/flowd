@@ -5,22 +5,27 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 //component-specific
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
+use lexopt::prelude::*;
 
 pub struct CmdComponent {
     //TODO differentiate between trigger inport and STDIN inport?
     inn: ProcessEdgeSource,
     cmd: ProcessEdgeSource,
+    conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+enum Mode { None = 0, One, Each }
+
 impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CmdComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             cmd: inports.remove("CMD").expect("found no CMD inport"),
+            conf: inports.remove("CONF").expect("found no CONF inport"),
             out: outports.remove("OUT").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -32,10 +37,11 @@ impl Component for CmdComponent {
         debug!("Cmd is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let cmd = &mut self.cmd;
+        let conf = &mut self.conf;
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
-        // read configuration
+        // read sub-process program and args
         let cmd_ip = cmd.pop().expect("could not read IP from CMD configuration inport");
         let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
         let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
@@ -47,6 +53,27 @@ impl Component for CmdComponent {
         let cmd_program1 = cmd_words.pop().expect("could not pop program name");
         let cmd_program = OsStr::new(cmd_program1.as_str());
         debug!("got program {} with arguments {:?}", cmd_program.to_str().expect("could not convert OsStr to &str"), cmd_args);
+
+        // read configuration
+        let mut mode = Mode::Each;
+        let mut retry: bool;
+        let mut parser = lexopt::Parser::from_args(vec![OsString::from(std::str::from_utf8(&conf.pop().expect("could not read IP from CONF configuration inport")).expect("invalid utf-8"))]);
+        while let Some(arg) = parser.next().expect("could not call next()") {
+            match arg {
+                Long("retry") => {
+                    retry = parser.value().expect("could not get parser value").parse().expect("could not parse value");
+                }
+                Long("mode") => {
+                    let mode_str: OsString = parser.value().expect("could not get parser value").parse::<OsString>().expect("could not parse value");
+                    match mode_str.to_str().expect("could not convert mode_str to str") {
+                        "one" => { mode = Mode::One; },
+                        "each" => { mode = Mode::Each; },
+                        _ => { unreachable!(); }
+                    }
+                }
+                _ => { unreachable!(); }
+            }
+        }
 
         // main loop
         loop {
@@ -75,6 +102,7 @@ impl Component for CmdComponent {
                     //println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
 
                     //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
+                    //FIXME be responsive during longer-running sub-processes or for server sub-processes
                     //TODO add ability to send signal to sub-process (HUP, KILL, TERM etc.)
                     // NOTE: Alternative to IFS for reading all of STDIN:
                     //   input=$(cat)
@@ -147,7 +175,7 @@ impl Component for CmdComponent {
             description: String::from("Runs an external program and forwards STDIN, STDERR and STDOUT."),
             icon: String::from("terminal"),
             subgraph: false,
-            //TODO config inport - flag mode operating mode: one (command instance handling all IPs) or each (IP handled by new instance
+            //TODO config inport - flag mode operating mode: one (command instance handling all IPs) or each (IP handled by new instance)
 	        //TODO config inport - flag bool framing  true = frame mode, false = send frame body to command STDIN, frame the data from command STDOUT")
 	        //TODO config inport - flag bool retry retry/restart command on non-zero return code
             in_ports: vec![
@@ -170,7 +198,17 @@ impl Component for CmdComponent {
                     description: String::from("POSIX shell-compatible path and arguments for the sub-process"),
                     values_allowed: vec![],
                     value_default: String::from("")
-                }
+                },
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("configuration parameters: --retry detault false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance)"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                },
             ],
             out_ports: vec![
                 ComponentPort {
@@ -184,7 +222,7 @@ impl Component for CmdComponent {
                     value_default: String::from("")
                 }
             ],
-            //TODO STDERR
+            //TODO implement STDERR
             ..Default::default()
         }
     }
