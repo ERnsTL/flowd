@@ -30,7 +30,7 @@ impl Component for CronComponent {
         debug!("Count is now run()ning!");
         let when = &mut self.when;
         let tick = &mut self.tick.sink;
-        let tick_wakeup = self.tick.wakeup.expect("got no wakeup notify handle for outport TICK");
+        let tick_wakeup = self.tick.wakeup.expect("got no wakeup handle for outport TICK");
         let mut schedule: OwnedScheduleIterator<Local>;
 
         // check config port
@@ -75,8 +75,6 @@ impl Component for CronComponent {
                 if let Ok(dur_to_next_std) = dur_to_next.to_std() {
                     // cannot get woken by the condvar
                     std::thread::sleep(dur_to_next_std);
-                    // can get woken by timeout or watchdog
-                    //condvar_block_timeout!(&*self.wakeup_notify, dur_to_next_std);    //TODO error handling
                 } else {
                     // out of range = negative -> we are after next already
                     //TODO optimize this actually happens sometimes
@@ -89,13 +87,9 @@ impl Component for CronComponent {
             debug!("sending tick");
             //TODO really send an empty IP or just wake the downstream component? how could the receiver differentiate?
             tick.push(vec![]).unwrap();
-            //condvar_notify!(tick_wakeup);
             tick_wakeup.unpark();
 
             trace!("-- end of outer iteration");
-            // we are not blocking on input, but on time
-            //###thread::park();
-            //condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

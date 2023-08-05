@@ -24,7 +24,7 @@ impl Component for FileReaderComponent {
         debug!("FileReader is now run()ning!");
         let filenames = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -60,7 +60,6 @@ impl Component for FileReaderComponent {
                     // send it
                     debug!("forwarding file contents...");
                     out.push(contents).expect("could not push into OUT");
-                    //condvar_notify!(&*out_wakeup);
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -72,14 +71,12 @@ impl Component for FileReaderComponent {
             if filenames.is_abandoned() {
                 info!("EOF on inport NAMES, shutting down");
                 drop(out);
-                //condvar_notify!(&*out_wakeup);
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }

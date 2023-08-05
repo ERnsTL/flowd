@@ -67,7 +67,6 @@ impl Component for DropComponent {
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

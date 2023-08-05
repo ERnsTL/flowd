@@ -41,7 +41,7 @@ impl Component for UnixSocketServerComponent {
         let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         //listener.set_nonblocking(true).expect("set listen socket to non-blocking");
         let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -78,7 +78,6 @@ impl Component for UnixSocketServerComponent {
                                     buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
                                     out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
                                     trace!("unparking OUT thread");
-                                    //condvar_notify!(&*out_wakeup_ref2);
                                     out_wakeup_ref2.unpark();
                                 } else {
                                     debug!("connection non-ok result, exiting connection handler");
@@ -141,7 +140,6 @@ impl Component for UnixSocketServerComponent {
 
             trace!("end of iteration");
             std::thread::park();
-            //condvar_block!(&*self.wakeup_notify);
         }
         debug!("cleaning up");
         std::fs::remove_file(listenpath).unwrap();

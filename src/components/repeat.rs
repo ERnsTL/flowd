@@ -24,7 +24,7 @@ impl Component for RepeatComponent {
         debug!("Repeat is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
 
@@ -48,7 +48,6 @@ impl Component for RepeatComponent {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
-                    //condvar_notify!(out_wakeup);
                     out_wakeup.unpark();
                     debug!("done");
 
@@ -81,14 +80,12 @@ impl Component for RepeatComponent {
                 // input closed, nothing more to do
                 info!("EOF on inport, shutting down");
                 drop(out);
-                //condvar_notify!(&*out_wakeup);
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

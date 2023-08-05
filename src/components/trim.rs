@@ -24,7 +24,7 @@ impl Component for TrimComponent {
         debug!("Trim is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -57,7 +57,6 @@ impl Component for TrimComponent {
                     debug!("forwarding trimmed string...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
                     out.push(Vec::from(text)).expect("could not push into OUT");
-                    //condvar_notify!(&*out_wakeup);
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -69,14 +68,12 @@ impl Component for TrimComponent {
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
                 drop(out);
-                //condvar_notify!(&*out_wakeup);
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }

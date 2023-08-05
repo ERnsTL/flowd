@@ -24,7 +24,7 @@ impl Component for CountComponent {
         debug!("Count is now run()ning!");
         let inn = &mut self.inn;
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         let mut packets: usize = 0;
         let start = chrono::Utc::now();
         let mut start_1st = chrono::Utc::now();
@@ -73,7 +73,6 @@ impl Component for CountComponent {
                 let end = chrono::Utc::now();
                 info!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
                 out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
-                //condvar_notify!(out_wakeup);
                 drop(out);
                 out_wakeup.unpark();
                 break;
@@ -81,7 +80,6 @@ impl Component for CountComponent {
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(self.wakeup_notify);
         }
         info!("exiting");
     }

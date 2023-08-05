@@ -24,7 +24,7 @@ impl Component for SplitLinesComponent {
         debug!("SplitLines is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -74,7 +74,6 @@ impl Component for SplitLinesComponent {
                         */
                         if let Err(_) = out.push(Vec::from(line)) {
                             // full, so wake up output-side component
-                            //condvar_notify!(&*out_wakeup);
                             out_wakeup.unpark();
                             //println!("out_wakeup has name: {}", out_wakeup.name().unwrap());
                             while out.is_full() {
@@ -94,7 +93,6 @@ impl Component for SplitLinesComponent {
                             out_wakeup.unpark();
                         }
                     }
-                    //condvar_notify!(&*out_wakeup);
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -106,14 +104,12 @@ impl Component for SplitLinesComponent {
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
                 drop(out);
-                //condvar_notify!(&*out_wakeup);
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
-            //condvar_block!(&*self.wakeup_notify);
         }
         info!("exiting");
     }

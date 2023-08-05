@@ -71,7 +71,7 @@ impl Component for LibComponent { //<'_> {
         debug!("LibComponent is now run()ning!");
         let inn = &mut self.inn;    //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup notify handle for outport OUT");
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
@@ -107,7 +107,6 @@ impl Component for LibComponent { //<'_> {
                         // forward split words
                         //TODO maybe more than one
                         out.push(res.to_string().into_bytes()).expect("could not push into OUT"); //TODO optimize kludgy conversion
-                        //condvar_notify!(&*out_wakeup);
                         out_wakeup.unpark();
                         debug!("done");
                     } else {
@@ -119,14 +118,12 @@ impl Component for LibComponent { //<'_> {
                 if inn.is_abandoned() {
                     info!("EOF on inport, shutting down");
                     drop(out);
-                    //condvar_notify!(&*out_wakeup);
                     out_wakeup.unpark();
                     break;
                 }
 
                 trace!("-- end of iteration");
                 std::thread::park();
-                //condvar_block!(&*self.wakeup_notify);
             }
         }
         info!("exiting");
