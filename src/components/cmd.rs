@@ -18,7 +18,7 @@ pub struct CmdComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
-enum Mode { None = 0, One, Each }
+enum Mode { One, Each }
 
 impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -205,7 +205,7 @@ impl Component for CmdComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("configuration parameters: --retry detault false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance)"),
+                    description: String::from("configuration parameters: --retry default false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance)"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 },
