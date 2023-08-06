@@ -167,8 +167,6 @@ impl Component for CmdComponent {
         info!("exiting");
     }
 
-    // modeled after https://github.com/noflo/noflo-core/blob/master/components/Output.js
-    // what node.js console.log() does:  https://nodejs.org/api/console.html#consolelogdata-args
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("Cmd"),
