@@ -51,6 +51,7 @@ use components::count::CountComponent;
 use components::cron::CronComponent;
 use components::cmd::CmdComponent;
 use components::hasher::HasherComponent;
+use components::equals::EqualsComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -94,6 +95,7 @@ fn main() {
         CronComponent::get_metadata(),
         CmdComponent::get_metadata(),
         HasherComponent::get_metadata(),
+        EqualsComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1727,6 +1729,7 @@ impl RuntimeRuntimePayload {
                     "Cron" => { CronComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "Cmd" => { CmdComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "Hasher" => { HasherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "Equals" => { EqualsComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
