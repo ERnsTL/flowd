@@ -26,6 +26,8 @@ The act of programming is thus shifted from entering strings and lines of tailor
 
 You can find out more about this paradigm on J. Paul Morrison's website linked above.
 
+More, humans are terrible at writing, maintaining and understanding code [talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). One solution proposed here is to keep programming on a humanly-understandable level by using these re-usable *black boxes*, which are individually all easily understandable, to compose software.
+
 
 ## Installation and Running
 
@@ -186,7 +188,7 @@ Everything else:
 * Split lines
 * Count
 * Cron with extended 7-parameter form and granularity up to seconds
-* Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc.
+* Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc. The sub-process commandline with arguments can be configured. TODO add more info about the features of this component
 
 TODO (copy from Go version):
 
