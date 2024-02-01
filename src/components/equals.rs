@@ -1,4 +1,6 @@
 use std::sync::{Arc, Mutex};
+use rtrb::PushError;
+
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct EqualsComponent {
@@ -66,14 +68,36 @@ impl Component for EqualsComponent {
             // check in port
             loop {
                 if let Ok(ip) = inn.pop() {
-                    trace!("checking for equality packet...");
+                    trace!("checking if equals...");
                     if ip == cmp_value {
                         trace!("equality packet");
-                        out_true.push(ip).expect("could not push into TRUE outport");
+                        // try to push into TRUE
+                        if let Err(PushError::Full(ip_ret)) = out_true.push(ip) {
+                            // full, so wake up output-side component
+                            out_true_wakeup.unpark();
+                            while out_true.is_full() {
+                                out_true_wakeup.unpark();
+                                // wait     //TODO optimize
+                                std::thread::yield_now();
+                            }
+                            // send nao
+                            out_true.push(ip_ret).expect("could not push into TRUE - but said !is_full");
+                        }
                         out_true_wakeup.unpark();
                     } else {
                         trace!("inequality packet");
-                        out_false.push(ip).expect("could not push into FALSE outport");
+                        // try to push into FALSE
+                        if let Err(PushError::Full(ip_ret)) = out_false.push(ip) {
+                            // full, so wake up output-side component
+                            out_false_wakeup.unpark();
+                            while out_false.is_full() {
+                                out_false_wakeup.unpark();
+                                // wait     //TODO optimize
+                                std::thread::yield_now();
+                            }
+                            // send nao
+                            out_false.push(ip_ret).expect("could not push into FALSE - but said !is_full");
+                        }
                         out_false_wakeup.unpark();
                     }
                     trace!("done");
@@ -88,6 +112,8 @@ impl Component for EqualsComponent {
                 info!("EOF on inport, shutting down");
                 drop(out_true);
                 out_true_wakeup.unpark();
+                drop(out_false);
+                out_false_wakeup.unpark();
                 break;
             }
 
