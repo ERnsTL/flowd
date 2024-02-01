@@ -52,6 +52,7 @@ use components::cron::CronComponent;
 use components::cmd::CmdComponent;
 use components::hasher::HasherComponent;
 use components::equals::EqualsComponent;
+use components::httpclient::HTTPClient;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -96,6 +97,7 @@ fn main() {
         CmdComponent::get_metadata(),
         HasherComponent::get_metadata(),
         EqualsComponent::get_metadata(),
+        HTTPClientComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1730,6 +1732,7 @@ impl RuntimeRuntimePayload {
                     "Cmd" => { CmdComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "Hasher" => { HasherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "Equals" => { EqualsComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "HTTPClient" => { HTTPClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
