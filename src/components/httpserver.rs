@@ -1,13 +1,12 @@
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
-use std::io::{Write, Read};
 use std::thread::{self};
-use std::collections::HashMap;
 use astra::{Body, Request, Response, Server};
 
 pub struct HTTPServerComponent {
     conf: ProcessEdgeSource,
+    routes: ProcessEdgeSource,
     resp: ProcessEdgeSource,
     req: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
@@ -19,6 +18,7 @@ impl Component for HTTPServerComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         HTTPServerComponent {
             conf: inports.remove("CONF").expect("found no CONF inport"),
+            routes: inports.remove("ROUTES").expect("found no ROUTES inport"),
             resp: inports.remove("RESP").expect("found no RESP inport"),
             req: outports.remove("REQ").expect("found no OUT outport"),
             signals_in: signals_in,
@@ -29,33 +29,62 @@ impl Component for HTTPServerComponent {
 
     fn run(mut self) {
         debug!("HTTPServer is now run()ning!");
-        let conf = &mut self.conf;
+
+        // read configuration
         trace!("spinning for listen IP address on CONF...");
-        while conf.is_empty() {
+        while self.conf.is_empty() {
+            thread::yield_now();
+        }
+        trace!("spinning for routes on ROUTES...");
+        while self.routes.is_empty() {
             thread::yield_now();
         }
         //TODO optimize string conversions to listen on a path
-        let config = conf.pop().expect("not empty but still got an error on pop");
-        let listenpath = std::str::from_utf8(&config).expect("could not parse listenpath as utf8").to_owned();
-        trace!("got path {}", listenpath);
-        std::fs::remove_file(&listenpath).ok();
-        //let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
+        let config = self.conf.pop().expect("not empty but still got an error on pop");
+        let listenaddress = std::str::from_utf8(&config).expect("could not parse listenpath as utf8").to_owned();   //TODO optimize
+        trace!("got listen address {}", listenaddress);
+        let routes_bytes = self.routes.pop().expect("not empty but still got an error on pop");
+        let routes_str = std::str::from_utf8(&routes_bytes).expect("could not parse routes as utf8").split(",").collect::<Vec<_>>();   //TODO optimize
+        let routes = routes_str.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // set up work inports and outports
         let resp = Arc::new(Mutex::new(self.resp));
         let out_req = Arc::new(Mutex::new(self.req.sink));
         let out_req_wakeup = self.req.wakeup.expect("got no wakeup handle for outport OUT");
 
-        // start HTTP server in thread so we can also handle signals
+        // start HTTP server in separate thread so we can also handle signals
         let _server = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
-            Server::bind(listenpath)
+            Server::bind(listenaddress)
                 .serve(move |mut req: Request, _| {
                     debug!("request for {:?}", req.uri());
 
-                    // read and send body to outport
+                    // decide which route to use
+                    let route_req = req.uri().path();
+                    let mut route_index = usize::MAX;
+                    for (i, route) in routes.iter().enumerate() {
+                        if route_req.starts_with(route) {   //TODO optimize, does it convert and thus clone?
+                            debug!("matched route {} at index {}", route, i);
+                            route_index = i;
+                            break;
+                        }
+                    }
+                    if route_index == usize::MAX {
+                        warn!("no route matched, responding with 404");
+
+                        let response = Response::new("no route matched".into());
+                        let (mut parts, body) = response.into_parts();
+
+                        parts.status = reqwest::StatusCode::NOT_FOUND;
+                        let response = Response::from_parts(parts, body);
+
+                        return response;
+                    }
+
+                    // read and send body to outport based on route index
                     let mut body = Vec::new();
                     for chunk in req.body_mut() {
-                        body.extend_from_slice(&chunk.unwrap());
+                        body.extend_from_slice(&chunk.unwrap());    //TODO optimize - this clones!
                     }
-                    //req.into_body().reader().read_to_end(&mut body).expect("failed to read full request body");
                     //req.body_mut().reader().read_to_end(&mut body).expect("failed to read full request body");
                     out_req.lock().expect("poisoned lock on REQ inport").push(body).expect("could not push IP into FBP network");
                     out_req_wakeup.unpark();
@@ -143,6 +172,16 @@ impl Component for HTTPServerComponent {
                     description: String::from("configuration value, currently the IP address to listen on"),
                     values_allowed: vec![],
                     value_default: String::from("localhost:8080")
+                },
+                ComponentPort {
+                    name: String::from("ROUTES"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("configuration value, currently a comma-separated list of routes; matching route index = outport index"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
                 },
                 ComponentPort {
                     name: String::from("RESP"),
