@@ -68,13 +68,13 @@ impl Component for HTTPClientComponent {
                             //TODO forward response headers? useful?
                             debug!("forwarding HTTP results...");
                             let body = resp.bytes().expect("should have been able to read the HTTP response");
-                            out_resp.push(body).expect("could not push into RESP");  //TODO optimize conversion
+                            out_resp.push(body.to_vec()).expect("could not push into RESP");  //TODO optimize conversion
                             out_resp_wakeup.unpark();
                         },
                         Err(err) => {
                             // send error
                             debug!("got HTTP error, sending...");
-                            out_err.push(err.to_string()).expect("could not push into RESP");   //TODO optimize conversion
+                            out_err.push(err.to_string().into()).expect("could not push into RESP");   //TODO optimize conversion
                             out_err_wakeup.unpark();
                         }
                     };
@@ -89,6 +89,8 @@ impl Component for HTTPClientComponent {
                 info!("EOF on inport REQ, shutting down");
                 drop(out_resp);
                 out_resp_wakeup.unpark();
+                drop(out_err);
+                out_err_wakeup.unpark();
                 break;
             }
 

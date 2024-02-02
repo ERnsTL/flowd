@@ -52,7 +52,7 @@ use components::cron::CronComponent;
 use components::cmd::CmdComponent;
 use components::hasher::HasherComponent;
 use components::equals::EqualsComponent;
-use components::httpclient::HTTPClient;
+use components::httpclient::HTTPClientComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
