@@ -1,0 +1,173 @@
+use std::sync::{Arc, Mutex};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+
+use std::io::{Write, Read};
+use std::thread::{self};
+use std::collections::HashMap;
+use astra::{Body, Request, Response, Server};
+
+pub struct HTTPServerComponent {
+    conf: ProcessEdgeSource,
+    resp: ProcessEdgeSource,
+    req: ProcessEdgeSink,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+}
+
+impl Component for HTTPServerComponent {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+        HTTPServerComponent {
+            conf: inports.remove("CONF").expect("found no CONF inport"),
+            resp: inports.remove("RESP").expect("found no RESP inport"),
+            req: outports.remove("REQ").expect("found no OUT outport"),
+            signals_in: signals_in,
+            signals_out: signals_out,
+            //graph_inout: graph_inout,
+        }
+    }
+
+    fn run(mut self) {
+        debug!("HTTPServer is now run()ning!");
+        let conf = &mut self.conf;
+        trace!("spinning for listen IP address on CONF...");
+        while conf.is_empty() {
+            thread::yield_now();
+        }
+        //TODO optimize string conversions to listen on a path
+        let config = conf.pop().expect("not empty but still got an error on pop");
+        let listenpath = std::str::from_utf8(&config).expect("could not parse listenpath as utf8").to_owned();
+        trace!("got path {}", listenpath);
+        std::fs::remove_file(&listenpath).ok();
+        //let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
+        let resp = Arc::new(Mutex::new(self.resp));
+        let out_req = Arc::new(Mutex::new(self.req.sink));
+        let out_req_wakeup = self.req.wakeup.expect("got no wakeup handle for outport OUT");
+
+        // start HTTP server in thread so we can also handle signals
+        let _server = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+            Server::bind(listenpath)
+                .serve(move |mut req: Request, _| {
+                    debug!("request for {:?}", req.uri());
+
+                    // read and send body to outport
+                    let mut body = Vec::new();
+                    for chunk in req.body_mut() {
+                        body.extend_from_slice(&chunk.unwrap());
+                    }
+                    //req.into_body().reader().read_to_end(&mut body).expect("failed to read full request body");
+                    //req.body_mut().reader().read_to_end(&mut body).expect("failed to read full request body");
+                    out_req.lock().expect("poisoned lock on REQ inport").push(body).expect("could not push IP into FBP network");
+                    out_req_wakeup.unpark();
+
+                    // read back response from inport and send to client
+                    debug!("waiting for response from FBP network...");
+                    while resp.lock().expect("poisoned lock on RESP outport").is_empty() {
+                        //TODO optimize spinning
+                        thread::yield_now();
+                    }
+                    debug!("got a packet, writing into HTTP response...");
+                    let ip = resp.lock().expect("poisoned lock on RESP outport").pop().expect("no response data available, but said !is_empty() before");
+                    Response::new(Body::new(ip))
+                    
+                    //Response::new(Body::from("Hello, World!"))
+                })
+                .expect("failed to start server");
+        });
+
+        debug!("entering main loop");
+        loop {
+            trace!("begin of iteration");
+
+            // check signals
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals_in.try_recv() {
+                //TODO optimize string conversions
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                // stop signal
+                if ip == b"stop" {
+                    info!("got stop signal, exiting");
+                    break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
+
+            // check in port
+            //TODO while !inn.is_empty() {
+            /*
+            loop {
+                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                    // output the packet data with newline
+                    debug!("got a packet, writing into unix socket...");
+
+                    // send into unix socket to peer
+                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
+                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
+                    debug!("done");
+                } else {
+                    break;
+                }
+            }
+            */
+
+            // check socket
+            //NOTE: happens in connection handler threads, see above
+
+            trace!("end of iteration");
+            std::thread::park();
+        }
+        debug!("cleaning up");
+        //std::fs::remove_file(listenpath).unwrap();
+        //TODO stop listening thread
+        //TODO inform services
+        info!("exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("HTTPServer"),
+            description: String::from("HTTP server"),
+            icon: String::from("server"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("configuration value, currently the IP address to listen on"),
+                    values_allowed: vec![],
+                    value_default: String::from("localhost:8080")
+                },
+                ComponentPort {
+                    name: String::from("RESP"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("response data from HTTP route handlers"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
+                ComponentPort {
+                    name: String::from("REQ"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: true,
+                    description: String::from("incoming requests from HTTP clients"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            ..Default::default()
+        }
+    }
+}

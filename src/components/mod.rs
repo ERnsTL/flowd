@@ -13,3 +13,4 @@ pub mod cmd;
 pub mod hasher;
 pub mod equals;
 pub mod httpclient;
+pub mod httpserver;
