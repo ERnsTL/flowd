@@ -2,8 +2,9 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct HTTPClientComponent {
-    inn: ProcessEdgeSource,
-    out: ProcessEdgeSink,
+    req: ProcessEdgeSource,
+    out_resp: ProcessEdgeSink,
+    out_err: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
@@ -12,8 +13,9 @@ pub struct HTTPClientComponent {
 impl Component for HTTPClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         HTTPClientComponent {
-            inn: inports.remove("NAMES").expect("found no NAMES inport"),
-            out: outports.remove("OUT").expect("found no OUT outport"),
+            req: inports.remove("REQ").expect("found no REQ inport"),
+            out_resp: outports.remove("RESP").expect("found no RESP outport"),
+            out_err: outports.remove("ERR").expect("found no ERR outport"),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -22,9 +24,11 @@ impl Component for HTTPClientComponent {
 
     fn run(mut self) {
         debug!("HTTPClient is now run()ning!");
-        let filenames = &mut self.inn;    //TODO optimize
-        let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let requests = &mut self.req;    //TODO optimize
+        let out_resp = &mut self.out_resp.sink;
+        let out_resp_wakeup = self.out_resp.wakeup.expect("got no wakeup handle for outport RESP");
+        let out_err = &mut self.out_err.sink;
+        let out_err_wakeup = self.out_err.wakeup.expect("got no wakeup handle for outport ERR");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -46,21 +50,34 @@ impl Component for HTTPClientComponent {
             // check in port
             //TODO while !inn.is_empty() {
             loop {
-                if let Ok(ip) = filenames.pop() {
+                if let Ok(ip) = requests.pop() {
                     // read filename on inport
+                    //TODO support POST etc.
+                    //TODO support sending a body
                     let file_path = std::str::from_utf8(&ip).expect("non utf-8 data");
-                    debug!("got a filename: {}", &file_path);
+                    debug!("got a request: {}", &file_path);
 
-                    // read whole file
+                    // make HTTP request
                     //TODO may be big file - add chunking
                     //TODO enclose files in brackets to know where its stream of chunks start and end
-                    debug!("reading file...");
-                    let contents = std::fs::read(file_path).expect("should have been able to read the file");
-
-                    // send it
-                    debug!("forwarding file contents...");
-                    out.push(contents).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                    //TODO enable use of async and/or timeout
+                    debug!("making HTTP request...");
+                    match reqwest::blocking::get(file_path) {
+                        Ok(resp) => {
+                            // send it
+                            //TODO forward response headers? useful?
+                            debug!("forwarding HTTP results...");
+                            let body = resp.bytes().expect("should have been able to read the HTTP response");
+                            out_resp.push(body).expect("could not push into RESP");  //TODO optimize conversion
+                            out_resp_wakeup.unpark();
+                        },
+                        Err(err) => {
+                            // send error
+                            debug!("got HTTP error, sending...");
+                            out_err.push(err.to_string()).expect("could not push into RESP");   //TODO optimize conversion
+                            out_err_wakeup.unpark();
+                        }
+                    };
                     debug!("done");
                 } else {
                     break;
@@ -68,10 +85,10 @@ impl Component for HTTPClientComponent {
             }
 
             // are we done?
-            if filenames.is_abandoned() {
-                info!("EOF on inport NAMES, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            if requests.is_abandoned() {
+                info!("EOF on inport REQ, shutting down");
+                drop(out_resp);
+                out_resp_wakeup.unpark();
                 break;
             }
 
@@ -84,32 +101,42 @@ impl Component for HTTPClientComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("HTTPClient"),
-            description: String::from("Reads the contents of the given files and sends the contents."),
-            icon: String::from("file"),
+            description: String::from("Reads URLs and sends the response body out via RESP or ERR"),   //TODO change according to new features
+            icon: String::from("web"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
-                    name: String::from("NAMES"),
+                    name: String::from("REQ"),
                     allowed_type: String::from("any"),
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("filenames, one per IP"),
+                    description: String::from("URLs, one per IP"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
             ],
             out_ports: vec![
                 ComponentPort {
-                    name: String::from("OUT"),
+                    name: String::from("RESP"),
                     allowed_type: String::from("any"),
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("conents of the given files"),
+                    description: String::from("response body if response is non-error"),
                     values_allowed: vec![],
                     value_default: String::from("")
-                }
+                },
+                ComponentPort {
+                    name: String::from("ERR"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("error responses in human-readable error format"),    //TODO some machine-readable format better?
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                },
             ],
             ..Default::default()
         }
