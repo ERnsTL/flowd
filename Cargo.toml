@@ -3,7 +3,7 @@ name = "flowd-rs"
 version = "0.3.0-git"
 authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
 repository = "https://github.com/ERnsTL/flowd"
-license = "GNU/LGPL-3.0+"
+license = "LGPL-3.0-or-later"
 description = "inter-language runtime for Flow-based Programming (FBP)"
 edition = "2018"
 
