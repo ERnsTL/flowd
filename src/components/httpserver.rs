@@ -100,6 +100,8 @@ impl Component for HTTPServerComponent {
                     let mut out_req_inner = out_req.lock().expect("poisoned lock on REQ inport");
                     unsafe {
                         let out_req_one = out_req_inner.borrow_mut().get_unchecked_mut(route_index);    // already checked this above
+                        let unknown = &"(unknown)".to_owned();
+                        debug!("pushing to outport index {} -> {}", route_index, out_req_one.proc_name.as_ref().unwrap_or(unknown));
                         out_req_one.sink.push(body).expect("could not push IP into FBP network");
                         out_req_one.wakeup.as_ref().unwrap().unpark();
                     }
