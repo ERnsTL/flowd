@@ -1803,12 +1803,15 @@ impl RuntimeRuntimePayload {
 
                 // replace all process names with Thread handles
                 // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
-                for outport in outports.iter_mut() {
+                //####
+                for outport in outports.flat_iter_mut() {
                     let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
-                    let joinhandles_tmp = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
-                    let thr = joinhandles_tmp.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
+                    let joinhandles_locked = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
+                    let thr = joinhandles_locked.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
+                    // now the actual replacement - replace wakeup from None with the handle and the process name with None
                     outport.1.wakeup = Some(thr.clone());   // before this was None, now replaced with Some(Thread)
-                    outport.1.proc_name = None; // before this was Some(String), now replaced with None
+                    //NOTE: technically, the process name is not needed any more, but we leave it in for debugging
+                    //outport.1.proc_name = None; // before this was Some(String), now we could replace it with None
                 }
                 drop(joinhandlesref);   // not needed anymore, we got the handles
 
