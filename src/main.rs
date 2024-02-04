@@ -1601,9 +1601,13 @@ impl RuntimeRuntimePayload {
                 }
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
+                //####
+                /*
                 if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.target.process.clone()) } ) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
                 }
+                */
+                sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.target.process.clone()) } );
             }
         }
         for (public_name, edge) in graph.inports.iter() {
@@ -1620,9 +1624,13 @@ impl RuntimeRuntimePayload {
             // assign into outports of source process
             // source process name = graphname-IN
             let sourceproc: &mut ProcPorts = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
+            //####
+            /*
             if let Some(_) = sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.process.clone()) } ) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source inport insert failed, key exists")));
             }
+            */
+            sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.process.clone()) } );
         }
         for (public_name, edge) in graph.outports.iter() {
             // prepare edge
@@ -1638,9 +1646,13 @@ impl RuntimeRuntimePayload {
             }
             // assign into outports of source process
             let sourceproc = ports_all.get_mut(&edge.process).expect("graph source assignment process not found");
+            //####
+            /*
             if let Some(_) = sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(format!("{}-OUT", graph.properties.name)) } ) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source outport insert failed, key exists")));
             }
+            */
+            sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(format!("{}-OUT", graph.properties.name)) } );
         }
 
         // generate processes and assign prepared connections
@@ -1798,11 +1810,17 @@ impl RuntimeRuntimePayload {
                 // get ports for this special component
                 let ports_this: ProcPorts = ports_all.remove(format!("{}-IN", graph.properties.name).as_str()).expect("prepared connections for graph inports not found");
                 // add wakeup handles and sinks of all target processes (translate target proc_name into join_handle)
-                for (port_name, edge) in ports_this.outports {
+                for (port_name, mut edge) in ports_this.outports {
+                    // arrayports: check if there are multiple edges going out of the graph inport, which is not allowed
+                    //####
+                    if edge.len() != 1 {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges from graph inport")));
+                    }
                     // get targetproc
-                    let targetproc_wake_notify = thread_wake_handles.lock().expect("could not lock thread wake handles for getting Thread wake handle").get(edge.proc_name.as_ref().expect("target process for graph inport missing name").as_str()).expect("target process for graph inport not found").clone();
+                    let targetproc_wake_notify = thread_wake_handles.lock().expect("could not lock thread wake handles for getting Thread wake handle").get(edge[0].proc_name.as_ref().expect("target process for graph inport missing name").as_str()).expect("target process for graph inport not found").clone();
                     // insert that port
-                    outports.insert(port_name, ProcessEdgeSink { sink: edge.sink, wakeup: Some(targetproc_wake_notify), proc_name: edge.proc_name });
+                    let edge0 = edge.pop().unwrap();
+                    outports.insert(port_name, ProcessEdgeSink { sink: edge0.sink, wakeup: Some(targetproc_wake_notify), proc_name: edge0.proc_name });
                 }
                 // save the inports (where we put packets into) as the graph inport channel handles; they are "outport handles" because they are being written into (packet sink)
                 graph_inout.inports = Some(outports);
