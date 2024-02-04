@@ -1505,6 +1505,38 @@ impl RuntimeRuntimePayload {
         let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
         let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
+        // check if all edges having the same source process have a source port that is marked as an arry port
+        let mut known_source_processes = vec![];
+        for edge in graph.edges.iter() {
+            if known_source_processes.contains(&edge.source.process) {
+                // ignore IIP edges
+                if edge.data.is_some() && edge.source.process.is_empty() {
+                    // that is an IIP edge, ignore
+                    continue;
+                }
+                // check if source port is array port
+                let component_name = &graph.nodes.get(&edge.source.process).expect("process not found").component;
+                for component in components.available.iter() {
+                    if component.name == *component_name {
+                        for port in component.out_ports.iter() {
+                            if port.name == edge.source.port {
+                                if !port.is_arrayport {
+                                    // error
+                                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges from source process port which is not an array port")));
+                                } else {
+                                    debug!("found correct in-use array port {}.{}", edge.source.process, edge.source.port);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // add to list
+                known_source_processes.push(edge.source.process.clone());
+            }
+        }
+        drop(known_source_processes);
+
         // generate all connections
         struct ProcPorts {
             inports: ProcessInports,    // including ports with IIPs
