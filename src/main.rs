@@ -1508,8 +1508,7 @@ impl RuntimeRuntimePayload {
         let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
         let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
-        // check if all edges having the same source process have a source port that is marked as an arry port
-        //####
+        // arrayports: check if all edges having the same source process have a source port that is marked as an arry port
         let mut known_source_processes = vec![];
         for edge in graph.edges.iter() {
             if known_source_processes.contains(&edge.source.process) {
@@ -1540,8 +1539,7 @@ impl RuntimeRuntimePayload {
             }
         }
         drop(known_source_processes);
-        // check if all edges having the same target process have a target port that is marked as an arry port
-        //####
+        // arrayports: check if all edges having the same target process have a target port that is marked as an arry port
         let mut known_target_processes: MultiMap<String, String> = MultiMap::new();
         for edge in graph.edges.iter() {
             if let Some(ports) = known_target_processes.get_vec_mut(&edge.target.process) {
@@ -1618,12 +1616,7 @@ impl RuntimeRuntimePayload {
                 sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");    //TODO optimize as_bytes() / clone or String in Edge struct
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
-                //####
-                /*
-                if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
-                }
-                */
+                // arrayports: insert, but remember that this is a multimap
                 targetproc.inports.insert(edge.target.port.clone(), source);
                 // assign into outports of source process
                 // nothing to do in case of IIP - this also means that sink will go ouf ot scope and that source.is_abandoned() = Arc::strong_count() will be 1
@@ -1636,21 +1629,11 @@ impl RuntimeRuntimePayload {
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
                 let targetproc_wake_notify = targetproc.wake_notify.clone();
-                //####
-                /*
-                if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process target inport insert failed, key exists")));
-                }
-                */
+                // arrayports: insert, but remember that this is a multimap
                 targetproc.inports.insert(edge.target.port.clone(), source);
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
-                //####
-                /*
-                if let Some(_) = sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.target.process.clone()) } ) {
-                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process source inport insert failed, key exists")));
-                }
-                */
+                // arrayports: insert, but remember that this is a multimap
                 sourceproc.outports.insert(edge.source.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.target.process.clone()) } );
             }
         }
@@ -1662,22 +1645,12 @@ impl RuntimeRuntimePayload {
             // insert into inports of target process
             let targetproc = ports_all.get_mut(&edge.process).expect("graph target assignment process not found");
             let targetproc_wake_notify = targetproc.wake_notify.clone();
-            //####
-            /*
-            if let Some(_) = targetproc.inports.insert(edge.port.clone(), source) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target inport insert failed, key exists")));
-            }
-            */
+            // arrayports: insert, but remember that this is a multimap
             targetproc.inports.insert(edge.port.clone(), source);
             // assign into outports of source process
             // source process name = graphname-IN
             let sourceproc: &mut ProcPorts = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
-            //####
-            /*
-            if let Some(_) = sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.process.clone()) } ) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source inport insert failed, key exists")));
-            }
-            */
+            // arrayports: insert, but remember that this is a multimap
             sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.process.clone()) } );
         }
         for (public_name, edge) in graph.outports.iter() {
@@ -1689,21 +1662,11 @@ impl RuntimeRuntimePayload {
             // target process name = graphname-OUT
             let targetproc = ports_all.get_mut(format!("{}-OUT", graph.properties.name).as_str()).expect("graph target assignment process not found");
             let targetproc_wake_notify = targetproc.wake_notify.clone();
-            //####
-            /*
-            if let Some(_) = targetproc.inports.insert(public_name.clone(), source) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target outport insert failed, key exists")));
-            }
-            */
+            // arrayports: insert, but remember that this is a multimap
             targetproc.inports.insert(public_name.clone(), source);
             // assign into outports of source process
             let sourceproc = ports_all.get_mut(&edge.process).expect("graph source assignment process not found");
-            //####
-            /*
-            if let Some(_) = sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(format!("{}-OUT", graph.properties.name)) } ) {
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph source outport insert failed, key exists")));
-            }
-            */
+            // arrayports: insert, but remember that this is a multimap
             sourceproc.outports.insert(edge.port.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(format!("{}-OUT", graph.properties.name)) } );
         }
 
@@ -1803,7 +1766,7 @@ impl RuntimeRuntimePayload {
 
                 // replace all process names with Thread handles
                 // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
-                //####
+                // arrayports: do a flat iteration over all outports because of multimap
                 for outport in outports.flat_iter_mut() {
                     let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
                     let joinhandles_locked = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
@@ -1868,7 +1831,6 @@ impl RuntimeRuntimePayload {
                 // add wakeup handles and sinks of all target processes (translate target proc_name into join_handle)
                 for (port_name, mut edge) in ports_this.outports {
                     // arrayports: check if there are multiple edges going out of the graph inport, which is not allowed
-                    //####
                     if edge.len() != 1 {
                         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges from graph inport")));
                     }
