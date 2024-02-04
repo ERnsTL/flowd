@@ -5746,7 +5746,7 @@ impl ComponentLibrary {
 // components
 // ----------
 
-type ProcessInports = HashMap<String, ProcessEdgeSource>;
+type ProcessInports = MultiMap<String, ProcessEdgeSource>;
 type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
