@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{borrow::BorrowMut, sync::{Arc, Mutex}};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 use std::thread::{self};
@@ -8,7 +8,7 @@ pub struct HTTPServerComponent {
     conf: ProcessEdgeSource,
     routes: ProcessEdgeSource,
     resp: ProcessEdgeSource,
-    req: ProcessEdgeSink,
+    req: Vec<ProcessEdgeSink>,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,

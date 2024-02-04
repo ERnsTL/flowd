@@ -14,8 +14,8 @@ impl Component for HTTPClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         HTTPClientComponent {
             req: inports.remove("REQ").expect("found no REQ inport"),
-            out_resp: outports.remove("RESP").expect("found no RESP outport"),
-            out_err: outports.remove("ERR").expect("found no ERR outport"),
+            out_resp: outports.remove("RESP").expect("found no RESP outport").pop().unwrap(),
+            out_err: outports.remove("ERR").expect("found no ERR outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,

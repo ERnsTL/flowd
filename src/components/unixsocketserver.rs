@@ -19,7 +19,7 @@ impl Component for UnixSocketServerComponent {
         UnixSocketServerComponent {
             conf: inports.remove("CONF").expect("found no CONF inport"),
             resp: inports.remove("RESP").expect("found no RESP inport"),
-            out: outports.remove("OUT").expect("found no OUT outport"),
+            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,

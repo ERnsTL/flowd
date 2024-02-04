@@ -26,7 +26,7 @@ impl Component for CmdComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
             cmd: inports.remove("CMD").expect("found no CMD inport"),
             conf: inports.remove("CONF").expect("found no CONF inport"),
-            out: outports.remove("OUT").expect("found no OUT outport"),
+            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,

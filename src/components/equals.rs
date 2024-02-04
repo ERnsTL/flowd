@@ -18,8 +18,8 @@ impl Component for EqualsComponent {
         EqualsComponent {
             cmp: inports.remove("CMP").expect("found no CMP inport"),
             inn: inports.remove("IN").expect("found no IN inport"),
-            out_true: outports.remove("TRUE").expect("found no TRUE outport"),
-            out_false: outports.remove("FALSE").expect("found no FALSE outport"),
+            out_true: outports.remove("TRUE").expect("found no TRUE outport").pop().unwrap(),
+            out_false: outports.remove("FALSE").expect("found no FALSE outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,

@@ -13,7 +13,7 @@ impl Component for OutputComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         OutputComponent {
             inn: inports.remove("IN").expect("found no IN inport"),
-            out: outports.remove("OUT").expect("found no OUT outport"),
+            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
