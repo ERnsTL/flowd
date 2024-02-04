@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct MuxerComponent {
-    inn: ProcessEdgeSource,
+    inn: Vec<ProcessEdgeSource>,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
@@ -12,7 +12,7 @@ pub struct MuxerComponent {
 impl Component for MuxerComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         MuxerComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            inn: inports.remove("IN").expect("found no IN inport"),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -43,22 +43,24 @@ impl Component for MuxerComponent {
                 }
             }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+            // check in port(s)
+            for inport in inn.iter_mut() {
+                loop {
+                    if let Ok(ip) = inport.pop() {
+                        debug!("repeating packet...");
+                        out.push(ip).expect("could not push into OUT");
+                        out_wakeup.unpark();
+                        debug!("done");
+                    } else {
+                        break;
+                    }
                 }
             }
 
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
+            // are we done? = all inports have exited
+            if inn.iter().all(|x| x.is_abandoned()) {
+                // inputs closed, nothing more to do
+                info!("EOF on all inports, shutting down");
                 drop(out);
                 out_wakeup.unpark();
                 break;
