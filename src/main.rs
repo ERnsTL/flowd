@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
 use std::collections::HashMap;
+use multimap::MultiMap;
 //use dashmap::DashMap;
 
 use chrono::prelude::*;
@@ -5728,7 +5729,7 @@ impl ComponentLibrary {
 // ----------
 
 type ProcessInports = HashMap<String, ProcessEdgeSource>;
-type ProcessOutports = HashMap<String, ProcessEdgeSink>;
+type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
 #[derive(Debug)]
