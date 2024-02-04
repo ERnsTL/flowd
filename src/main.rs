@@ -1856,6 +1856,7 @@ impl RuntimeRuntimePayload {
                 //let ports_this_wake_notify = ports_this.wake_notify.clone();
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     let signals = signalsource;
+                    // arrayports: Note that this does currently not handle arrayports, but since this is forbidden via the graph definition, we can ignore that for now //TODO add check
                     if inports.len() == 0 {
                         error!("no graph inports found, exiting");
                         return;
