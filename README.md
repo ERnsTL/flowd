@@ -182,30 +182,32 @@ Everything else:
 * Drop
 * Output
 * LibComponent (work in progress - for loading components from C API libraries)
-* Unix socket server
+* Unix domain socket server, TODO support for abstract address
 * File reader
-* Trim
+* Trim for removing trailing and heading whitespace
 * Split lines
-* Count
-* Cron with extended 7-parameter form and granularity up to seconds
+* Count for packets
+* Cron for time-based events, with extended 7-parameter form and granularity up to seconds
 * Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc. The sub-process commandline with arguments can be configured. TODO add more info about the features of this component
+* Hasher for calculating hash value of packets, supports xxHash64
+* Equals routing based on matching IP content
+* simple HTTP client
+* simple HTTP server, supporting multiple HTTP routes
 
 TODO (copy from Go version):
 
 * TCP client and server
-* Unix domain client and server (abstract and path-based)
+* Unix domain client (abstract and path-based)
 * TLS client and server
-* SSH client
-* Simple HTTP server and client
+* SSH client (without using OpenSSH client)
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
 * File writing
 * File tailing resp. following
 * Modification of frame headers (?)
-* Extraction of data from frame body
+* Extraction of data from frame body using regular expressions
 * Routing based on frame contents or header values (?)
-* Time-based events with cron expressions
-* Counter for packets (done), packet sizes and packets matching by header field (?)
+* Counter for packet sizes and packets matching by header field (?)
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
 * Compression and decompression in XZ/LZMA2 and Brotli formats
