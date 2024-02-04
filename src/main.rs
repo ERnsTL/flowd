@@ -1542,28 +1542,34 @@ impl RuntimeRuntimePayload {
         drop(known_source_processes);
         // check if all edges having the same target process have a target port that is marked as an arry port
         //####
-        let mut known_target_processes = vec![];
+        let mut known_target_processes: MultiMap<String, String> = MultiMap::new();
         for edge in graph.edges.iter() {
-            if known_target_processes.contains(&edge.target.process) {
-                // check if target port is array port
-                let component_name = &graph.nodes.get(&edge.target.process).expect("target process not found").component;
-                for component in components.available.iter() {
-                    if component.name == *component_name {
-                        for port in component.in_ports.iter() {
-                            if port.name == edge.target.port {
-                                if !port.is_arrayport {
-                                    // error
-                                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges to target process port which is not an array port")));    //TODO say which ones
-                                } else {
-                                    debug!("found correct in-use array inport {}.{}", edge.target.process, edge.target.port);
+            if let Some(ports) = known_target_processes.get_vec_mut(&edge.target.process) {
+                // check for multiple connections to the same target port
+                if ports.contains(&edge.target.port) {
+                    // check if target port is array port, since we now have multiple connections into that target port
+                    let component_name = &graph.nodes.get(&edge.target.process).expect("target process not found").component;
+                    for component in components.available.iter() {
+                        if component.name == *component_name {
+                            for port in component.in_ports.iter() {
+                                if port.name == edge.target.port {
+                                    if !port.is_arrayport {
+                                        // error
+                                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges to target process port which is not an array port")));    //TODO say which ones
+                                    } else {
+                                        debug!("found correct in-use array inport {}.{}", edge.target.process, edge.target.port);
+                                    }
                                 }
                             }
                         }
                     }
+                } else {
+                    // add to list (under that process name), first use of that port
+                    ports.push(edge.target.port.clone());
                 }
             } else {
-                // add to list
-                known_target_processes.push(edge.target.process.clone());
+                // add to list, first use of that process
+                known_target_processes.insert(edge.target.process.clone(), edge.target.port.clone());
             }
         }
         drop(known_target_processes);
