@@ -194,6 +194,12 @@ Everything else:
 * simple HTTP client
 * simple HTTP server, supporting multiple HTTP routes
 
+TODO:
+
+* brackets using OOB marker
+* filtering on object structures in sexp fashion
+* building of header (K/V) and body structure - then it is on par with Go and JavaFBP implementation
+
 TODO (copy from Go version):
 
 * TCP client and server
