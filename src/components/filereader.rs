@@ -12,7 +12,7 @@ pub struct FileReaderComponent {
 impl Component for FileReaderComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         FileReaderComponent {
-            inn: inports.remove("NAMES").expect("found no NAMES inport"),
+            inn: inports.remove("NAMES").expect("found no NAMES inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,

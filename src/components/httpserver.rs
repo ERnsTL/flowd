@@ -17,9 +17,9 @@ pub struct HTTPServerComponent {
 impl Component for HTTPServerComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         HTTPServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport"),
-            routes: inports.remove("ROUTES").expect("found no ROUTES inport"),
-            resp: inports.remove("RESP").expect("found no RESP inport"),
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
+            routes: inports.remove("ROUTES").expect("found no ROUTES inport").pop().unwrap(),
+            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
             req: outports.remove("REQ").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,

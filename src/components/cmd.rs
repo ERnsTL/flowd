@@ -23,9 +23,9 @@ enum Mode { One, Each }
 impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CmdComponent {
-            inn: inports.remove("IN").expect("found no IN inport"),
-            cmd: inports.remove("CMD").expect("found no CMD inport"),
-            conf: inports.remove("CONF").expect("found no CONF inport"),
+            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            cmd: inports.remove("CMD").expect("found no CMD inport").pop().unwrap(),
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,

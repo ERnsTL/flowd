@@ -17,8 +17,8 @@ pub struct UnixSocketServerComponent {
 impl Component for UnixSocketServerComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         UnixSocketServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport"),
-            resp: inports.remove("RESP").expect("found no RESP inport"),
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
+            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,

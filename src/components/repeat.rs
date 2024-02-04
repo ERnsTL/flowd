@@ -12,7 +12,7 @@ pub struct RepeatComponent {
 impl Component for RepeatComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         RepeatComponent {
-            inn: inports.remove("IN").expect("found no IN inport"),
+            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,

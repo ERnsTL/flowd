@@ -55,7 +55,7 @@ impl Component for LibComponent { //<'_> {
 
             //TODO take the declared inports and outports
             LibComponent {
-                inn: inports.remove("IN").expect("found no IN inport"),
+                inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
                 out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
                 signals_in: signals_in,
                 signals_out: signals_out,

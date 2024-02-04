@@ -16,8 +16,8 @@ pub struct EqualsComponent {
 impl Component for EqualsComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         EqualsComponent {
-            cmp: inports.remove("CMP").expect("found no CMP inport"),
-            inn: inports.remove("IN").expect("found no IN inport"),
+            cmp: inports.remove("CMP").expect("found no CMP inport").pop().unwrap(),
+            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             out_true: outports.remove("TRUE").expect("found no TRUE outport").pop().unwrap(),
             out_false: outports.remove("FALSE").expect("found no FALSE outport").pop().unwrap(),
             signals_in: signals_in,

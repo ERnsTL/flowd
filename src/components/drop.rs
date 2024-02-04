@@ -11,7 +11,7 @@ pub struct DropComponent {
 impl Component for DropComponent {
     fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         DropComponent {
-            inn: inports.remove("IN").expect("found no IN inport"),
+            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,

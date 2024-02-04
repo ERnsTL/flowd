@@ -18,7 +18,7 @@ pub struct CronComponent {
 impl Component for CronComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CronComponent {
-            when: inports.remove("WHEN").expect("found no WHEN inport"),
+            when: inports.remove("WHEN").expect("found no WHEN inport").pop().unwrap(),
             tick: outports.remove("TICK").expect("found no TICK outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
