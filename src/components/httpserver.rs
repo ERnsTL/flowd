@@ -49,8 +49,18 @@ impl Component for HTTPServerComponent {
 
         // set up work inports and outports
         let resp = Arc::new(Mutex::new(self.resp));
-        let out_req = Arc::new(Mutex::new(self.req.sink));
-        let out_req_wakeup = self.req.wakeup.expect("got no wakeup handle for outport OUT");
+        //TODO optimize
+        /*
+        let mut out_req = vec![];
+        let mut out_req_wakeup = vec![];
+        for req in self.req.iter() {
+            out_req.push(req.as_mut().sink);
+            out_req_wakeup.push(req.wakeup.expect("got no wakeup handle for outport REQ"));
+        }
+        let out_req = Arc::new(Mutex::new(self.req.iter().map(|p| p.sink).collect::<Vec<_>>()));    // all sinks
+        let out_req_wakeup = self.req.iter().map(|p| p.wakeup.expect("got no wakeup handle for outport REQ")).collect::<Vec<_>>();    // all wakeup handles
+        */
+        let out_req = Arc::new(Mutex::new(self.req));
 
         // start HTTP server in separate thread so we can also handle signals
         let _server = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
@@ -86,8 +96,13 @@ impl Component for HTTPServerComponent {
                         body.extend_from_slice(&chunk.unwrap());    //TODO optimize - this clones!
                     }
                     //req.body_mut().reader().read_to_end(&mut body).expect("failed to read full request body");
-                    out_req.lock().expect("poisoned lock on REQ inport").push(body).expect("could not push IP into FBP network");
-                    out_req_wakeup.unpark();
+                    //TODO optimize
+                    let mut out_req_inner = out_req.lock().expect("poisoned lock on REQ inport");
+                    unsafe {
+                        let out_req_one = out_req_inner.borrow_mut().get_unchecked_mut(route_index);    // already checked this above
+                        out_req_one.sink.push(body).expect("could not push IP into FBP network");
+                        out_req_one.wakeup.as_ref().unwrap().unpark();
+                    }
 
                     // read back response from inport and send to client
                     debug!("waiting for response from FBP network...");
