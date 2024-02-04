@@ -107,6 +107,7 @@ impl Component for HTTPServerComponent {
 
                     // read back response from inport and send to client
                     debug!("waiting for response from FBP network...");
+                    //TODO currently this needs a Muxer before it and the RESP port is thus intentionally not marked as an arrayport
                     while resp.lock().expect("poisoned lock on RESP outport").is_empty() {
                         //TODO optimize spinning
                         thread::yield_now();
@@ -204,7 +205,7 @@ impl Component for HTTPServerComponent {
                     allowed_type: String::from("any"),
                     schema: None,
                     required: true,
-                    is_arrayport: false,
+                    is_arrayport: false,    //TODO currently this needs a Muxer before it and the RESP port is thus intentionally not marked as an arrayport
                     description: String::from("response data from HTTP route handlers"),
                     values_allowed: vec![],
                     value_default: String::from("")
