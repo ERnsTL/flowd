@@ -1582,9 +1582,13 @@ impl RuntimeRuntimePayload {
                 sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");    //TODO optimize as_bytes() / clone or String in Edge struct
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
+                //####
+                /*
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process IIP inport insert failed, key exists")));
                 }
+                */
+                targetproc.inports.insert(edge.target.port.clone(), source);
                 // assign into outports of source process
                 // nothing to do in case of IIP - this also means that sink will go ouf ot scope and that source.is_abandoned() = Arc::strong_count() will be 1
                 // in summary: IIP ports are closed/abandoned
@@ -1596,9 +1600,13 @@ impl RuntimeRuntimePayload {
                 // insert into inports of target process
                 let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
                 let targetproc_wake_notify = targetproc.wake_notify.clone();
+                //####
+                /*
                 if let Some(_) = targetproc.inports.insert(edge.target.port.clone(), source) {
                     return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("process target inport insert failed, key exists")));
                 }
+                */
+                targetproc.inports.insert(edge.target.port.clone(), source);
                 // assign into outports of source process
                 let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
                 //####
@@ -1618,9 +1626,13 @@ impl RuntimeRuntimePayload {
             // insert into inports of target process
             let targetproc = ports_all.get_mut(&edge.process).expect("graph target assignment process not found");
             let targetproc_wake_notify = targetproc.wake_notify.clone();
+            //####
+            /*
             if let Some(_) = targetproc.inports.insert(edge.port.clone(), source) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target inport insert failed, key exists")));
             }
+            */
+            targetproc.inports.insert(edge.port.clone(), source);
             // assign into outports of source process
             // source process name = graphname-IN
             let sourceproc: &mut ProcPorts = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
@@ -1641,9 +1653,13 @@ impl RuntimeRuntimePayload {
             // target process name = graphname-OUT
             let targetproc = ports_all.get_mut(format!("{}-OUT", graph.properties.name).as_str()).expect("graph target assignment process not found");
             let targetproc_wake_notify = targetproc.wake_notify.clone();
+            //####
+            /*
             if let Some(_) = targetproc.inports.insert(public_name.clone(), source) {
                 return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("graph target outport insert failed, key exists")));
             }
+            */
+            targetproc.inports.insert(public_name.clone(), source);
             // assign into outports of source process
             let sourceproc = ports_all.get_mut(&edge.process).expect("graph source assignment process not found");
             //####
