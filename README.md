@@ -67,6 +67,8 @@ FBP network protocol:
 * Ability to implement custom buffering and flushing strategies is implemented.
 * Bulk transfers and parallel send/receive are implemented.
 * No bounds on the size of each information packet (limitation: system memory size, ulimits).
+* Multiple connections going into a single component is possible, with the consuming process able to control from which it wants to read (array inports).
+* Array outports addressable by index with ability to see the target process name for debugging.
 
 Test suite of the FBP network protocol:
 * One of the next milestones (TODO).
@@ -127,6 +129,7 @@ Debugging, tracing:
 * Currently responds with mock responses but does not send any tracing data.
 * Processes can send copies of received and/or sent IPs out to FBP Network Protocol client(s) for debugging.
 * TODO mandatory debugging of all transmitted packets (TODO performance implications? per-process basis or graph-based or whole runtime?)
+* Process name is available on each outport and each connection of an array outport.
 
 Logging:
 * Runtime logging facilities to STDOUT with multiple levels, mentioning the thread name is implemented.
@@ -145,9 +148,9 @@ Deployment and reproducible setups:
 * Planned (TODO). Goal is to easily load components from a Github repository, build them and use them in a network. Naming and referencing to such external components by git repository.
 
 Signaling, Monitoring:
-* A background caretaker thread with ability to signal to and from all processes is implemented.
+* A background watchdog thread with ability to signal to and from all processes is implemented.
 * In addition, the main thread can issue one-way signaling to threads, eg. for a stop command.
-* The caretaker thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
+* The watchdog thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
 * Export of monitoring data, API server or visualization is currently not implemented.
 
 Testing:
@@ -162,7 +165,6 @@ Present in Go version to reach feature parity:
 * TODO Can run a terminal UI component - and then bring it to the web using gotty :-)
 * TODO Delivery of program parameters to components (?)
 * TODO Connections between components in framed or raw way
-* TODO Basic array ports
 * TODO Broadcasting to multiple output ports, serializing only once
 * TODO Parsing of .fbp network specifications
 * TODO Parsing of .drw network specifications made using DrawFBP
@@ -193,12 +195,13 @@ Everything else:
 * Equals routing based on matching IP content
 * simple HTTP client
 * simple HTTP server, supporting multiple HTTP routes
+* Muxer to merge multiple connections into one output for components not able to handle array inports
 
 TODO:
 
 * brackets using OOB marker
 * filtering on object structures in sexp fashion
-* building of header (K/V) and body structure - then it is on par with Go and JavaFBP implementation
+* building of header (K/V) and body structure in sexp fashion - then it is on par with Go and JavaFBP implementation
 
 TODO (copy from Go version):
 
@@ -210,10 +213,10 @@ TODO (copy from Go version):
 * Distribution of the network across multiple machines
 * File writing
 * File tailing resp. following
-* Modification of frame headers (?)
+* Modification of frame headers (via sexp objects using brackets)
 * Extraction of data from frame body using regular expressions
-* Routing based on frame contents or header values (?)
-* Counter for packet sizes and packets matching by header field (?)
+* Routing based on frame contents or header values (sexp objects using brackets)
+* Counter for packet sizes and packets matching by header field (on sexp objects)
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
 * Compression and decompression in XZ/LZMA2 and Brotli formats
