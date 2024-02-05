@@ -3871,23 +3871,24 @@ struct GraphAddnodeResponse {
     payload: GraphAddnodeResponsePayload,
 }
 
-impl Default for GraphAddnodeResponse {
-    fn default() -> Self {
+//###
+impl GraphAddnodeResponse {
+    fn new(payload: GraphAddnodeResponsePayload) -> Self {
         GraphAddnodeResponse {
             protocol: String::from("graph"),
             command: String::from("addnode"),
-            payload: GraphAddnodeResponsePayload::default(),
+            payload: payload,
         }
     }
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddnodeResponsePayload {} // TODO check spec: should the sent values be echoed back as confirmation or is empty graph:addnode vs. a graph:error enough?
-
-impl Default for GraphAddnodeResponsePayload {
-    fn default() -> Self {
-        GraphAddnodeResponsePayload {}
-    }
+struct GraphAddnodeResponsePayload {    // TODO check spec: should the sent values be echoed back as confirmation or is empty graph:addnode vs. a graph:error enough?
+    #[serde(rename = "id")]
+    name: String,
+    component: String,
+    metadata: GraphNodeMetadata,
+    graph: String,
 }
 
 // graph:removenode -> graph:removenode | graph:error
