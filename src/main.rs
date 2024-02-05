@@ -2252,6 +2252,19 @@ impl GraphInportOutportHolder {
         }
     }
 
+    //###
+    // should not be used by components but only by watchdog (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
+    fn send_network_stopped(&mut self, packet: &NetworkStoppedResponse) {
+        //TODO add capabilities check for each client!
+        for client in self.websockets.iter_mut() {
+            client.1.write_message(Message::text(
+                serde_json::to_string(packet)
+                .expect("failed to serialize network:stopped response"),
+            ))
+            .expect("failed to write message into websocket");
+        }
+    }
+
     // like STDOUT.println() - to be used by processes
     fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
         //TODO add capabilities check for each client!
