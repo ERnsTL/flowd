@@ -5432,7 +5432,7 @@ impl Graph {
                     y: metadata.y,
                     width: Some(NODE_WIDTH_DEFAULT),
                     height: Some(NODE_HEIGHT_DEFAULT),
-                    label: metadata.label.clone(),
+                    label: metadata.label.clone(),  // should be Some(name.clone()) but noflo-ui does not display it right away
                 }
             };
         } else {
