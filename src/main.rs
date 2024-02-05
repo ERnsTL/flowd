@@ -3837,6 +3837,7 @@ struct GraphAddnodeRequestPayload {
     #[serde(rename = "id")]
     name: String,                  // name of the node/process
     component: String,           // component name to be used for this node/process
+    //TODO spec: the metadata object is optional according to schema - make it Option<>
     metadata: GraphNodeMetadata, //TODO spec: key-value pairs (with some well-known values)
     graph: String,                 // name of the graph
     secret: String,
