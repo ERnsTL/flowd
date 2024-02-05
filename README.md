@@ -153,6 +153,7 @@ Signaling, Monitoring:
 * In addition, the main thread can issue one-way signaling to threads, eg. for a stop command.
 * The watchdog thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
 * Export of monitoring data, API server or visualization is currently not implemented.
+* The watchdog thread recognizes network self-shutdown and calls the runtime to stop and signal all FBP protocol clients about the status change.
 
 Testing:
 * Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
