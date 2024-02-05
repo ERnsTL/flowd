@@ -58,7 +58,8 @@ TODO
 FBP network protocol:
 * Full serialization and deserialization of all specified messages in both directions.
 * Runtime behaviors are in mock stage, working with in-memory state and actual components.
-* Adding components, removing components, changing components and their connections is implemented.
+* Adding graph nodes, removing nodes, changing nodes and their connections is implemented.
+* Renaming nodes (internal ID) and changing the label on nodes is implemented.
 * Starting and stopping the network is implemented (graph traversal, connection setup, component instantiation, thread start/stop, background watchdog, signaling).
 * Sending and receiving IPs to/from graph inports and outports is implemented. So, it is possible to send data into/out of the network directly using FBP Network Protocol (besides the possibility to create components which input/output on TCP or any other channel).
 * Delivery of IIPs is implemented.
