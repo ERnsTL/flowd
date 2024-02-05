@@ -1125,7 +1125,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStopRequest(payload) => {
                         info!("got network:stop message");
                         //TODO check secret
-                        match runtime.write().expect("lock poisoned").stop(graph_inout.clone()) {   //TODO optimize avoid clone here? (but it is just an Arc clone)
+                        match runtime.write().expect("lock poisoned").stop(graph_inout.clone(), false) {   //TODO optimize avoid clone here? (but it is just an Arc clone)
                             Ok(status) => {
                                 info!("response: sending network:stop response");
                                 websocket
@@ -2065,50 +2065,53 @@ impl RuntimeRuntimePayload {
         Ok(&self.status)
     }
 
-    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement in full detail
 
-        // close front door early - inform FBP Network Protocol clients that graph inports are now disconnected (runtime:packet event type = connect)
-        //NOTE: this happens before the GraphOutports handler thread is notified below among all the processes, so processing can be finished but no new packets are sent in anymore by the FBP client(s)
-        //NOTE: this is inside a scope so that the lock goes out of scope and thus unlocks before the GraphOutHandler thread is signaled to shut down and notifies all FBP lients and therefore tries to lock graph_inout also
-        {
-            let mut graph_inout_inner = graph_inout.lock().expect("lock poisoned");
-            // check if this graph actually has graph inports
-            if let Some(inports) = &graph_inout_inner.inports {
-                info!("notifying clients of graph inports disconnect");
-                let keys = inports.keys().cloned().collect::<Vec<_>>();  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
-                for port_name in keys {
-                    graph_inout_inner.send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+        // if true, the network is simply marked shut down because watchdog informed us that all processes have exited
+        if !watchdog_all_exited {
+            // close front door early - inform FBP Network Protocol clients that graph inports are now disconnected (runtime:packet event type = connect)
+            //NOTE: this happens before the GraphOutports handler thread is notified below among all the processes, so processing can be finished but no new packets are sent in anymore by the FBP client(s)
+            //NOTE: this is inside a scope so that the lock goes out of scope and thus unlocks before the GraphOutHandler thread is signaled to shut down and notifies all FBP lients and therefore tries to lock graph_inout also
+            {
+                let mut graph_inout_inner = graph_inout.lock().expect("lock poisoned");
+                // check if this graph actually has graph inports
+                if let Some(inports) = &graph_inout_inner.inports {
+                    info!("notifying clients of graph inports disconnect");
+                    let keys = inports.keys().cloned().collect::<Vec<_>>();  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+                    for port_name in keys {
+                        graph_inout_inner.send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+                    }
                 }
             }
-        }
 
-        // signal all threads
-        info!("stop: signaling all processes...");
-        for (name, proc) in self.processes.iter() {
-            info!("stop: signaling {}", name);
-            proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
-            proc.joinhandle.thread().unpark();  // wake up for reception
-        }
-        // signal watchdog thread
-        info!("stop: signaling watchdog");
-        self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec()).expect("could not send stop signal to watchdog thread");
-        let watchdog_thread = self.watchdog_thread.take().expect("watchdog thread is None? wtf");
-        watchdog_thread.thread().unpark();
-        info!("done");
+            // signal all threads
+            info!("stop: signaling all processes...");
+            for (name, proc) in self.processes.iter() {
+                info!("stop: signaling {}", name);
+                proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
+                proc.joinhandle.thread().unpark();  // wake up for reception
+            }
+            // signal watchdog thread
+            info!("stop: signaling watchdog");
+            self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec()).expect("could not send stop signal to watchdog thread");
+            let watchdog_thread = self.watchdog_thread.take().expect("watchdog thread is None? wtf");
+            watchdog_thread.thread().unpark();
+            info!("done");
 
-        // join all threads
-        //TODO what if one of them wont join? hangs? -> kill, how much time to give?
-        info!("stop: joining all threads...");
-        for (name, proc) in self.processes.drain() {
-            info!("stop: joining {}", name);
-            proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
+            // join all threads
+            //TODO what if one of them wont join? hangs? -> kill, how much time to give?
+            info!("stop: joining all threads...");
+            for (name, proc) in self.processes.drain() {
+                info!("stop: joining {}", name);
+                proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
+            }
+            info!("done");
+            // join watchdog thread
+            //info!("stop: joining watchdog");
+            //TODO cannot wait for join because otherwise noflo-ui shows a timeout
+            //watchdog_thread.join().expect("watchdog thread join failed");
         }
-        info!("done");
-        // join watchdog thread
-        //info!("stop: joining watchdog");
-        //TODO cannot wait for join because otherwise noflo-ui shows a timeout
-        //watchdog_thread.join().expect("watchdog thread join failed");
 
         // set status
         info!("network is shut down.");
