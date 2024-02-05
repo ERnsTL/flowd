@@ -5431,7 +5431,7 @@ impl Graph {
                     y: metadata.y,
                     width: Some(NODE_WIDTH_DEFAULT),
                     height: Some(NODE_HEIGHT_DEFAULT),
-                    label: Some(name.clone()),
+                    label: metadata.label.clone(),
                 }
             };
         } else {
