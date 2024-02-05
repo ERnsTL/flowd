@@ -5378,17 +5378,47 @@ impl Graph {
         }
     }
 
-    fn add_node(&mut self, graph: String, component: String, name: String, metadata: GraphNodeMetadata) -> Result<(), std::io::Error> {
+    fn add_node(&mut self, graph: String, component: String, name: String, metadata: GraphNodeMetadata) -> Result<GraphAddnodeResponsePayload, std::io::Error> {
         //TODO implement
         //TODO in what state is it allowed do change the nodeset?
         //TODO check graph name and state, multi-graph support
-        let nodedef = GraphNode {
-            component: component,
-            metadata: metadata,
+
+        // TODO check if that node already exists
+        // TODO check if that component exists
+
+        let nodedef: GraphNode;
+        // TODO check spec: check for noflo-ui behavior sending missing data
+        if metadata.label.is_some() && !metadata.label.as_ref().unwrap().eq(&name) && metadata.width.is_none() && metadata.height.is_none() {
+            debug!("add_node(): doing noflo-ui data fixup");
+            nodedef = GraphNode {
+                component: component,
+                metadata: GraphNodeMetadata {
+                    x: metadata.x,
+                    y: metadata.y,
+                    width: Some(NODE_WIDTH_DEFAULT),
+                    height: Some(NODE_HEIGHT_DEFAULT),
+                    label: Some(name.clone()),
+                }
+            };
+        } else {
+            // normal client
+            nodedef = GraphNode {
+                component: component,
+                metadata: metadata,
+            };
+        }
+        //TODO optimize - constructing here because try_insert() moves the value
+        let ret = GraphAddnodeResponsePayload {
+            name: name.clone(),
+            component: nodedef.component.clone(),
+            metadata: nodedef.metadata.clone(),
+            graph: graph.clone(),
         };
+
+        // insert and return
         match self.nodes.try_insert(name, nodedef) {
             Ok(_) => {
-                return Ok(());
+                return Ok(ret);
             },
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
