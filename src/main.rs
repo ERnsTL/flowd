@@ -1079,7 +1079,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("got network:start message");
                         //TODO check secret
                         //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
-                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned"), graph_inout.clone()) {
+                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned"), graph_inout.clone(), runtime.clone()) {
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
@@ -1457,7 +1457,7 @@ impl RuntimeRuntimePayload {
     }
 
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
-    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
         // get all graph in and out ports
         let mut graph_inout = graph_inout_arc.lock().expect("could not acquire lock for network start()");
