@@ -1506,6 +1506,10 @@ impl RuntimeRuntimePayload {
 
         //TODO optimize: check performance, maybe this could be done easier using the signal channel sending (), but since the thread_handle already has blocking feature built-in...
 
+        // prepare graph_inout reference for watchdog stopping the network
+        let watchdog_graph_inout = graph_inout_arc.clone();
+        // prepare runtime reference for watchdong stopping the network
+        let watchdog_runtime = runtime;
         // prepare holder of the signal back-channel for the watchdog thread
         let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
         let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
