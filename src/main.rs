@@ -2041,10 +2041,15 @@ impl RuntimeRuntimePayload {
                     debug!("process health check OK");
                 } else if exited_count == watchdog_threadandsignal.len() {
                     // network has effectively shut down
-                    info!("process health check: all processes exited");
-                    //TODO signal runtime
-                    //self.stop(graph);
-                    //self.status.running = false;//###
+                    info!("process health check: all processes exited, shutting down network");
+                    // signal runtime
+                    watchdog_runtime.write().expect("watchdog failed to acquire lock for runtime").stop(watchdog_graph_inout.clone(), true).expect("watchdog failed to runtime.stop()");
+                    //TODO runtime should set the time_stopped etc. values on runtime.status
+                    // TODO not watchdog, but runtime.stop() should signal the FBP protocol clients
+                    // send network stop notification to all FBP protocol clients//###
+                    watchdog_graph_inout.lock().expect("lock poisoned").send_network_stopped(&NetworkStoppedResponse::new(&watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime").status));
+                    // exit thread
+                    break;
                 }
                 thread::sleep(PROCESS_HEALTHCHECK_DUR);
             }
