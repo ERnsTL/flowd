@@ -5481,13 +5481,25 @@ impl Graph {
         //TODO in which state should manipulating nodes be allowed?
         //TODO check graph name and state, multi-graph support
 
-        //TODO optimize: which is faster? see above.
+        // check if new name already exists
         if self.nodes.contains_key(&new) {
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("node with that name already exists")));
         }
+        // remove, then re-insert (there is no rename in HashMap)
         match self.nodes.remove(&old) {
             Some(v) => {
-                self.nodes.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                self.nodes.try_insert(new.clone(), v).expect("wtf key occupied on insertion");    // should not happen
+
+                // rename in edges
+                for edge in self.edges.iter_mut() {
+                    if edge.source.process == old {
+                        edge.source.process = new.clone();
+                    }
+                    if edge.target.process == old {
+                        edge.target.process = new.clone();
+                    }
+                };
+
                 return Ok(());
             },
             None => {
