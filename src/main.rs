@@ -3852,6 +3852,18 @@ struct GraphNodeMetadata {
     label: Option<String>,  // not mentioned in specs, but used by noflo-ui, used for the process name in bigger letters than component name
 }
 
+impl Clone for GraphNodeMetadata {
+    fn clone(&self) -> Self {
+        GraphNodeMetadata {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+            label: self.label.clone(),
+        }
+    }
+}
+
 #[derive(Serialize, Debug)]
 struct GraphAddnodeResponse {
     protocol: String,
