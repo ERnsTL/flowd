@@ -3864,6 +3864,19 @@ impl Clone for GraphNodeMetadata {
     }
 }
 
+impl Default for GraphNodeMetadata {
+    fn default() -> Self {
+        GraphNodeMetadata {
+            x: 0,
+            y: 0,
+            width: Some(NODE_WIDTH_DEFAULT),
+            height: Some(NODE_HEIGHT_DEFAULT),
+            label: None,
+        }
+    }
+
+}
+
 #[derive(Serialize, Debug)]
 struct GraphAddnodeResponse {
     protocol: String,
