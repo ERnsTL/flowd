@@ -3884,7 +3884,16 @@ struct GraphAddnodeResponse {
     payload: GraphAddnodeResponsePayload,
 }
 
-//###
+impl Default for GraphAddnodeResponse {
+    fn default() -> Self {
+        GraphAddnodeResponse {
+            protocol: String::from("graph"),
+            command: String::from("addnode"),
+            payload: GraphAddnodeResponsePayload::default(),
+        }
+    }
+}
+
 impl GraphAddnodeResponse {
     fn new(payload: GraphAddnodeResponsePayload) -> Self {
         GraphAddnodeResponse {
@@ -3902,6 +3911,18 @@ struct GraphAddnodeResponsePayload {    // TODO check spec: should the sent valu
     component: String,
     metadata: GraphNodeMetadata,
     graph: String,
+}
+
+impl Default for GraphAddnodeResponsePayload {
+    fn default() -> Self {
+        GraphAddnodeResponsePayload {
+            name: "".to_owned(),
+            component: "".to_owned(),
+            metadata: GraphNodeMetadata::default(),
+            graph: String::from("default_graph"),
+        }
+    }
+
 }
 
 // graph:removenode -> graph:removenode | graph:error
