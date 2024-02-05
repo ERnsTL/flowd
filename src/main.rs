@@ -411,11 +411,11 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::GraphAddnodeRequest(payload) => {
                         info!("got graph:addnode message");
                         match graph.write().expect("lock poisoned").add_node(payload.graph, payload.component, payload.name, payload.metadata) {
-                            Ok(_) => {
+                            Ok(response) => {
                                 info!("response: sending graph:addnode response");
                                 websocket
                                     .write_message(Message::text(
-                                        serde_json::to_string(&GraphAddnodeResponse::default())
+                                        serde_json::to_string(&GraphAddnodeResponse::new(response))
                                             .expect("failed to serialize graph:addnode response"),
                                     ))
                                     .expect("failed to write message into websocket");
