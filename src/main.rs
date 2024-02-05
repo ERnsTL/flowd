@@ -5477,7 +5477,6 @@ impl Graph {
     }
 
     fn rename_node(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
-        //TODO implement
         //TODO in which state should manipulating nodes be allowed?
         //TODO check graph name and state, multi-graph support
 
