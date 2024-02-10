@@ -1,6 +1,10 @@
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+use std::time::Duration;
+use rumqttc::{MqttOptions, Client, Event::Incoming, Packet::Publish, QoS};
+use std::thread;
+
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
@@ -27,67 +31,40 @@ impl Component for MQTTPublisherComponent {
 
         // check config port
         trace!("read config IP");
+        let url;
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         if let Ok(ip) = conf.pop() {
-            //TODO the cron crate has a non-standard 7-parameter form ranging down to seconds and up to years, is that good? cron-parser has POSIX 5-parameter format
-            schedule = Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8")).unwrap().upcoming_owned(Local); //TODO error handling
+            url = std::str::from_utf8(&ip).expect("invalid utf-8");
         } else {
             error!("no config IP received - exiting");
             return;
         }
 
-        let mut mqttoptions = MqttOptions::parse_url("mqtts://test.mosquitto.org:8886?client_id=flowd").expect("failed to parse MQTT URL");	//new("rumqtt-sync", "test.mosquitto.org", 8886);	//1883);
+        // prepare connection arguments
+        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
         mqttoptions.set_keep_alive(Duration::from_secs(5));
-    
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
-    
-        client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-    
-        thread::spawn(move || for i in 0..10 {
-            client.publish("hello/rumqtt", QoS::AtLeastOnce, false, format!("msg {}", i)).unwrap();
-            thread::sleep(Duration::from_millis(1000));
-        });
-    
-        // Iterate to poll the eventloop for connection progress
-        //thread::sleep(Duration::from_millis(2000));
-        for (i, notification) in connection.iter().enumerate() {
-            println!("Notification = {:?}", notification);
-            match notification {
-                Ok(Incoming(Publish(packet))) => {
-                    println!("Received payload: {:?}", packet.payload);
+
+        // handle connection events
+        //TODO automatic reconnection
+        //TODO integration with main component thread signalling (MQTT -> FBP signalling and FBP signalling -> MQTT)
+        //###
+        //client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
+        thread::spawn(move || {
+            // Iterate to poll the eventloop for connection progress
+            //thread::sleep(Duration::from_millis(2000));
+            for (i, notification) in connection.iter().enumerate() {
+                println!("Notification = {:?}", notification);
+                match notification {
+                    Ok(Incoming(Publish(packet))) => {
+                        println!("Received payload: {:?}", packet.payload);
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
+        });
 
-
-
-
-
-
-
-        // check in port
-        /*
-        loop {
-            if let Ok(_ip) = inn.pop() {
-                debug!("got a packet, dropping it.");
-            } else {
-                break;
-            }
-        }
-        */
-        while !inn.is_empty() {
-            //_ = inn.pop().ok();
-            //debug!("got a packet, dropping it.");
-
-            debug!("got {} packets, dropping them.", inn.slots());
-            inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
-        }
-
-
-
-
-
+        // FBP main loop
         loop {
             trace!("begin of iteration");
 
@@ -107,6 +84,29 @@ impl Component for MQTTPublisherComponent {
             }
 
             // check in port
+            /*
+            loop {
+                if let Ok(_ip) = inn.pop() {
+                    debug!("got a packet, dropping it.");
+                } else {
+                    break;
+                }
+            }
+            */
+            while !inn.is_empty() {
+                //_ = inn.pop().ok();
+                //debug!("got a packet, dropping it.");
+
+                debug!("got {} packets, dropping them.", inn.slots());
+                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                for ip in chunk {
+                    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, ip).unwrap();
+                }
+                chunk.commit_all();
+            }
+
+            // check in port
+            /*
             loop {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
@@ -117,13 +117,17 @@ impl Component for MQTTPublisherComponent {
                     break;
                 }
             }
+            */
 
             // are we done?
             if inn.is_abandoned() {
                 // input closed, nothing more to do
                 info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+                //###
+                //TODO close MQTT connection
+                //TODO signal MQTT event thread
+                //drop(out);
+                //out_wakeup.unpark();
                 break;
             }
 
@@ -135,41 +139,40 @@ impl Component for MQTTPublisherComponent {
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
-            name: String::from("Repeat"),
-            description: String::from("Copies data as-is from IN port to OUT port."),
-            icon: String::from("arrow-right"),
+            name: String::from("MQTTPublisher"),
+            description: String::from("Publishes data as-is from IN port to the MQTT topic given in CONF."),
+            icon: String::from("arrow-right"),  //###
             subgraph: false,
             in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),
+                    values_allowed: vec![],
+                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd")
+                },
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("data to be repeated on outport"),
+                    description: String::from("data to be published on given MQTT topic"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
             ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("repeated data from IN port"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            out_ports: vec![],
             ..Default::default()
         }
     }
 }
 
 pub struct MQTTSubscriberComponent {
-    inn: ProcessEdgeSource,
+    conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
@@ -179,7 +182,7 @@ pub struct MQTTSubscriberComponent {
 impl Component for MQTTSubscriberComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         MQTTSubscriberComponent {
-            inn: inports.remove("NAMES").expect("found no NAMES inport").pop().unwrap(),
+            inn: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -189,26 +192,28 @@ impl Component for MQTTSubscriberComponent {
 
     fn run(mut self) {
         debug!("MQTTSubscriber is now run()ning!");
-        let filenames = &mut self.inn;    //TODO optimize
+        let conf = &mut self.conf;    //TODO optimize
         let out = &mut self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // check config port
         trace!("read config IP");
+        let url;
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        if let Ok(ip) = when.pop() {
-            //TODO the cron crate has a non-standard 7-parameter form ranging down to seconds and up to years, is that good? cron-parser has POSIX 5-parameter format
-            schedule = Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8")).unwrap().upcoming_owned(Local); //TODO error handling
+        if let Ok(ip) = conf.pop() {
+            url = std::str::from_utf8(&ip).expect("invalid utf-8");
         } else {
             error!("no config IP received - exiting");
             return;
         }
 
-        let mut mqttoptions = MqttOptions::parse_url("mqtts://test.mosquitto.org:8886?client_id=flowd").expect("failed to parse MQTT URL");	//new("rumqtt-sync", "test.mosquitto.org", 8886);	//1883);
+        // prepare connection arguments
+        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
         mqttoptions.set_keep_alive(Duration::from_secs(5));
-    
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
-    
+
+        // subscribe to given topic
+        //###
         client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
     
         thread::spawn(move || for i in 0..10 {
