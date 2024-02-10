@@ -97,7 +97,7 @@ impl Component for MQTTPublisherComponent {
                 for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
                     //TODO make topic configurable
                     //###
-                    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, ip).expect("failed to publish");
+                    client.publish("hello/rumqtt", QoS::AtLeastOnce, true, ip).expect("failed to publish");
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
             }
@@ -176,7 +176,7 @@ pub struct MQTTSubscriberComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
-const RECV_TIMEOUT: Duration = Duration::from_millis(250);
+const RECV_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for MQTTSubscriberComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -298,7 +298,8 @@ impl Component for MQTTSubscriberComponent {
             */
 
             trace!("-- end of iteration");
-            std::thread::park();
+            //### dont park
+            //std::thread::park();
         }
         info!("exiting");
     }
