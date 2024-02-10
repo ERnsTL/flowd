@@ -31,15 +31,10 @@ impl Component for MQTTPublisherComponent {
 
         // check config port
         trace!("read config IP");
-        let url;
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        if let Ok(ip) = conf.pop() {
-            url = std::str::from_utf8(&ip).expect("invalid utf-8");
-        } else {
-            error!("no config IP received - exiting");
-            return;
-        }
-
+        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        
         // prepare connection arguments
         let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
         mqttoptions.set_keep_alive(Duration::from_secs(5));
@@ -97,12 +92,14 @@ impl Component for MQTTPublisherComponent {
                 //_ = inn.pop().ok();
                 //debug!("got a packet, dropping it.");
 
-                debug!("got {} packets, dropping them.", inn.slots());
+                debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
                 let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
-                for ip in chunk {
-                    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, ip).unwrap();
+                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
+                    //TODO make topic configurable
+                    //###
+                    client.publish("hello/rumqtt", QoS::AtLeastOnce, false, ip).expect("failed to publish");
                 }
-                chunk.commit_all();
+                // NOTE: no commit_all() necessary, because into_iter() does that automatically
             }
 
             // check in port
@@ -179,10 +176,12 @@ pub struct MQTTSubscriberComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+const RECV_TIMEOUT: Duration = Duration::from_millis(250);
+
 impl Component for MQTTSubscriberComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         MQTTSubscriberComponent {
-            inn: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -198,14 +197,9 @@ impl Component for MQTTSubscriberComponent {
 
         // check config port
         trace!("read config IP");
-        let url;
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        if let Ok(ip) = conf.pop() {
-            url = std::str::from_utf8(&ip).expect("invalid utf-8");
-        } else {
-            error!("no config IP received - exiting");
-            return;
-        }
+        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
         let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
@@ -214,31 +208,8 @@ impl Component for MQTTSubscriberComponent {
 
         // subscribe to given topic
         //###
+        //TODO enable reconnection - or is this done automatically via .iter()?
         client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-    
-        thread::spawn(move || for i in 0..10 {
-            client.publish("hello/rumqtt", QoS::AtLeastOnce, false, format!("msg {}", i)).unwrap();
-            thread::sleep(Duration::from_millis(1000));
-        });
-    
-        // Iterate to poll the eventloop for connection progress
-        //thread::sleep(Duration::from_millis(2000));
-        for (i, notification) in connection.iter().enumerate() {
-            println!("Notification = {:?}", notification);
-            match notification {
-                Ok(Incoming(Publish(packet))) => {
-                    println!("Received payload: {:?}", packet.payload);
-                }
-                _ => {}
-            }
-        }
-
-
-
-
-
-
-
 
         loop {
             trace!("begin of iteration");
@@ -258,10 +229,41 @@ impl Component for MQTTSubscriberComponent {
                     warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
+
+            // iterate to poll the eventloop for connection progress
+            /*
+            for event in connection.iter() {
+                println!("Event = {:?}", event);
+                match event {
+                    Ok(Incoming(Publish(packet))) => {
+                        println!("Received payload: {:?}", packet.payload);
+                    }
+                    _ => {}
+                }
+            }
+            */
+            while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+                match event {
+                    Ok(Incoming(Publish(packet))) => {
+                        debug!("Received payload from MQTT topic: {:?}", packet.payload);
+
+                        // send it
+                        debug!("forwarding MQTT payload...");
+                        out.push(packet.payload.to_vec()).expect("could not push into OUT");    //TODO optimize conversion
+                        out_wakeup.unpark();
+                        debug!("done");
+                    }
+                    _ => {
+                        trace!("Event = {:?}", event);
+                    }
+                }
+            }
+
             // check in port
             //TODO while !inn.is_empty() {
+            /*
             loop {
-                if let Ok(ip) = filenames.pop() {
+                if let Ok(ip) = conf.pop() {
                     // read filename on inport
                     let file_path = std::str::from_utf8(&ip).expect("non utf-8 data");
                     debug!("got a filename: {}", &file_path);
@@ -281,14 +283,19 @@ impl Component for MQTTSubscriberComponent {
                     break;
                 }
             }
+            */
 
             // are we done?
-            if filenames.is_abandoned() {
+            //### EOF on MQTT connection
+            /*
+            if conf.is_abandoned() {
+                //TODO EOF on MQTT connection
                 info!("EOF on inport NAMES, shutting down");
                 drop(out);
                 out_wakeup.unpark();
                 break;
             }
+            */
 
             trace!("-- end of iteration");
             std::thread::park();
@@ -300,7 +307,7 @@ impl Component for MQTTSubscriberComponent {
         ComponentComponentPayload {
             name: String::from("MQTTSubscriber"),
             description: String::from("Reads the contents of the given files and sends the contents."),
-            icon: String::from("file"),
+            icon: String::from("file"), //###
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
@@ -309,9 +316,9 @@ impl Component for MQTTSubscriberComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("filenames, one per IP"),
+                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd")
                 }
             ],
             out_ports: vec![
@@ -321,7 +328,7 @@ impl Component for MQTTSubscriberComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("conents of the given files"),
+                    description: String::from("contents of received MQTT events on given topic"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
