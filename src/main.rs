@@ -58,6 +58,7 @@ use components::equals::EqualsComponent;
 use components::httpclient::HTTPClientComponent;
 use components::httpserver::HTTPServerComponent;
 use components::muxer::MuxerComponent;
+use components::mqtt::{MQTTPublisherComponent, MQTTSubscriberComponent};
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -105,6 +106,8 @@ fn main() {
         HTTPClientComponent::get_metadata(),
         HTTPServerComponent::get_metadata(),
         MuxerComponent::get_metadata(),
+        MQTTPublisherComponent::get_metadata(),
+        MQTTSubscriberComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1806,6 +1809,8 @@ impl RuntimeRuntimePayload {
                     "HTTPClient" => { HTTPClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "HTTPServer" => { HTTPServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "Muxer" => { MuxerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "MQTTPublisher" => { MQTTPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "MQTTSubscriber" => { MQTTSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
