@@ -60,9 +60,6 @@ impl Component for MQTTPublisherComponent {
 
         // handle connection events
         //TODO automatic reconnection
-        //TODO integration with main component thread signalling (MQTT -> FBP signalling and FBP signalling -> MQTT)
-        //###
-        //client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
         let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
             // Iterate to poll the eventloop for connection progress
             //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
@@ -192,8 +189,6 @@ impl Component for MQTTPublisherComponent {
                 debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
                 let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
                 for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    //TODO make topic configurable
-                    //###
                     client.publish(topic, MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
@@ -224,7 +219,7 @@ impl Component for MQTTPublisherComponent {
         ComponentComponentPayload {
             name: String::from("MQTTPublisher"),
             description: String::from("Publishes data as-is from IN port to the MQTT topic given in CONF."),
-            icon: String::from("arrow-right"),  //###
+            icon: String::from("cloud-upload"), // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
@@ -305,7 +300,6 @@ impl Component for MQTTSubscriberComponent {
         debug!("topic: {}", topic);
 
         // subscribe to given topic
-        //###
         //TODO enable reconnection - or is this done automatically via .iter()?
         client.subscribe(topic, QoS::AtMostOnce).unwrap();
 
@@ -348,9 +342,9 @@ impl Component for MQTTSubscriberComponent {
             }
 
             // are we done?
-            //### EOF on MQTT connection
+            //TODO handle EOF on MQTT connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
             /*
-            if conf.is_abandoned() {
+            if inn.is_abandoned() {
                 //TODO EOF on MQTT connection
                 info!("EOF on inport NAMES, shutting down");
                 drop(out);
@@ -360,8 +354,7 @@ impl Component for MQTTSubscriberComponent {
             */
 
             trace!("-- end of iteration");
-            //### dont park - this is done by recv_timeout()
-            //std::thread::park();
+            //NOTE: dont park thread here - this is done by recv_timeout()
         }
         info!("exiting");
     }
@@ -370,7 +363,7 @@ impl Component for MQTTSubscriberComponent {
         ComponentComponentPayload {
             name: String::from("MQTTSubscriber"),
             description: String::from("Reads the contents of the given files and sends the contents."),
-            icon: String::from("file"), //###
+            icon: String::from("cloud-download"),   // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
