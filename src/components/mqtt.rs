@@ -231,17 +231,6 @@ impl Component for MQTTSubscriberComponent {
             }
 
             // iterate to poll the eventloop for connection progress
-            /*
-            for event in connection.iter() {
-                println!("Event = {:?}", event);
-                match event {
-                    Ok(Incoming(Publish(packet))) => {
-                        println!("Received payload: {:?}", packet.payload);
-                    }
-                    _ => {}
-                }
-            }
-            */
             //TODO optimize is recv(), recv_timeout() or iter() better?
             while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
                 match event {
