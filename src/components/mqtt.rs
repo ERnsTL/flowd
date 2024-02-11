@@ -13,6 +13,9 @@ pub struct MQTTPublisherComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
+const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
+
 impl Component for MQTTPublisherComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         MQTTPublisherComponent {
@@ -34,7 +37,7 @@ impl Component for MQTTPublisherComponent {
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
         let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        
+
         // prepare connection arguments
         let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
         mqttoptions.set_keep_alive(Duration::from_secs(5));
@@ -87,23 +90,6 @@ impl Component for MQTTPublisherComponent {
                     break;
                 }
             }
-            */
-            while !inn.is_empty() {
-                //_ = inn.pop().ok();
-                //debug!("got a packet, dropping it.");
-
-                debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
-                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    //TODO make topic configurable
-                    //###
-                    client.publish("hello/rumqtt", QoS::AtLeastOnce, true, ip).expect("failed to publish");
-                }
-                // NOTE: no commit_all() necessary, because into_iter() does that automatically
-            }
-
-            // check in port
-            /*
             loop {
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
@@ -115,6 +101,19 @@ impl Component for MQTTPublisherComponent {
                 }
             }
             */
+            while !inn.is_empty() {
+                //_ = inn.pop().ok();
+                //debug!("got a packet, dropping it.");
+
+                debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
+                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
+                    //TODO make topic configurable
+                    //###
+                    client.publish("hello/rumqtt", MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
+                }
+                // NOTE: no commit_all() necessary, because into_iter() does that automatically
+            }
 
             // are we done?
             if inn.is_abandoned() {
@@ -149,7 +148,7 @@ impl Component for MQTTPublisherComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes options, see rumqttc crate documentation"),
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd")
+                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd123")
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -176,6 +175,7 @@ pub struct MQTTSubscriberComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+// how often the MQTT subscriber receive loop should check for signals from FBP network
 const RECV_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for MQTTSubscriberComponent {
@@ -242,6 +242,7 @@ impl Component for MQTTSubscriberComponent {
                 }
             }
             */
+            //TODO optimize is recv(), recv_timeout() or iter() better?
             while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
                 match event {
                     Ok(Incoming(Publish(packet))) => {
@@ -259,32 +260,6 @@ impl Component for MQTTSubscriberComponent {
                 }
             }
 
-            // check in port
-            //TODO while !inn.is_empty() {
-            /*
-            loop {
-                if let Ok(ip) = conf.pop() {
-                    // read filename on inport
-                    let file_path = std::str::from_utf8(&ip).expect("non utf-8 data");
-                    debug!("got a filename: {}", &file_path);
-
-                    // read whole file
-                    //TODO may be big file - add chunking
-                    //TODO enclose files in brackets to know where its stream of chunks start and end
-                    debug!("reading file...");
-                    let contents = std::fs::read(file_path).expect("should have been able to read the file");
-
-                    // send it
-                    debug!("forwarding file contents...");
-                    out.push(contents).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-            */
-
             // are we done?
             //### EOF on MQTT connection
             /*
@@ -298,7 +273,7 @@ impl Component for MQTTSubscriberComponent {
             */
 
             trace!("-- end of iteration");
-            //### dont park
+            //### dont park - this is done by recv_timeout()
             //std::thread::park();
         }
         info!("exiting");
@@ -317,9 +292,9 @@ impl Component for MQTTSubscriberComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),
+                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),    //TODO careful with the client id, other one gets disconnected - https://stackoverflow.com/questions/50654338/how-to-use-client-id-in-mosquitto-mqtt
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd")
+                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd456")
                 }
             ],
             out_ports: vec![
