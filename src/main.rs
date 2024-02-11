@@ -69,6 +69,7 @@ fn main() {
         simplelog::ConfigBuilder::default()
             .set_time_level(simplelog::LevelFilter::Off)
             .set_thread_level(simplelog::LevelFilter::Info)
+            .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
             .set_thread_mode(simplelog::ThreadLogMode::Names)
             .set_thread_padding(simplelog::ThreadPadding::Right(15))    // maximum thread name length on Linux
             .set_level_padding(simplelog::LevelPadding::Right)
