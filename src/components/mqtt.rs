@@ -42,6 +42,16 @@ impl Component for MQTTPublisherComponent {
         let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
+        // get topic from URL
+        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
+        let mut topic = url_parsed.path();
+        if topic.is_empty() || topic == "/" {
+            error!("no topic given in MQTT URL path, exiting");
+            return;
+        }
+        // remove leading slash
+        topic = topic.trim_start_matches('/');
+        debug!("topic: {}", topic);
 
         // signal handling
         //TODO optimize - currently not used because we use connection error (connection aborted) to stop the thread
@@ -184,7 +194,7 @@ impl Component for MQTTPublisherComponent {
                 for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
                     //TODO make topic configurable
                     //###
-                    client.publish("hello/rumqtt", MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
+                    client.publish(topic, MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
             }
@@ -225,7 +235,7 @@ impl Component for MQTTPublisherComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes options, see rumqttc crate documentation"),
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd123")
+                    value_default: String::from("mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd123")
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -283,10 +293,21 @@ impl Component for MQTTSubscriberComponent {
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
 
+        // get topic from URL
+        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
+        let mut topic = url_parsed.path();
+        if topic.is_empty() || topic == "/" {
+            error!("no topic given in MQTT URL path, exiting");
+            return;
+        }
+        // remove leading slash
+        topic = topic.trim_start_matches('/');
+        debug!("topic: {}", topic);
+
         // subscribe to given topic
         //###
         //TODO enable reconnection - or is this done automatically via .iter()?
-        client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
+        client.subscribe(topic, QoS::AtMostOnce).unwrap();
 
         loop {
             trace!("begin of iteration");
@@ -360,7 +381,7 @@ impl Component for MQTTSubscriberComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes options, see rumqttc crate documentation"),    //TODO careful with the client id, other one gets disconnected - https://stackoverflow.com/questions/50654338/how-to-use-client-id-in-mosquitto-mqtt
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886?client_id=flowd456")
+                    value_default: String::from("mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd456")
                 }
             ],
             out_ports: vec![
