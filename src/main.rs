@@ -73,6 +73,8 @@ fn main() {
             .set_thread_mode(simplelog::ThreadLogMode::Names)
             .set_thread_padding(simplelog::ThreadPadding::Right(15))    // maximum thread name length on Linux
             .set_level_padding(simplelog::LevelPadding::Right)
+            .add_filter_ignore_str("rumqttc")   //TODO optimize - unfortunately the rumqttc crate sends debug! about PingReq every few seconds in https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L416 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/v5/state.rs#L589 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L357
+            .add_filter_ignore_str("rustls")   //TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
             .build(),
         simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
         simplelog::ColorChoice::Auto    // depending on whether interactive or not
