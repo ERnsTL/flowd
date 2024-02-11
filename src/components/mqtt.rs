@@ -51,13 +51,13 @@ impl Component for MQTTPublisherComponent {
         thread::spawn(move || {
             // Iterate to poll the eventloop for connection progress
             //thread::sleep(Duration::from_millis(2000));
-            for (i, notification) in connection.iter().enumerate() {
-                println!("Notification = {:?}", notification);
-                match notification {
-                    Ok(Incoming(Publish(packet))) => {
-                        println!("Received payload: {:?}", packet.payload);
+            for event in connection.iter() {
+                match event {
+                    _ => {
+                        trace!("Event = {:?}", event);
+                        // nothing to do, not interested in any events
+                        //TODO really?
                     }
-                    _ => {}
                 }
             }
         });
