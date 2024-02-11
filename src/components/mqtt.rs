@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 use std::time::Duration;
@@ -48,11 +48,11 @@ impl Component for MQTTPublisherComponent {
         //TODO integration with main component thread signalling (MQTT -> FBP signalling and FBP signalling -> MQTT)
         //###
         //client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-        thread::spawn(move || {
+        let event_handler_thread = thread::spawn(move || {
             // Iterate to poll the eventloop for connection progress
-            //thread::sleep(Duration::from_millis(2000));
+            //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
             for event in connection.iter() {
-                match event {
+                    match event {
                     _ => {
                         trace!("Event = {:?}", event);
                         // nothing to do, not interested in any events
@@ -60,6 +60,21 @@ impl Component for MQTTPublisherComponent {
                     }
                 }
             }
+            // alternative with recv_timeout()
+            /*
+            loop {
+                // TODO here check for closed shutdown signal channel
+                while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+                    match event {
+                        _ => {
+                            trace!("Event = {:?}", event);
+                            // nothing to do, not interested in any events
+                            //TODO really?
+                        }
+                    }
+                }
+            }
+            */
         });
 
         // FBP main loop
@@ -74,6 +89,11 @@ impl Component for MQTTPublisherComponent {
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
                     info!("got stop signal, exiting");
+                    // stop sub-thread
+                    let thread_id = event_handler_thread.into_pthread_t();   //TODO optimize - better into_pthread_t() ?
+                    unsafe { libc::pthread_cancel(thread_id); }    //TODO optimize - better way to stop the thread? adds libc dependency
+                    //TODO above does not seem to work, thread is still running - give it a name and check again//###
+                    // exit myself
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
