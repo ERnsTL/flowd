@@ -2,7 +2,7 @@ use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 use std::time::Duration;
-use rumqttc::{MqttOptions, Client, Event::Incoming, Packet::Publish, QoS};
+use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
 
 pub struct MQTTPublisherComponent {
@@ -43,16 +43,23 @@ impl Component for MQTTPublisherComponent {
         mqttoptions.set_keep_alive(Duration::from_secs(5));
         let (mut client, mut connection) = Client::new(mqttoptions, 10);
 
+        // signal handling
+        //TODO optimize - currently not used because we use connection error (connection aborted) to stop the thread
+        // but there can be other reasons for connection close or an error...
+        //let (eventthread_signalsink, eventthread_signalsource) = std::sync::mpsc::sync_channel::<()>(0);
+
         // handle connection events
         //TODO automatic reconnection
         //TODO integration with main component thread signalling (MQTT -> FBP signalling and FBP signalling -> MQTT)
         //###
         //client.subscribe("hello/rumqtt", QoS::AtMostOnce).unwrap();
-        let event_handler_thread = thread::spawn(move || {
+        let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
             // Iterate to poll the eventloop for connection progress
             //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
+            //TODO optimize - dont know how to install a signal handler on thread level, otherwise we could save the channel and polling for shutdown
+            /*
             for event in connection.iter() {
-                    match event {
+                match event {
                     _ => {
                         trace!("Event = {:?}", event);
                         // nothing to do, not interested in any events
@@ -60,14 +67,28 @@ impl Component for MQTTPublisherComponent {
                     }
                 }
             }
+            */
             // alternative with recv_timeout()
             /*
             loop {
-                // TODO here check for closed shutdown signal channel
+                // check for closed shutdown signal channel
+                match eventthread_signalsource.try_recv() {
+                    Ok(_) => {
+                        // there will never anything be sent
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // nothing to do, lets continue receiving MQTT events
+                    },
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        trace!("eventloop listener got close on signal channel, shutting down");
+                        break;
+                    }
+                }
+                // block on MQTT events
                 while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                    match event {
+                        match event {
                         _ => {
-                            trace!("Event = {:?}", event);
+                            debug!("Event = {:?}", event);
                             // nothing to do, not interested in any events
                             //TODO really?
                         }
@@ -75,7 +96,45 @@ impl Component for MQTTPublisherComponent {
                 }
             }
             */
-        });
+            //TODO optimize - we dont want to poll for shutdown, so we currently use the Ok or Err distinction - maybe it can be more efficient with an iter() based solution?
+            // but there can be other reasons for connection close or an error...
+            while let Ok(event) = connection.recv() {
+                match event {
+                    Err(err) => {
+                        trace!("Event Err = {:?}", err);
+                        match err {
+                            rumqttc::ConnectionError::MqttState(err) => {
+                                match err {
+                                    rumqttc::StateError::Io(err) => {
+                                        if err.kind() == std::io::ErrorKind::ConnectionAborted {
+                                            debug!("MQTT connection aborted, shutting down");
+                                            break;
+                                        } else {
+                                            error!("MQTT state error: {:?}", err);
+                                            //TODO optimize - maybe send a signal to the main thread to stop the component
+                                        }
+                                    },
+                                    _ => {
+                                        error!("MQTT connection error: {:?}", err);
+                                        //TODO optimize - maybe send a signal to the main thread to stop the component
+                                    }
+                                }
+                            },
+                            _ => {
+                                // will be handled by the eventloop?
+                                //TODO make sure
+                            }
+                        }
+                    },
+                    _ => {
+                        trace!("Event = {:?}", event);
+                        // nothing to do, not interested in any events
+                        //TODO really?
+                    }
+                }
+            }
+            debug!("exiting");
+        }).expect("failed to spawn eventloop listener thread");
 
         // FBP main loop
         loop {
@@ -89,11 +148,6 @@ impl Component for MQTTPublisherComponent {
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
                     info!("got stop signal, exiting");
-                    // stop sub-thread
-                    let thread_id = event_handler_thread.into_pthread_t();   //TODO optimize - better into_pthread_t() ?
-                    unsafe { libc::pthread_cancel(thread_id); }    //TODO optimize - better way to stop the thread? adds libc dependency
-                    //TODO above does not seem to work, thread is still running - give it a name and check again//###
-                    // exit myself
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
@@ -139,17 +193,20 @@ impl Component for MQTTPublisherComponent {
             if inn.is_abandoned() {
                 // input closed, nothing more to do
                 info!("EOF on inport, shutting down");
-                //###
-                //TODO close MQTT connection
-                //TODO signal MQTT event thread
-                //drop(out);
-                //out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
         }
+
+        // stop MQTT event thread - close channel
+        //drop(eventthread_signalsink);
+        // close MQTT connection -> MQTT event thread will exit from special connection error ConnectionAborted
+        client.disconnect().expect("failed to disconnect");
+        // wait for event thread to exit
+        event_handler_thread.join().expect("failed to join eventloop listener thread");
+
         info!("exiting");
     }
 
