@@ -50,7 +50,7 @@ astra = "0.3.0"
 # for MQTTPublisherCompmonent and MQTTSubscriberComponent
 rumqttc = { version = "0.23.0", features = ["url"] }
 # for canceling event listener thread
-libc = "0.2.153"
+#libc = "0.2.153"
 
 [[bin]]
 name = "flowd-rs"
