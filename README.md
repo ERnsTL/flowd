@@ -198,6 +198,8 @@ Everything else:
 * simple HTTP client
 * simple HTTP server, supporting multiple HTTP routes
 * Muxer to merge multiple connections into one output for components not able to handle array inports
+* MQTT publisher
+* MQTT subscriber
 
 TODO:
 
