@@ -125,6 +125,7 @@ impl Component for RedisPublisherComponent {
                     //TODO optimize so that the channel name is already fixed - does the channel name get cloned for every push?
                     //TODO optimize - does it make sense to use PubSub object?
                     //pipe_lpush.lpush(channel, ip).ignore();  //TODO add error handling
+                    //NOTE: there is also a command which pops an items off, but moves it to a backup queue where it stays until confirmed/removed when the message has been fully processed
                     pipe_lpush.publish(channel, ip).ignore();
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
@@ -161,7 +162,7 @@ impl Component for RedisPublisherComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("RedisPublisher"),
-            description: String::from("Publishes data as-is from IN port to the Redis MQ channel given in CONF."),
+            description: String::from("Publishes data as-is from IN port to the Redis MQ pub/sub channel given in CONF."),
             icon: String::from("cloud-upload"), // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
@@ -291,7 +292,7 @@ impl Component for RedisSubscriberComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("RedisSubscriber"),
-            description: String::from("Subscribes to the Redis MQ channel given in CONF and forwards received message data to the OUT outport."),
+            description: String::from("Subscribes to the Redis MQ pub/sub channel given in CONF and forwards received message data to the OUT outport."),
             icon: String::from("cloud-download"),   // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
