@@ -59,6 +59,7 @@ use components::httpclient::HTTPClientComponent;
 use components::httpserver::HTTPServerComponent;
 use components::muxer::MuxerComponent;
 use components::mqtt::{MQTTPublisherComponent, MQTTSubscriberComponent};
+use components::redis::{RedisPublisherComponent, RedisSubscriberComponent};
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -111,6 +112,8 @@ fn main() {
         MuxerComponent::get_metadata(),
         MQTTPublisherComponent::get_metadata(),
         MQTTSubscriberComponent::get_metadata(),
+        RedisPublisherComponent::get_metadata(),
+        RedisSubscriberComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1814,6 +1817,8 @@ impl RuntimeRuntimePayload {
                     "Muxer" => { MuxerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "MQTTPublisher" => { MQTTPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "MQTTSubscriber" => { MQTTSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "RedisPublisher" => { RedisPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "RedisSubscriber" => { RedisSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
