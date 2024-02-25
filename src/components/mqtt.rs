@@ -362,7 +362,7 @@ impl Component for MQTTSubscriberComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("MQTTSubscriber"),
-            description: String::from("Reads the contents of the given files and sends the contents."),
+            description: String::from("Subscribes to the MQTT topic given in CONF and forwards received message payload to the OUT outport."),
             icon: String::from("cloud-download"),   // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
