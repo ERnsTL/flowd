@@ -2,7 +2,6 @@ use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 use std::time::Duration;
-use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
 
 pub struct RedisPublisherComponent {
@@ -33,22 +32,21 @@ impl Component for RedisPublisherComponent {
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
-        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
-        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(mqttoptions, 10);
-        // get topic from URL
-        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
-        let mut topic = url_parsed.path();
-        if topic.is_empty() || topic == "/" {
-            error!("no topic given in MQTT URL path, exiting");
-            return;
-        }
-        // remove leading slash
-        topic = topic.trim_start_matches('/');
-        debug!("topic: {}", topic);
+        // get destination from URL
+        let url = url::Url::parse(&url_str).expect("failed to parse URL");
+        //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
+        let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
+        let channel_bytes = channel_queryparam.1.as_bytes();
+        let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
+        debug!("channel: {}", channel);
+
+        // connect
+        let client = redis::Client::open(url_str).expect("failed to open client");
+        let mut connection = client.get_connection().expect("failed to get connection on client");
+        let mut pipe_lpush = redis::pipe();
 
         // signal handling
         //TODO optimize - currently not used because we use connection error (connection aborted) to stop the thread
@@ -57,78 +55,15 @@ impl Component for RedisPublisherComponent {
 
         // handle connection events
         //TODO automatic reconnection
+        //NOTE: currently this is not using async so we need no async handler thread
+        /*
         let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
-            // Iterate to poll the eventloop for connection progress
-            //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
-            //TODO optimize - dont know how to install a signal handler on thread level, otherwise we could save the channel and polling for shutdown
-            /*
-            for event in connection.iter() {
-                match event {
-                    _ => {
-                        trace!("Event = {:?}", event);
-                        // nothing to do, not interested in any events
-                        //TODO really?
-                    }
-                }
-            }
-            */
-            // alternative with recv_timeout()
-            /*
-            loop {
-                // check for closed shutdown signal channel
-                match eventthread_signalsource.try_recv() {
-                    Ok(_) => {
-                        // there will never anything be sent
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        // nothing to do, lets continue receiving MQTT events
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        trace!("eventloop listener got close on signal channel, shutting down");
-                        break;
-                    }
-                }
-                // block on MQTT events
-                while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                        match event {
-                        _ => {
-                            debug!("Event = {:?}", event);
-                            // nothing to do, not interested in any events
-                            //TODO really?
-                        }
-                    }
-                }
-            }
-            */
             //TODO optimize - we dont want to poll for shutdown, so we currently use the Ok or Err distinction - maybe it can be more efficient with an iter() based solution?
             // but there can be other reasons for connection close or an error...
             while let Ok(event) = connection.recv() {
                 match event {
                     Err(err) => {
                         trace!("Event Err = {:?}", err);
-                        match err {
-                            rumqttc::ConnectionError::MqttState(err) => {
-                                match err {
-                                    rumqttc::StateError::Io(err) => {
-                                        if err.kind() == std::io::ErrorKind::ConnectionAborted {
-                                            debug!("MQTT connection aborted, shutting down");
-                                            break;
-                                        } else {
-                                            error!("MQTT state error: {:?}", err);
-                                            //TODO optimize - maybe send a signal to the main thread to stop the component
-                                        }
-                                    },
-                                    _ => {
-                                        error!("MQTT connection error: {:?}", err);
-                                        //TODO optimize - maybe send a signal to the main thread to stop the component
-                                    }
-                                }
-                            },
-                            _ => {
-                                // will be handled by the eventloop?
-                                //TODO make sure
-                            }
-                        }
                     },
                     _ => {
                         trace!("Event = {:?}", event);
@@ -139,6 +74,7 @@ impl Component for RedisPublisherComponent {
             }
             debug!("exiting");
         }).expect("failed to spawn eventloop listener thread");
+        */
 
         // FBP main loop
         loop {
@@ -183,13 +119,19 @@ impl Component for RedisPublisherComponent {
                 //_ = inn.pop().ok();
                 //debug!("got a packet, dropping it.");
 
-                debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
+                debug!("got {} packets, forwarding to redis channel.", inn.slots());
                 let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
                 for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    //###
-                    //client.publish(topic, MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
+                    //TODO optimize so that the channel name is already fixed - does the channel name get cloned for every push?
+                    //TODO optimize - does it make sense to use PubSub object?
+                    //pipe_lpush.lpush(channel, ip).ignore();  //TODO add error handling
+                    pipe_lpush.publish(channel, ip).ignore();
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
+
+                // send all queries at once
+                pipe_lpush.query::<Vec<u8>>(&mut connection).expect("failed to publish into redis channel");
+                pipe_lpush.clear();
             }
 
             // are we done?
@@ -203,12 +145,15 @@ impl Component for RedisPublisherComponent {
             std::thread::park();
         }
 
-        // stop MQTT event thread - close channel
+        // stop redis event thread - close channel
         //drop(eventthread_signalsink);
-        // close MQTT connection -> MQTT event thread will exit from special connection error ConnectionAborted
-        client.disconnect().expect("failed to disconnect");
+        // close redis connection -> redis event thread will exit from special connection error ConnectionAborted
+        //TODO there is no close() method anywhere - how to close the connection or the client?
+        drop(pipe_lpush);
+        drop(connection);
+        drop(client);
         // wait for event thread to exit
-        event_handler_thread.join().expect("failed to join eventloop listener thread");
+        //event_handler_thread.join().expect("failed to join eventloop listener thread");
 
         info!("exiting");
     }
@@ -216,7 +161,7 @@ impl Component for RedisPublisherComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("RedisPublisher"),
-            description: String::from("Publishes data as-is from IN port to the Redis MQ topic given in CONF."),
+            description: String::from("Publishes data as-is from IN port to the Redis MQ channel given in CONF."),
             icon: String::from("cloud-upload"), // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
@@ -226,9 +171,9 @@ impl Component for RedisPublisherComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),
+                    description: String::from("connection URL which includes options, see redis crate documentation"),  // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd123")
+                    value_default: String::from("rediss://user:pass@server.com/db_number?channel=channel_name")
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -236,7 +181,7 @@ impl Component for RedisPublisherComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("data to be published on given Redis MQ topic"),
+                    description: String::from("data to be published on given Redis MQ channel"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -254,6 +199,9 @@ pub struct RedisSubscriberComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
+
+// how often the subscriber receive loop should check for signals from FBP network
+const RECV_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
 impl Component for RedisSubscriberComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -276,28 +224,27 @@ impl Component for RedisSubscriberComponent {
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
-        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
-        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(mqttoptions, 10);
+        // get destination from URL
+        let url = url::Url::parse(&url_str).expect("failed to parse URL");
+        //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
+        let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
+        let channel_bytes = channel_queryparam.1.as_bytes();
+        let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
+        debug!("channel: {}", channel);
 
-        // get topic from URL
-        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
-        let mut topic = url_parsed.path();
-        if topic.is_empty() || topic == "/" {
-            error!("no topic given in MQTT URL path, exiting");
-            return;
-        }
-        // remove leading slash
-        topic = topic.trim_start_matches('/');
-        debug!("topic: {}", topic);
-
+        // connect
+        let client = redis::Client::open(url_str).expect("failed to open client");
+        let mut connection = client.get_connection().expect("failed to get connection on client");
+        let mut pubsub = connection.as_pubsub();
         // subscribe to given topic
         //TODO enable reconnection - or is this done automatically via .iter()?
-        client.subscribe(topic, QoS::AtMostOnce).unwrap();
+        pubsub.subscribe(channel).expect("failed to subscribe to channel");
+        pubsub.set_read_timeout(RECV_TIMEOUT).expect("failed to set read timeout");    //TODO optimize Some packaging
 
+        // main loop
         loop {
             trace!("begin of iteration");
             // check signals
@@ -317,39 +264,23 @@ impl Component for RedisSubscriberComponent {
                 }
             }
 
-            // iterate to poll the eventloop for connection progress
-            //TODO optimize is recv(), recv_timeout() or iter() better?
-            //###
-            /*
-            while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                match event {
-                    Ok(Incoming(Publish(packet))) => {
-                        debug!("Received payload from MQTT topic: {:?}", packet.payload);
+            // receive packets
+            while let Ok(msg) = pubsub.get_message() {
+                //TODO optimize get_payload() there is some FromRedisType conversion involved
+                let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
+                debug!("Received payload from redis channel: {:?}", payload);
 
-                        // send it
-                        debug!("forwarding MQTT payload...");
-                        out.push(packet.payload.to_vec()).expect("could not push into OUT");    //TODO optimize conversion
-                        out_wakeup.unpark();
-                        debug!("done");
-                    }
-                    _ => {
-                        trace!("Event = {:?}", event);
-                    }
-                }
+                // send it
+                debug!("forwarding redis payload...");
+                out.push(payload).expect("could not push into OUT");    //TODO optimize conversion
+                out_wakeup.unpark();
+                debug!("done");
             }
-            */
+            //TODO handle Err case - is is temporary error or permanent error?
 
             // are we done?
-            //TODO handle EOF on MQTT connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
-            /*
-            if inn.is_abandoned() {
-                //TODO EOF on MQTT connection
-                info!("EOF on inport NAMES, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
-            */
+            //TODO handle EOF on redis connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
+            //TODO add automatic reconnection via crate "connection-manager" feature
 
             trace!("-- end of iteration");
             //NOTE: dont park thread here - this is done by recv_timeout()
@@ -360,7 +291,7 @@ impl Component for RedisSubscriberComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("RedisSubscriber"),
-            description: String::from("Reads the contents of the given files and sends the contents."),
+            description: String::from("Subscribes to the Redis MQ channel given in CONF and forwards received message data to the OUT outport."),
             icon: String::from("cloud-download"),   // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
@@ -370,9 +301,9 @@ impl Component for RedisSubscriberComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),    //TODO careful with the client id, other one gets disconnected - https://stackoverflow.com/questions/50654338/how-to-use-client-id-in-mosquitto-mqtt
+                    description: String::from("connection URL which includes options, see redis crate documentation"),  // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd456")
+                    value_default: String::from("rediss://user:pass@server.com/db_number?channel=channel_name")
                 }
             ],
             out_ports: vec![
@@ -382,7 +313,7 @@ impl Component for RedisSubscriberComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("contents of received MQTT events on given topic"),
+                    description: String::from("contents of received messages on given Redis MQ channel"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
