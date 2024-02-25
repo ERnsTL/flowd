@@ -200,6 +200,8 @@ Everything else:
 * Muxer to merge multiple connections into one output for components not able to handle array inports
 * MQTT publisher
 * MQTT subscriber
+* Redis Pub/Sub publisher
+* Redis Pub/Sub subscriber
 
 TODO:
 
