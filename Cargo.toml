@@ -58,5 +58,10 @@ url = "2"
 # TODO optimize - try ahash feature for 7-10% performance improvement
 redis = { version = "*", default-features = false }
 
+# for IMAPFetchIdleComponent and IMAPAppendComponent
+# TODO optimize - try rustls. better performance working with Rust types than converting to and from C types?
+imap = "2.4.1"
+native-tls = "0.2.11"
+
 [[bin]]
 name = "flowd-rs"
