@@ -60,6 +60,7 @@ use components::httpserver::HTTPServerComponent;
 use components::muxer::MuxerComponent;
 use components::mqtt::{MQTTPublisherComponent, MQTTSubscriberComponent};
 use components::redis::{RedisPublisherComponent, RedisSubscriberComponent};
+use components::imap::{IMAPAppendComponent, IMAPFetchIdleComponent};
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -114,6 +115,8 @@ fn main() {
         MQTTSubscriberComponent::get_metadata(),
         RedisPublisherComponent::get_metadata(),
         RedisSubscriberComponent::get_metadata(),
+        IMAPAppendComponent::get_metadata(),
+        IMAPFetchIdleComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1819,6 +1822,8 @@ impl RuntimeRuntimePayload {
                     "MQTTSubscriber" => { MQTTSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "RedisPublisher" => { RedisPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "RedisSubscriber" => { RedisSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "IMAPAppend" => { IMAPAppendComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "IMAPFetchIdle" => { IMAPFetchIdleComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
