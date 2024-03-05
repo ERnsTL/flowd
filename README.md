@@ -202,6 +202,8 @@ Everything else:
 * MQTT subscriber
 * Redis Pub/Sub publisher
 * Redis Pub/Sub subscriber
+* IMAP e-mail append (sender)
+* IMAP e-mail fetch+idle (receiver)
 
 TODO:
 
