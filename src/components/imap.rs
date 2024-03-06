@@ -1,4 +1,5 @@
 use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
+use imap::extensions::idle::WaitOutcome;
 use tungstenite::protocol;
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
@@ -49,7 +50,7 @@ impl Component for IMAPAppendComponent {
         /*
         let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
             while let Ok(event) = connection.recv() {
-                //###
+                // do something here
             }
             debug!("exiting");
         }).expect("failed to spawn event handler thread");
@@ -185,6 +186,8 @@ impl Component for IMAPFetchIdleComponent {
         // parse and connect to IMAP server
         let parsed_url = parse_url(url);
         let (mut imap_session, mailbox) = login_and_connect(&parsed_url);
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let shutdown_ref = shutdown.clone();
 
         // handle connection events
         //TODO automatic reconnection
@@ -193,14 +196,41 @@ impl Component for IMAPFetchIdleComponent {
             let mut out = outport.sink;
             let out_wakeup = outport.wakeup.as_mut().expect("got no wakeup handle for outport OUT");
 
-            // first fetch
+            // first fetch of any existing unread messages
             fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
             // main loop of idle and fetch
-            while let Ok(_) = idle(&mut imap_session, &mut out, &out_wakeup) {
-                // idle already sends the received messages
+            while let Ok(res) = idle(&mut imap_session, &mut out, &out_wakeup) {
+                // check for shutdown signal before we fetch
+                if shutdown_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                    debug!("got shutdown signal, exiting event handler thread");
+
+                    debug!("closing connection");
+                    close(&mut imap_session);
+
+                    debug!("exiting");
+                    return;
+                }
+
+                // fetch any new messages
+                match res {
+                    WaitOutcome::TimedOut => {
+                        // listen again - and we know the server connection is still alive
+                    },
+                    WaitOutcome::MailboxChanged => {
+                        debug!("mailbox changed");
+                        fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
+                    },
+                }
             }
+
             debug!("closing connection");
             close(&mut imap_session);
+
+            // signal main thread that we are done
+            //TODO optimize - useless if we got notified by the main thread of shutdown ;-)
+            //TODO optimize - code duplication between "we signal main thread" case and "we got signalled by main thread" case
+            debug!("signalling main thread that we are done");
+            shutdown_ref.store(true, std::sync::atomic::Ordering::Relaxed);
 
             debug!("exiting");
         }).expect("failed to spawn event handler thread");
@@ -228,29 +258,30 @@ impl Component for IMAPFetchIdleComponent {
             // receive from IMAP connection is done in separate thread because we dont control the events
 
             // are we done?
-            //TODO how do we know about EOF on IMAP connection?
-            //TODO how can we signal the event handler thread to exit?
-            //TODO how does the event handler thread know about EOF on IMAP connection?
-            //###
-            /*
-            if inn.is_abandoned() {
-                //TODO EOF on IMAP connection
-                info!("EOF on inport NAMES, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                // event handler thread signalled it is done
+                info!("event handler thread signalled it is done, shutting down");
                 break;
             }
-            */
 
             trace!("-- end of iteration");
             thread::park();
         }
 
         // close connection -> event handler thread will exit from connection error
-        //close(&mut imap_session);
+        //TODO may be locked in idle() by the event handler thread - for up to 29 minutes
+        debug!("signal event handler thread to exit");
+        shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
 
-        // wait for event thread to exit
+        // wait for event handler thread to exit
+        debug!("joining event handler thread");
         event_handler_thread.join().expect("failed to join event handler thread");
+
+        // inform downstream
+        //TODO fix - we dont have the outport variable here anymore
+        //TODO will the receiver be notified anyway when we exit - thus drop our end of the ringbuffer?
+        //drop(outport.sink);
+        //outport.wakeup.unwrap().unpark();
 
         info!("exiting");
     }
@@ -409,11 +440,19 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     Ok(())
 }
 
-fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
+const IDLE_TIMEOUT: Duration = Duration::from_secs(10);  // TODO optimize this is unefficient - could idle up to 29 minutes
+//TODO optimize but I didnt find a way yet to signal the event handler thread to exit if it is stuck in idle()
+//  so wa issue IMAP idle command every 10 seconds... but this is not optimal
+
+//TODO handle connection lost case
+fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<WaitOutcome, imap::Error> {
     // wait for changed mailbox
     debug!("idling");
     //imap_session.idle()?.wait_with_timeout(timeout);
-    imap_session.idle().expect("failed to idle").wait_keepalive().expect("failed to wait_keepalive");
+    let res = imap_session.idle().expect("failed to idle").wait_with_timeout(IDLE_TIMEOUT);
+    //TODO this is much more optimal:
+    //imap_session.idle().expect("failed to idle").wait_keepalive().expect("failed to wait_keepalive");
     debug!("idling done");
-    return fetch(imap_session, out, out_wakeup);
+    //return fetch(imap_session, out, out_wakeup);
+    return res;
 }
