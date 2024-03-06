@@ -197,7 +197,7 @@ impl Component for IMAPFetchIdleComponent {
             fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
             // main loop of idle and fetch
             while let Ok(_) = idle(&mut imap_session, &mut out, &out_wakeup) {
-                // idle already sends received messages
+                // idle already sends the received messages
             }
             debug!("closing connection");
             close(&mut imap_session);
@@ -336,7 +336,7 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
         .login(user, password)
         .map_err(|e| e.0).expect("failed to login to IMAP server");
 
-    // we want to fetch the first email in the INBOX mailbox
+    // we want to fetch the first email in the given mailbox
     imap_session.select(mailbox).expect("failed to select mailbox");
 
     // return
@@ -352,7 +352,7 @@ fn close(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
 }
 
 fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
-    // find unseen messages in the INBOX mailbox
+    // find unseen messages in the given mailbox
     let uids_set = imap_session.uid_search("UNSEEN").expect("search failed");
 
     if uids_set.is_empty() {
@@ -380,6 +380,7 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     debug!("fetching messages {}", uid_set);
     // TODO possible race condition of there are multiple IMAP idlers running trying to fetch the same messages
     //   might lead to more-than-once delivery of messages
+    // TODO in case of multiple idlers, ordering of messages is not guaranteed
     let messages = imap_session.uid_fetch(&uid_set, query).expect("fetch failed");
     for message in messages.iter() {
         // extract the message's body
@@ -390,7 +391,7 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
             .expect("message was not valid utf-8")
             .to_string();
 
-        debug!("unseen email in INBOX:\n{}", body[0..std::cmp::min(body.len(),512)].to_string());
+        debug!("unseen email in {}:\n{}", mailbox, body[0..std::cmp::min(body.len(),512)].to_string());
         */
 
         // send it
