@@ -356,7 +356,7 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     let uids_set = imap_session.uid_search("UNSEEN").expect("search failed");
 
     if uids_set.is_empty() {
-        println!("no unseen messages");
+        debug!("no unseen messages");
         return Ok(());
     }
 
@@ -367,29 +367,30 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     //TODO optimize - no clue why uid_search is returning unordered HashSet
     // ordering is important for the stream of IPs
     let mut uids: Vec<&u32> = uids_set.iter().collect();
-    println!("{:?}", uids);
+    debug!("unread messages:  {:?}", uids);
     uids.sort_by(|a, b| a.cmp(b));
 
-    // fetch message number 1 in this mailbox, along with its RFC822 field.
+    // fetch message number 1 in this mailbox, along with its RFC822 field
     // RFC 822 dictates the format of the body of e-mails
     //let query = "RFC822";
     let query = "BODY[]";
     //let query = "BODY[TEXT]";
     //let uid_set = "(".to_owned() + uids.iter().map(|val| val.to_string()).collect::<Vec<_>>().join(" ").as_str() + ")";
     let uid_set = uids.iter().map(|val| val.to_string()).collect::<Vec<_>>().join(",");
-    println!("fetching messages {}", uid_set);
-
+    debug!("fetching messages {}", uid_set);
+    // TODO possible race condition of there are multiple IMAP idlers running trying to fetch the same messages
+    //   might lead to more-than-once delivery of messages
     let messages = imap_session.uid_fetch(&uid_set, query).expect("fetch failed");
-
     for message in messages.iter() {
         // extract the message's body
         let body = message.body().expect("message did not have a body!");
+        // we dont need that
         /*
         let body = std::str::from_utf8(body)
             .expect("message was not valid utf-8")
             .to_string();
 
-        println!("unseen email in INBOX:\n{}", body[0..std::cmp::min(body.len(),512)].to_string());
+        debug!("unseen email in INBOX:\n{}", body[0..std::cmp::min(body.len(),512)].to_string());
         */
 
         // send it
@@ -400,7 +401,7 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
 
         // delete from server
         imap_session.uid_store(&uid_set, "+FLAGS (\\Deleted)").expect("delete failed");
-        println!("deleted messages {}", uid_set);
+        debug!("deleted messages {}", uid_set);
     }
 
     // OK
@@ -409,9 +410,9 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
 
 fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
     // wait for changed mailbox
-    println!("idling");
+    debug!("idling");
     //imap_session.idle()?.wait_with_timeout(timeout);
     imap_session.idle().expect("failed to idle").wait_keepalive().expect("failed to wait_keepalive");
-    println!("idling done");
+    debug!("idling done");
     return fetch(imap_session, out, out_wakeup);
 }
