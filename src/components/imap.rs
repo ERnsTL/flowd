@@ -4,6 +4,7 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 
 use std::time::Duration;
 use std::thread;
+use std::thread::Thread;
 extern crate imap;
 extern crate native_tls;
 
@@ -173,8 +174,7 @@ impl Component for IMAPFetchIdleComponent {
     fn run(mut self) {
         debug!("IMAPFetchIdle is now run()ning!");
         let conf = &mut self.conf;    //TODO optimize
-        let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let mut outport = self.out; // will be moved into event handler thread and it will unpack it
 
         // check config port
         trace!("read config IP");
@@ -189,21 +189,15 @@ impl Component for IMAPFetchIdleComponent {
         // handle connection events
         //TODO automatic reconnection
         let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
-            fetch(&mut imap_session);
-            //while //let Ok(event) = connection.recv() {
-            loop {
-                //###
-                idle(&mut imap_session);
+            // unpack outport
+            let mut out = outport.sink;
+            let out_wakeup = outport.wakeup.as_mut().expect("got no wakeup handle for outport OUT");
 
-                /*
-                debug!("Received payload from IMAP mailbox: {:?}", packet.payload);
-
-                // send it
-                debug!("forwarding message...");
-                out.push(packet.payload.to_vec()).expect("could not push into OUT");    //TODO optimize conversion
-                out_wakeup.unpark();
-                debug!("done");
-                */
+            // first fetch
+            fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
+            // main loop of idle and fetch
+            while let Ok(_) = idle(&mut imap_session, &mut out, &out_wakeup) {
+                // idle already sends received messages
             }
             debug!("closing connection");
             close(&mut imap_session);
@@ -231,11 +225,13 @@ impl Component for IMAPFetchIdleComponent {
                 }
             }
 
-            // receive from IMAP connection - this is done in separate thread because we dont control the events
+            // receive from IMAP connection is done in separate thread because we dont control the events
 
             // are we done?
             //TODO how do we know about EOF on IMAP connection?
+            //TODO how can we signal the event handler thread to exit?
             //TODO how does the event handler thread know about EOF on IMAP connection?
+            //###
             /*
             if inn.is_abandoned() {
                 //TODO EOF on IMAP connection
@@ -355,13 +351,13 @@ fn close(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     imap_session.logout().expect("logout failed");
 }
 
-fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>) {
+fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
     // find unseen messages in the INBOX mailbox
     let uids_set = imap_session.uid_search("UNSEEN").expect("search failed");
 
     if uids_set.is_empty() {
         println!("no unseen messages");
-        return;
+        return Ok(());
     }
 
     // get first unseen message
@@ -388,23 +384,34 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     for message in messages.iter() {
         // extract the message's body
         let body = message.body().expect("message did not have a body!");
+        /*
         let body = std::str::from_utf8(body)
             .expect("message was not valid utf-8")
             .to_string();
 
         println!("unseen email in INBOX:\n{}", body[0..std::cmp::min(body.len(),512)].to_string());
+        */
+
+        // send it
+        debug!("forwarding message...");
+        out.push(body.to_vec()).expect("could not push into OUT");    //TODO optimize Vec conversion - is it free?
+        out_wakeup.unpark();
+        debug!("done");
+
+        // delete from server
+        imap_session.uid_store(&uid_set, "+FLAGS (\\Deleted)").expect("delete failed");
+        println!("deleted messages {}", uid_set);
     }
 
-    // delete from server
-    imap_session.uid_store(&uid_set, "+FLAGS (\\Deleted)").expect("delete failed");
-    println!("deleted messages {}", uid_set);
+    // OK
+    Ok(())
 }
 
-fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>) {
+fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
     // wait for changed mailbox
     println!("idling");
     //imap_session.idle()?.wait_with_timeout(timeout);
     imap_session.idle().expect("failed to idle").wait_keepalive().expect("failed to wait_keepalive");
     println!("idling done");
-    fetch(imap_session);
+    return fetch(imap_session, out, out_wakeup);
 }
