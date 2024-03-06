@@ -133,7 +133,7 @@ impl Component for IMAPAppendComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes encryption, server, username, password, mailbox name"),
                     values_allowed: vec![],
-                    value_default: String::from("imaps://username:password@example.com:993/mailbox")
+                    value_default: String::from("imaps://username:password@example.com:993/INBOX")
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -270,7 +270,7 @@ impl Component for IMAPFetchIdleComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes encryption, server, username, password, mailbox name"),
                     values_allowed: vec![],
-                    value_default: String::from("imaps://username:password@example.com:993/mailbox")
+                    value_default: String::from("imaps://username:password@example.com:993/INBOX")
                 }
             ],
             out_ports: vec![
