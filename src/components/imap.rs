@@ -191,7 +191,7 @@ impl Component for IMAPFetchIdleComponent {
 
         // handle connection events
         //TODO automatic reconnection
-        let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
+        let event_handler_thread = thread::Builder::new().name(format!("{}/I", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
             // unpack outport
             let mut out = outport.sink;
             let out_wakeup = outport.wakeup.as_mut().expect("got no wakeup handle for outport OUT");
