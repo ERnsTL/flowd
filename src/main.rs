@@ -1195,8 +1195,6 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         websocket.close(None).expect("could not close websocket");
                     }
                 }
-
-                //websocket.write_message(msg)?;
             }
             Message::Ping(_) | Message::Pong(_) => {
                 info!("got a ping|pong");
@@ -1208,6 +1206,10 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
             // From documentation: Raw frame. Note, that you are not going to get this value while reading the message.
             Message::Frame(_) => todo!()
         }
+
+        // need to flush manually
+        websocket.flush().expect("could not flush websocket");
+
         info!("--- end of message handling iteration")
     }
     {
