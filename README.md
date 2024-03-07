@@ -209,6 +209,7 @@ TODO:
 
 * brackets using OOB marker
 * filtering on object structures in sexp fashion
+* "XPath"-like filtering on sexp object structures
 * building of header (K/V) and body structure in sexp fashion - then it is on par with Go and JavaFBP implementation
 
 TODO (copy from Go version):
