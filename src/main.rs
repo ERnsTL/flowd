@@ -1207,7 +1207,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
             Message::Frame(_) => todo!()
         }
 
-        // need to flush manually
+        // need to flush explicitly
         websocket.flush().expect("could not flush websocket");
 
         info!("--- end of message handling iteration")
