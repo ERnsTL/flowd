@@ -185,7 +185,7 @@ impl Component for IMAPFetchIdleComponent {
 
         // parse and connect to IMAP server
         let parsed_url = parse_url(url);
-        let (mut imap_session, mailbox) = login_and_connect(&parsed_url);
+        let (mut imap_session, _mailbox) = login_and_connect(&parsed_url);
         let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let shutdown_ref = shutdown.clone();
 
