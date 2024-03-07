@@ -238,7 +238,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
     debug!("entering receive loop");
     loop {
         debug!("waiting for next message");
-        match websocket.read_message()? {
+        match websocket.read()? {
             msg @ Message::Text(_) | msg @ Message::Binary(_) => {
                 debug!("got a text|binary message");
                 //debug!("message data: {}", msg.clone().into_text().unwrap());
@@ -254,7 +254,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         // send response = runtime:runtime message
                         info!("response: sending runtime:runtime message");
                         websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 //TODO handing over value inside lock would work like this:  serde_json::to_string(&*runtime.read().expect("lock poisoned"))
                                 serde_json::to_string(&RuntimeRuntimeMessage::new(&runtime.read().expect("lock poisoned")))
                                 .expect("failed to serialize runtime:runtime message"),
@@ -263,7 +263,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         // spec: "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
                         info!("response: sending runtime:ports message");
                         websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 serde_json::to_string(&RuntimePortsMessage::new(&runtime.read().expect("lock poisoned"), &graph.read().expect("lock poisoned")))
                                     .expect("failed to serialize runtime:ports message"),
                             ))
@@ -278,7 +278,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         for component in components.read().expect("lock poisoned").available.iter() {
                             info!("response: sending component:component message");
                             websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 serde_json::to_string(&ComponentComponentMessage::new(&component))
                                     .expect("failed to serialize component:component response"),
                             ))
@@ -287,7 +287,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         }
                         info!("response: sending component:componentsready response");
                         websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 serde_json::to_string(&ComponentComponentsreadyMessage::new(count))
                                     .expect("failed to serialize component:componentsready response"),
                             ))
@@ -300,7 +300,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         //TODO check secret
                         info!("response: sending network:status message");
                         websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 serde_json::to_string(&NetworkStatusMessage::new(&NetworkStatusPayload::new(&runtime.read().expect("lock poisoned").status)))
                                     .expect("failed to serialize network:status message"),
                             ))
@@ -315,7 +315,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending network:persist message");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkPersistResponse::default())
                                             .expect("failed to serialize network:persist message"),
                                     ))
@@ -325,7 +325,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("persist failed: {}", err);
                                 info!("response: sending network:error message");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
@@ -351,7 +351,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 Ok(source_info) => {
                                     info!("response: sending component:source message for graph");
                                     websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&ComponentSourceMessage::new(source_info))
                                             .expect("failed to serialize component:source message"),
                                     ))
@@ -361,7 +361,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     error!("graph.get_source() failed: {}", err);
                                     info!("response: sending graph:error response");
                                     websocket
-                                        .write_message(Message::text(
+                                        .write(Message::text(
                                             serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                                 .expect("failed to serialize graph:error response"),
                                         ))
@@ -375,7 +375,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 Ok(source_info) => {
                                     info!("response: sending component:source message for component");
                                     websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&ComponentSourceMessage::new(source_info))
                                             .expect("failed to serialize component:source message"),
                                     ))
@@ -385,7 +385,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                     error!("componentlib.get_source() failed: {}", err);
                                     info!("response: sending graph:error response");
                                     websocket
-                                        .write_message(Message::text(
+                                        .write(Message::text(
                                             serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                                 .expect("failed to serialize graph:error response"),
                                         ))
@@ -401,7 +401,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:clear response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphClearResponse::new(&payload))
                                             .expect("failed to serialize graph:clear response"),
                                     ))
@@ -411,7 +411,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.clear() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -426,7 +426,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(response) => {
                                 info!("response: sending graph:addnode response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddnodeResponse::new(response))
                                             .expect("failed to serialize graph:addnode response"),
                                     ))
@@ -436,7 +436,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_node() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -451,7 +451,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removenode response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemovenodeResponse::default())
                                             .expect("failed to serialize graph:removenode response"),
                                     ))
@@ -461,7 +461,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_node() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -476,7 +476,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:renamenode response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRenamenodeResponse::default())
                                             .expect("failed to serialize graph:renamenode response"),
                                     ))
@@ -486,7 +486,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.rename_node() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -501,7 +501,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:changenode response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphChangenodeResponse::default())
                                             .expect("failed to serialize graph:changenode response"),
                                     ))
@@ -511,7 +511,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.change_node() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -527,7 +527,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:addedge response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddedgeResponse::from_request(payload))
                                             .expect("failed to serialize graph:addedge response"),
                                     ))
@@ -537,7 +537,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_edge() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -552,7 +552,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removeedge response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemoveedgeResponse::from_request(payload))
                                             .expect("failed to serialize graph:removeedge response"),
                                     ))
@@ -562,7 +562,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_edge() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -577,7 +577,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:changeedge response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphChangeedgeResponse::from_request(payload))  //TODO optimize clone
                                             .expect("failed to serialize graph:changeedge response"),
                                     ))
@@ -587,7 +587,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.change_edge() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -602,7 +602,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:addinitial response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddinitialResponse::default())
                                             .expect("failed to serialize graph:addinitial response"),
                                     ))
@@ -612,7 +612,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_initialip() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -627,7 +627,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removeinitial response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemoveinitialResponse::default())
                                             .expect("failed to serialize graph:removeinitial response"),
                                     ))
@@ -637,7 +637,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_initialip() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -654,7 +654,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:addinport response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddinportResponse::default())
                                             .expect("failed to serialize graph:addinport response"),
                                     ))
@@ -664,7 +664,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_inport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -681,7 +681,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removeinport response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemoveinportResponse::default())
                                             .expect("failed to serialize graph:removeinport response"),
                                     ))
@@ -691,7 +691,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_inport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -708,7 +708,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         match graph.write().expect("lock poisoned").rename_inport(payload.from, payload.to) {
                             Ok(_) => {
                                 websocket
-                                .write_message(Message::text(
+                                .write(Message::text(
                                     serde_json::to_string(&GraphRenameinportResponse::default())
                                         .expect("failed to serialize graph:renameinport response"),
                                 ))
@@ -718,7 +718,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.rename_inport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -735,7 +735,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:addoutport response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddoutportResponse::default())
                                             .expect("failed to serialize graph:addoutport response"),
                                     ))
@@ -745,7 +745,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_outport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -762,7 +762,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removeoutport response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemoveoutportResponse::default())
                                             .expect("failed to serialize graph:removeoutport response"),
                                     ))
@@ -772,7 +772,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_outport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -789,7 +789,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         match graph.write().expect("lock poisoned").rename_outport(payload.from, payload.to) {
                             Ok(_) => {
                                 websocket
-                                .write_message(Message::text(
+                                .write(Message::text(
                                     serde_json::to_string(&GraphRenameoutportResponse::default())
                                         .expect("failed to serialize graph:renameoutport response"),
                                 ))
@@ -799,7 +799,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.rename_outport() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -814,7 +814,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:addgroup response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphAddgroupResponse::default())
                                             .expect("failed to serialize graph:addgroup response"),
                                     ))
@@ -824,7 +824,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.add_group() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -839,7 +839,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:removegroup response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRemovegroupResponse::default())
                                             .expect("failed to serialize graph:removegroup response"),
                                     ))
@@ -849,7 +849,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.remove_group() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -864,7 +864,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:renamegroup response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphRenamegroupResponse::default())
                                             .expect("failed to serialize graph:renamegroup response"),
                                     ))
@@ -874,7 +874,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.rename_group() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -889,7 +889,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending graph:changegroup response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphChangegroupResponse::default())
                                             .expect("failed to serialize graph:changegroup response"),
                                     ))
@@ -899,7 +899,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("graph.change_group() failed: {}", err);
                                 info!("response: sending graph:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize graph:error response"),
                                     ))
@@ -918,7 +918,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending trace:start response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceStartResponse::new(payload.graph))
                                             .expect("failed to serialize trace:start response"),
                                     ))
@@ -928,7 +928,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.start_trace() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize trace:error response"),
                                     ))
@@ -944,7 +944,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending trace:stop response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceStopResponse::new(payload.graph))
                                             .expect("failed to serialize trace:stop response"),
                                     ))
@@ -954,7 +954,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.stop_trace() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize trace:error response"),
                                     ))
@@ -971,7 +971,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending trace:clear response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceClearResponse::new(payload.graph))
                                             .expect("failed to serialize trace:clear response"),
                                     ))
@@ -981,7 +981,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.tracing_start() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize trace:error response"),
                                     ))
@@ -997,7 +997,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(dump) => {
                                 info!("response: sending trace:dump response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceDumpResponse::new(payload.graph, dump))
                                             .expect("failed to serialize trace:dump response"),
                                     ))
@@ -1007,7 +1007,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.dump_trace() failed: {}", err);
                                 info!("response: sending trace:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&TraceErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize trace:error response"),
                                     ))
@@ -1024,7 +1024,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending runtime:packetsent response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&RuntimePacketsentMessage::new(RuntimePacketsentPayload::from(payload)))
                                             .expect("failed to serialize runtime:packetsent response"),
                                     ))
@@ -1034,7 +1034,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.packet() failed: {}", err);
                                 info!("response: sending runtime:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&RuntimeErrorResponse::new(err.to_string()))
                                             .expect("failed to serialize runtime:error response"),
                                     ))
@@ -1049,7 +1049,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("got runtime:packetsent message");
                         warn!("response: sending runtime:error response (error case, unexpected from FBP network protocol client)");
                         websocket
-                            .write_message(Message::text(
+                            .write(Message::text(
                                 serde_json::to_string(&RuntimeErrorResponse::new(String::from("runtime:packetsent from client is an error")))
                                     .expect("failed to serialize runtime:error response"),
                             ))
@@ -1063,7 +1063,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending network:edges response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkEdgesResponse::from_request(payload))
                                             .expect("failed to serialize network:edges response"),
                                     ))
@@ -1073,7 +1073,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.set_debug_edges() failed: {}", err);
                                 info!("response: sending network:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
@@ -1095,14 +1095,14 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(status) => {
                                 info!("response: sending network:started response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkStartedResponse::new(&status))
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
                                 /*TODO implement network debugging, see https://github.com/ERnsTL/flowd/issues/193
                                 websocket
-                                    .write_message(Message::text(serde_json::to_string(&NetworkDataResponse::new(
+                                    .write(Message::text(serde_json::to_string(&NetworkDataResponse::new(
                                         NetworkTransmissionPayload {
                                             id: String::from("Repeater.OUT -> Display.IN"),
                                             src: GraphNodeSpecNetwork { node: "Repeater".to_owned(), port: "OUT".to_owned(), index: None },
@@ -1121,7 +1121,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.start() failed: {}", err);
                                 info!("response: sending network:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
@@ -1141,7 +1141,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(status) => {
                                 info!("response: sending network:stop response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkStoppedResponse::new(status))
                                             .expect("failed to serialize network:stopped response"),
                                     ))
@@ -1151,7 +1151,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.stop() failed: {}", err);
                                 info!("response: sending network:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkErrorResponse::new(
                                             err.to_string(),
                                             String::from(""),
@@ -1170,7 +1170,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                             Ok(_) => {
                                 info!("response: sending network:debug response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkDebugResponse::new(payload.graph))
                                             .expect("failed to serialize network:debug response"),
                                     ))
@@ -1180,7 +1180,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                                 error!("runtime.debug_mode() failed: {}", err);
                                 info!("response: sending network:error response");
                                 websocket
-                                    .write_message(Message::text(
+                                    .write(Message::text(
                                         serde_json::to_string(&NetworkErrorResponse::new(err.to_string(), String::from(""), payload.graph))
                                             .expect("failed to serialize network:debug response"),
                                     ))
