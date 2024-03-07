@@ -2262,7 +2262,7 @@ impl GraphInportOutportHolder {
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
-            client.1.write_message(Message::text(
+            client.1.write(Message::text(
                 serde_json::to_string(packet)
                 .expect("failed to serialize runtime:packet response"),
             ))
@@ -2275,7 +2275,7 @@ impl GraphInportOutportHolder {
     fn send_network_stopped(&mut self, packet: &NetworkStoppedResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
-            client.1.write_message(Message::text(
+            client.1.write(Message::text(
                 serde_json::to_string(packet)
                 .expect("failed to serialize network:stopped response"),
             ))
@@ -2287,7 +2287,7 @@ impl GraphInportOutportHolder {
     fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
-            client.1.write_message(Message::text(
+            client.1.write(Message::text(
                 serde_json::to_string(packet)
                 .expect("failed to serialize network:output response"),
             ))
@@ -2299,7 +2299,7 @@ impl GraphInportOutportHolder {
     fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
         //TODO add capabilities check for each client!
         for client in self.websockets.iter_mut() {
-            client.1.write_message(Message::text(
+            client.1.write(Message::text(
                 serde_json::to_string(packet)
                 .expect("failed to serialize network:error response"),
             ))
@@ -2313,7 +2313,7 @@ impl GraphInportOutportHolder {
         //TODO add debug mode check for the graph (network:debug)
         //TODO add check if edge was selected for debugging (network:edges)
         for client in self.websockets.iter_mut() {
-            client.1.write_message(Message::text(
+            client.1.write(Message::text(
                 serde_json::to_string(packet)
                 .expect("failed to serialize network:data response"),
             ))
