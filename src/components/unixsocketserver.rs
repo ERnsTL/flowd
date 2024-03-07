@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+// component-specific
 use std::io::{Write, Read};
 use std::thread::{self};
 use std::collections::HashMap;
@@ -28,7 +29,7 @@ impl Component for UnixSocketServerComponent {
 
     fn run(mut self) {
         debug!("UnixSocketServer is now run()ning!");
-        let conf = &mut self.conf;
+        let mut conf = self.conf;
         trace!("spinning for listen path on CONF...");
         while conf.is_empty() {
             thread::yield_now();

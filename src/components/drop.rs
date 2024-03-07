@@ -18,9 +18,9 @@ impl Component for DropComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("Drop is now run()ning!");
-        let inn = &mut self.inn;    //TODO optimize
+        let mut inn = self.inn;
         loop {
             trace!("begin of iteration");
 

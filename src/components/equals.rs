@@ -1,7 +1,8 @@
 use std::sync::{Arc, Mutex};
-use rtrb::PushError;
-
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+
+// component-specific
+use rtrb::PushError;
 
 pub struct EqualsComponent {
     cmp: ProcessEdgeSource,
@@ -26,13 +27,13 @@ impl Component for EqualsComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("Equals is now run()ning!");
-        let cmp = &mut self.cmp;
-        let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
-        let out_true = &mut self.out_true.sink;
+        let mut cmp = self.cmp;
+        let mut inn = self.inn;
+        let mut out_true = self.out_true.sink;
         let out_true_wakeup = self.out_true.wakeup.expect("got no wakeup handle for outport TRUE");
-        let out_false = &mut self.out_false.sink;
+        let mut out_false = self.out_false.sink;
         let out_false_wakeup = self.out_false.wakeup.expect("got no wakeup handle for outport FALSE");
 
         // read cmp until we get a value

@@ -67,10 +67,10 @@ impl Component for LibComponent { //<'_> {
     }
 
     // TODO refactor to receive on inports of the component in the shared library
-    fn run(mut self) {
+    fn run(self) {
         debug!("LibComponent is now run()ning!");
-        let inn = &mut self.inn;    //TODO optimize
-        let out = &mut self.out.sink;
+        let mut inn = self.inn;
+        let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         unsafe {
             let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");

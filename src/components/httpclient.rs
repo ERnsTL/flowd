@@ -22,12 +22,12 @@ impl Component for HTTPClientComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("HTTPClient is now run()ning!");
-        let requests = &mut self.req;    //TODO optimize
-        let out_resp = &mut self.out_resp.sink;
+        let mut requests = self.req;
+        let mut out_resp = self.out_resp.sink;
         let out_resp_wakeup = self.out_resp.wakeup.expect("got no wakeup handle for outport RESP");
-        let out_err = &mut self.out_err.sink;
+        let mut out_err = self.out_err.sink;
         let out_err_wakeup = self.out_err.wakeup.expect("got no wakeup handle for outport ERR");
         loop {
             trace!("begin of iteration");

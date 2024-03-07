@@ -1,8 +1,8 @@
-use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 use imap::extensions::idle::WaitOutcome;
-use tungstenite::protocol;
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+// component-specific
 use std::time::Duration;
 use std::thread;
 use std::thread::Thread;
@@ -18,7 +18,7 @@ pub struct IMAPAppendComponent {
 }
 
 impl Component for IMAPAppendComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         IMAPAppendComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
@@ -28,10 +28,10 @@ impl Component for IMAPAppendComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("IMAPAppend is now run()ning!");
-        let conf = &mut self.conf;
-        let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
+        let mut conf = self.conf;
+        let mut inn = self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
 
         // check config port
         trace!("read config IP");
@@ -172,9 +172,9 @@ impl Component for IMAPFetchIdleComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("IMAPFetchIdle is now run()ning!");
-        let conf = &mut self.conf;    //TODO optimize
+        let mut conf = self.conf;
         let mut outport = self.out; // will be moved into event handler thread and it will unpack it
 
         // check config port
@@ -199,7 +199,7 @@ impl Component for IMAPFetchIdleComponent {
             // first fetch of any existing unread messages
             fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
             // main loop of idle and fetch
-            while let Ok(res) = idle(&mut imap_session, &mut out, &out_wakeup) {
+            while let Ok(res) = idle(&mut imap_session) {
                 // check for shutdown signal before we fetch
                 if shutdown_ref.load(std::sync::atomic::Ordering::Relaxed) {
                     debug!("got shutdown signal, exiting event handler thread");
@@ -445,7 +445,7 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(10);  // TODO optimize this i
 //  so wa issue IMAP idle command every 10 seconds... but this is not optimal
 
 //TODO handle connection lost case
-fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<WaitOutcome, imap::Error> {
+fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>) -> Result<WaitOutcome, imap::Error> {
     // wait for changed mailbox
     debug!("idling");
     //imap_session.idle()?.wait_with_timeout(timeout);

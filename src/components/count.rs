@@ -20,10 +20,10 @@ impl Component for CountComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("Count is now run()ning!");
-        let inn = &mut self.inn;
-        let out = &mut self.out.sink;
+        let mut inn = self.inn;
+        let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         let mut packets: usize = 0;
         let start = chrono::Utc::now();

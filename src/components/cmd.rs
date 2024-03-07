@@ -1,8 +1,8 @@
-use std::ffi::{OsStr,OsString};
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 //component-specific
+use std::ffi::{OsStr,OsString};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use lexopt::prelude::*;
@@ -33,12 +33,12 @@ impl Component for CmdComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("Cmd is now run()ning!");
-        let inn = &mut self.inn;    //TODO optimize
-        let cmd = &mut self.cmd;
-        let conf = &mut self.conf;
-        let out = &mut self.out.sink;
+        let mut inn = self.inn;
+        let mut cmd = self.cmd;
+        let mut conf = self.conf;
+        let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // read sub-process program and args

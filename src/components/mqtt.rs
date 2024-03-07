@@ -1,6 +1,7 @@
-use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+// component-specific
 use std::time::Duration;
 use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
@@ -17,7 +18,7 @@ const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be o
 const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
 
 impl Component for MQTTPublisherComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         MQTTPublisherComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
@@ -27,10 +28,10 @@ impl Component for MQTTPublisherComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("MQTTPublisher is now run()ning!");
-        let conf = &mut self.conf;
-        let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
+        let mut conf = self.conf;
+        let mut inn = self.inn;
 
         // check config port
         trace!("read config IP");

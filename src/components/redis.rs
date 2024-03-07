@@ -1,8 +1,8 @@
-use std::{os::unix::thread::JoinHandleExt, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+// component-specific
 use std::time::Duration;
-use std::thread;
 
 pub struct RedisPublisherComponent {
     conf: ProcessEdgeSource,
@@ -13,7 +13,7 @@ pub struct RedisPublisherComponent {
 }
 
 impl Component for RedisPublisherComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         RedisPublisherComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
@@ -215,10 +215,10 @@ impl Component for RedisSubscriberComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("RedisSubscriber is now run()ning!");
-        let conf = &mut self.conf;    //TODO optimize
-        let out = &mut self.out.sink;
+        let mut conf = self.conf;
+        let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // check config port

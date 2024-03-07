@@ -20,10 +20,10 @@ impl Component for FileReaderComponent {
         }
     }
 
-    fn run(mut self) {
+    fn run(self) {
         debug!("FileReader is now run()ning!");
-        let filenames = &mut self.inn;    //TODO optimize
-        let out = &mut self.out.sink;
+        let mut filenames = self.inn;
+        let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
