@@ -2006,7 +2006,7 @@ impl RuntimeRuntimePayload {
 
                 // health check of all components
                 trace!("running health check...");
-                let mut now = chrono::Utc::now();   //TODO any way to not initialize this with a throwaway value?
+                let mut now: chrono::DateTime<Utc>;   //TODO any way to not initialize this with a throwaway value?
                 let mut ok = true;
                 let mut exited_count: usize = 0;
                 for (name, proc) in watchdog_threadandsignal.iter() {
