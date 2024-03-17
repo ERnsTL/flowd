@@ -63,5 +63,9 @@ redis = { version = "*", default-features = false }
 imap = "2.4.1"
 native-tls = "0.2.11"
 
+# for OpenAIChatComponent
+openai = "1.0.0-alpha.14"
+#tokio = "1.36.0"
+
 [[bin]]
 name = "flowd-rs"
