@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, thread};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 use openai::chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole};
@@ -26,7 +26,7 @@ impl Component for OpenAIChatComponent {
 
     fn run(self) {
         debug!("OpenAIChat is now run()ning!");
-        let conf = self.conf;
+        let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
@@ -38,12 +38,72 @@ impl Component for OpenAIChatComponent {
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // get configuration arguments
-        let url = url::Url::parse(&url).expect("failed to parse configuration URL");
-        //### let args = url
-        //### let api_key = 
+        let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
+        let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        // get API key
+        let api_key;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "apikey") {
+            api_key = value.to_string();
+        } else {
+            error!("no API key found in configuration URL - exiting");
+            return;
+        }
+        // get model
+        let model;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "model") {
+            model = value.to_string();  //TODO optimize and use &str
+        } else {
+            trace!("no model found in configuration URL - assuming default");
+            model = "gpt-3.5-turbo".to_owned();
+        }
+        // get context
+        let context: bool;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "context") {
+            context = value.parse().expect("could not parse context value in configuration URL as boolean");
+        } else {
+            trace!("no context found in configuration URL - assuming default");
+            context = false;
+        }
+        // get initial prompt
+        let initialprompt: bool;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "initialprompt") {
+            initialprompt = value.parse().expect("could not parse initialprompt value in configuration URL as boolean");
+        } else {
+            trace!("no initial prompt found in configuration URL - assuming default");
+            initialprompt = false;
+        }
 
         // set configuration
+        // set API key
         openai::set_key(api_key);
+        // set base URL
+        if url.host_str().expect("no host in URL") != "default" {
+            let base_url = url.scheme().to_owned() + "://" + url.host_str().expect("no host in URL") + url.path();
+            openai::set_base_url(base_url);
+        } else {
+            debug!("using default base URL for OpenAI API");
+        }
+        // set initial prompt
+        let mut messages = vec![];
+        debug!("waiting for initial prompt IP");
+        if initialprompt {
+            // read initial prompt from inport
+            loop {
+                if let Ok(ip) = inn.pop() {
+                    let initialprompt_str = String::from_utf8(ip).expect("invalid utf-8");
+                    // set initial prompt
+                    messages.push(ChatCompletionMessage {
+                        role: ChatCompletionMessageRole::System,
+                        content: Some(initialprompt_str),
+                        name: None,
+                        function_call: None,
+                    });
+                    break;
+                } else {
+                    thread::yield_now();
+                }
+            }
+        }
 
         // main loop
         loop {
@@ -67,47 +127,43 @@ impl Component for OpenAIChatComponent {
             // check in port
             loop {
                 if let Ok(ip) = inn.pop() {
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
+                    debug!("got a packet, sending to AI...");
+                    let user_message_content = String::from_utf8(ip).expect("invalid utf-8 in IP");
+
+                    // put into context, if desired
+                    if context {
+                        messages.push(ChatCompletionMessage {
+                            role: ChatCompletionMessageRole::User,
+                            content: Some(user_message_content),
+                            name: None,
+                            function_call: None,
+                        });
+                    } else {
+                        messages = vec![ChatCompletionMessage {
+                            role: ChatCompletionMessageRole::User,
+                            content: Some(user_message_content),
+                            name: None,
+                            function_call: None,
+                        }];
+                    }
+
+                    // build request
+                    let chat_completion = ChatCompletion::builder(&model, messages.clone()).create();
+                    // send request and wait for result
+                    let returned_message_res = tokio::runtime::Runtime::new().unwrap().block_on(chat_completion); //TODO optimize
+                    let returned_message_inner = returned_message_res.expect("failed to get OpenAI response");
+                    let returned_message_inner2 = &returned_message_inner.choices[0];
+                    let returned_message_inner3 = &returned_message_inner2.message;
+                    // add returned message into context
+                    if context {
+                        messages.push(returned_message_inner3.clone());
+                    }
+                    let returned_message = returned_message_inner3.content.as_ref().expect("no content in returned message");
+
+                    // send response to out port
+                    out.push(returned_message.as_bytes().to_vec()).expect("could not push into OUT");   //TODO optimize - avoid copy, why isnt it possible to just get the message from the returned chat completion?
                     out_wakeup.unpark();
                     debug!("done");
-
-                    //###
-                    // initial prompt
-                    /*
-                    let mut messages = vec![ChatCompletionMessage {
-                        role: ChatCompletionMessageRole::System,
-                        content: Some("You are a large language model built into a command line interface as an example of what the `openai` Rust library made by Valentine Briese can do.".to_string()),
-                        name: None,
-                        function_call: None,
-                    }];
-                    */
-                    let mut messages = vec![];
-                
-                    let user_message_content = "Tell me what OS/2 is in 1 sentence.".to_owned();
-                
-                    //stdin().read_line(&mut user_message_content).unwrap();
-                    messages.push(ChatCompletionMessage {
-                        role: ChatCompletionMessageRole::User,
-                        content: Some(user_message_content),
-                        name: None,
-                        function_call: None,
-                    });
-                
-                    let chat_completion = ChatCompletion::builder("gpt-3.5-turbo", messages.clone())
-                        .create()
-                        .await
-                        .unwrap();
-                    let returned_message = chat_completion.choices.first().unwrap().message.clone();
-                
-                    println!(
-                        "{:#?}: {}",
-                        &returned_message.role,
-                        &returned_message.content.clone().unwrap().trim()
-                    );
-                
-                    // add returned message into context
-                    //messages.push(returned_message);
                 } else {
                     break;
                 }
@@ -131,8 +187,8 @@ impl Component for OpenAIChatComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("OpenAIChat"),
-            description: String::from("Copies data as-is from IN port to OUT port."),//###
-            icon: String::from("arrow-right"),
+            description: String::from("Sends IPs to an OpenAI model via the Chat API - the most popular being ChatGPT - and sends the AI response as a potentially multi-line IP to the outport."),
+            icon: String::from("wechat"), // robot would be best, but there is no such icon in free font-awesome
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
@@ -141,9 +197,9 @@ impl Component for OpenAIChatComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options"),  //###
+                    description: String::from("connection URL which includes options in the query string"),
                     values_allowed: vec![],
-                    value_default: String::from("?key=val")
+                    value_default: String::from("https://default/?apikey=xxx&model=gpt-3.5-turbo&context=false&initialprompt=false"),
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -151,7 +207,7 @@ impl Component for OpenAIChatComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("data to be repeated on outport"),//###
+                    description: String::from("chat prompts from the user"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -163,7 +219,7 @@ impl Component for OpenAIChatComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("repeated data from IN port"),//###
+                    description: String::from("response chat completion message"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
