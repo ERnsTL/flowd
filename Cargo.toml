@@ -65,7 +65,7 @@ native-tls = "0.2.11"
 
 # for OpenAIChatComponent
 openai = "1.0.0-alpha.14"
-#tokio = "1.36.0"
+tokio = "1.36.0"
 
 [[bin]]
 name = "flowd-rs"
