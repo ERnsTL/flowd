@@ -199,7 +199,7 @@ impl Component for OpenAIChatComponent {
                     is_arrayport: false,
                     description: String::from("connection URL which includes options in the query string"),
                     values_allowed: vec![],
-                    value_default: String::from("https://default/?apikey=xxx&model=gpt-3.5-turbo&context=false&initialprompt=false"),
+                    value_default: String::from("https://default/?apikey=xxx&model=gpt-3.5-turbo&context=false&initialprompt=false"),   //TODO can this be minimized for the default base URL case? I tried but got RelativeUrlWithoutBase https://github.com/servo/rust-url/blob/e654efb9c19732f680f14db43a673a726b834f42/url/src/parser.rs#L384
                 },
                 ComponentPort {
                     name: String::from("IN"),
