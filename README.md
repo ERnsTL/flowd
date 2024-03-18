@@ -204,7 +204,7 @@ Everything else:
 * Redis Pub/Sub subscriber
 * IMAP e-mail append (sender)
 * IMAP e-mail fetch+idle (receiver)
-* OpenAI Chat API component ("ChatGPT component")
+* OpenAI Chat component ("ChatGPT component")
 
 TODO:
 
