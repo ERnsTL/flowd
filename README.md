@@ -205,6 +205,7 @@ Everything else:
 * IMAP e-mail append (sender)
 * IMAP e-mail fetch+idle (receiver)
 * OpenAI Chat component ("ChatGPT component")
+* Tera template component, which includes control flow and logic usable for simple scripts
 
 TODO:
 
