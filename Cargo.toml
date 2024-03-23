@@ -70,5 +70,15 @@ tokio = "1.36.0"
 # for TeraTemplateComponent
 tera = "1.0"
 
+# for FileTailer
+#fs-tail = "0.1.4"
+#timeout-iterator = { version = "1.1.7", default-features = false, features = ["sync"] }
+#chase = "0.1.8"
+# ^ not possible to start tailing at end of file, wtf:  https://github.com/lloydmeta/chase-rs/issues/4
+#logwatcher = "0.1"
+# ^ uses callback, which necessitates a separate thread and
+# the callback cannot control that thread, so the callback cannot signal "stop tailing", also not the forks
+staart = "0.7"
+
 [[bin]]
 name = "flowd-rs"
