@@ -47,7 +47,7 @@ use components::drop::DropComponent;
 use components::output::OutputComponent;
 use components::libcomponent::LibComponent;
 use components::unixsocketserver::UnixSocketServerComponent;
-use components::filereader::FileReaderComponent;
+use components::file::FileReaderComponent;
 use components::trim::TrimComponent;
 use components::splitlines::SplitLinesComponent;
 use components::count::CountComponent;

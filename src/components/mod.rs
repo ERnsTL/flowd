@@ -4,7 +4,7 @@ pub mod output;
 
 pub mod libcomponent;
 pub mod unixsocketserver;
-pub mod filereader;
+pub mod file;
 pub mod trim;
 pub mod splitlines;
 pub mod count;
