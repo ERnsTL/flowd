@@ -47,7 +47,7 @@ use components::drop::DropComponent;
 use components::output::OutputComponent;
 use components::libcomponent::LibComponent;
 use components::unixsocketserver::UnixSocketServerComponent;
-use components::file::FileReaderComponent;
+use components::file::{FileReaderComponent, FileTailerComponent};
 use components::trim::TrimComponent;
 use components::splitlines::SplitLinesComponent;
 use components::count::CountComponent;
@@ -121,6 +121,7 @@ fn main() {
         IMAPFetchIdleComponent::get_metadata(),
         OpenAIChatComponent::get_metadata(),
         TeraTemplateComponent::get_metadata(),
+        FileTailerComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1832,6 +1833,7 @@ impl RuntimeRuntimePayload {
                     "IMAPFetchIdle" => { IMAPFetchIdleComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "OpenAIChat" => { OpenAIChatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TeraTemplate" => { TeraTemplateComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "FileTailer" => { FileTailerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
