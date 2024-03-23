@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct FileReaderComponent {
-    inn: ProcessEdgeSource,
+    conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
@@ -12,7 +12,7 @@ pub struct FileReaderComponent {
 impl Component for FileReaderComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         FileReaderComponent {
-            inn: inports.remove("NAMES").expect("found no NAMES inport").pop().unwrap(),
+            conf: inports.remove("NAMES").expect("found no NAMES inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -22,7 +22,7 @@ impl Component for FileReaderComponent {
 
     fn run(self) {
         debug!("FileReader is now run()ning!");
-        let mut filenames = self.inn;
+        let mut filenames = self.conf;
         let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
