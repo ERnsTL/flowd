@@ -206,6 +206,7 @@ Everything else:
 * IMAP e-mail fetch+idle (receiver)
 * OpenAI Chat component ("ChatGPT component")
 * Tera template component, which includes control flow and logic usable for simple scripts
+* File tailing resp. following including detection of replaced or truncated file
 
 TODO:
 
@@ -223,7 +224,6 @@ TODO (copy from Go version):
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
 * File writing
-* File tailing resp. following
 * Modification of frame headers (via sexp objects using brackets)
 * Extraction of data from frame body using regular expressions
 * Routing based on frame contents or header values (sexp objects using brackets)
