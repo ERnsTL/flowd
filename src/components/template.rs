@@ -112,7 +112,7 @@ impl Component for TeraTemplateComponent {
         ComponentComponentPayload {
             name: String::from("TeraTemplate"),
             description: String::from("Sends IPs through the template given on TEMPLATE and the rendered result to the outport."),
-            icon: String::from("file-text"),    //### or file-text-o
+            icon: String::from("file-text-o"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
