@@ -9,9 +9,16 @@ pub struct CountComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+enum Mode {
+    Packets,
+    Size,
+    Sum,
+}
+
 impl Component for CountComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
         CountComponent {
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
@@ -22,9 +29,40 @@ impl Component for CountComponent {
 
     fn run(self) {
         debug!("Count is now run()ning!");
+        let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+
+        // read configuration
+        trace!("read config IP");
+        /*
+        while conf.is_empty() {
+            thread::yield_now();
+        }
+        */
+        let Ok(url_vec) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let url_str = "https://makeurlhappy/?".to_owned() + std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        let url = url::Url::parse(url_str.as_str()).expect("failed to parse configuration URL");
+        let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        // get API key
+        let mode: Mode;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "mode") {
+            match value.to_string().as_str() {   //TODO optimize
+                "packets" => { mode = Mode::Packets; }
+                "size" => { mode = Mode::Size; }
+                "sum" => { mode = Mode::Sum; }
+                _ => { error!("unexpected mode, expected packets|size|sum - exiting"); return; }
+            }
+        } else {
+            error!("no mode found in configuration URL - exiting");
+            return;
+        }
+
+        // configure
+        // mode already configured
+
+        // main loop
         let mut packets: usize = 0;
         let start = chrono::Utc::now();
         let mut start_1st = chrono::Utc::now();
@@ -87,10 +125,20 @@ impl Component for CountComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("Count"),
-            description: String::from("Counts the number of packets, discarding them, and sending the packet count every 1M packets."), //TODO
+            description: String::from("Counts the number of packets, total size of IPs or sums the amounts contained in IPs, discards them and sends the count every 1M packets."), //TODO make configurable
             icon: String::from("bar-chart"),
             subgraph: false,
             in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("IPs to count"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                },
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
