@@ -82,3 +82,6 @@ tera = "1.0"
 # ^ uses callback, which necessitates a separate thread and
 # the callback cannot control that thread, so the callback cannot signal "stop tailing", also not the forks
 staart = "0.7"
+
+# for RegexpExtractComponent
+regex = "1.10"
