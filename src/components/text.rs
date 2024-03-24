@@ -35,6 +35,8 @@ impl Component for TextReplaceComponent {
         // read configuration
         trace!("read config IPs");
         let mut replacements: Vec<(String, String)> = Vec::new();
+        // NOTE: this condition ensures that when the inport is abandoned, we still process the remaining replacements
+        // and any remaining single one is ignored, eg. the usual last line in a text file on Unix-like systems
         while !conf.is_abandoned() || conf.slots() >= 2 {
             // wait for packet
             while conf.is_empty() {
@@ -50,7 +52,6 @@ impl Component for TextReplaceComponent {
             }
         }
         trace!("got text replacements: {}", replacements.len());
-        //TODO how is the last empty line in a text file with replacements handled?
 
         // configure
         // NOTE: nothing to be done here
