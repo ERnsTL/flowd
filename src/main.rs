@@ -24,8 +24,6 @@ use multimap::MultiMap;
 
 use chrono::prelude::*;
 
-use rtrb;
-
 
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
