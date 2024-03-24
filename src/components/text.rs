@@ -83,6 +83,8 @@ impl Component for TextReplaceComponent {
                     debug!("got a text to process: {}", text);
 
                     // apply text replacements
+                    //TODO feature - add version using regular expressions
+                    //TODO feature - add search and replacement of \r, \n, \t etc. as well
                     for replacement in &replacements {
                         text = text.replace(replacement.0.as_str(), replacement.1.as_str());    //TODO optimize - better &String or String.as_str() ?
                     }
