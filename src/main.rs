@@ -63,6 +63,7 @@ use components::redis::{RedisPublisherComponent, RedisSubscriberComponent};
 use components::imap::{IMAPAppendComponent, IMAPFetchIdleComponent};
 use components::openai::OpenAIChatComponent;
 use components::template::TeraTemplateComponent;
+use components::regexp::RegexpExtractComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -122,6 +123,7 @@ fn main() {
         OpenAIChatComponent::get_metadata(),
         TeraTemplateComponent::get_metadata(),
         FileTailerComponent::get_metadata(),
+        RegexpExtractComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1834,6 +1836,7 @@ impl RuntimeRuntimePayload {
                     "OpenAIChat" => { OpenAIChatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TeraTemplate" => { TeraTemplateComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "FileTailer" => { FileTailerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "RegexpExtract" => { RegexpExtractComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
