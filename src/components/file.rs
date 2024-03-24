@@ -4,6 +4,10 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 // component-specific for FileTailer
 use std::time::Duration;
 use staart::TailedFile;
+// component-specific for FileWriter
+use std::io::prelude::*;
+use std::io::BufWriter;
+use std::fs::File;
 
 pub struct FileReaderComponent {
     conf: ProcessEdgeSource,
@@ -248,6 +252,131 @@ impl Component for FileTailerComponent {
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
+            ],
+            ..Default::default()
+        }
+    }
+}
+
+pub struct FileWriterComponent {
+    conf: ProcessEdgeSource,
+    inn: ProcessEdgeSource,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+}
+
+const BUFFER_SIZE: usize = 65536;
+
+impl Component for FileWriterComponent {
+    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+        FileWriterComponent {
+            conf: inports.remove("CONF").expect("found no NAMES inport").pop().unwrap(),
+            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            signals_in: signals_in,
+            signals_out: signals_out,
+            //graph_inout: graph_inout,
+        }
+    }
+
+    fn run(self) {
+        debug!("FileWriter is now run()ning!");
+        let mut conf = self.conf;
+        let mut inn = self.inn;
+
+        // read configuration
+        trace!("read config IP");
+        /*
+        while conf.is_empty() {
+            thread::yield_now();
+        }
+        */
+        let Ok(file_name) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+
+        // configure
+        //TODO make file creating/overwriting or appending configurable via URL
+        //TODO change filename into URL format for configuration
+        let mut buffer = BufWriter::with_capacity(BUFFER_SIZE, File::create(std::str::from_utf8(&file_name).expect("failed to parse filename as UTF-8")).expect("failed to open-create given file"));
+
+        // main loop
+        loop {
+            trace!("begin of iteration");
+            // check signals
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals_in.try_recv() {
+                //TODO optimize string conversions
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                // stop signal
+                if ip == b"stop" {   //TODO optimize comparison
+                    info!("got stop signal, exiting");
+                    break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
+
+            // check in port
+            while !inn.is_empty() {
+                // read IPs and write them
+                if let Ok(chunk) = inn.read_chunk(inn.slots()) {
+                    debug!("got {} packets", chunk.len());
+
+                    for ip in chunk.into_iter() {
+                        buffer.write(ip.as_slice()).expect("failed to write IP into buffer");
+                    }
+                    // NOTE: no need for commit_all(), because into_iter() does that automatically
+
+                    buffer.flush().expect("failed to flush buffer into file");
+                } else {
+                    break;
+                }
+            }
+
+            // check for EOF on input
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                // NOTE: no outport to drop here, no downstream process to notify
+                break;
+            }
+
+            trace!("-- end of iteration");
+            std::thread::park();
+        }
+        info!("exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("FileWriter"),
+            description: String::from("Writes the contents of received IPs to the given file."),
+            icon: String::from("file"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("filename, one IP"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                },
+                ComponentPort {
+                    name: String::from("IN"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("data to be written to the given file"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
             ],
             ..Default::default()
         }
