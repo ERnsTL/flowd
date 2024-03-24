@@ -45,7 +45,7 @@ use components::drop::DropComponent;
 use components::output::OutputComponent;
 use components::libcomponent::LibComponent;
 use components::unixsocketserver::UnixSocketServerComponent;
-use components::file::{FileReaderComponent, FileTailerComponent};
+use components::file::{FileReaderComponent, FileTailerComponent, FileWriterComponent};
 use components::trim::TrimComponent;
 use components::splitlines::SplitLinesComponent;
 use components::count::CountComponent;
@@ -122,6 +122,7 @@ fn main() {
         TeraTemplateComponent::get_metadata(),
         FileTailerComponent::get_metadata(),
         RegexpExtractComponent::get_metadata(),
+        FileWriterComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1835,6 +1836,7 @@ impl RuntimeRuntimePayload {
                     "TeraTemplate" => { TeraTemplateComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "FileTailer" => { FileTailerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "RegexpExtract" => { RegexpExtractComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "FileWriter" => { FileWriterComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
