@@ -190,7 +190,7 @@ Everything else:
 * File reader
 * Trim for removing trailing and heading whitespace
 * Split lines
-* Count for packets
+* Count for packets, size of packets and sum of packet values
 * Cron for time-based events, with extended 7-parameter form and granularity up to seconds
 * Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc. The sub-process commandline with arguments can be configured. TODO add more info about the features of this component
 * Hasher for calculating hash value of packets, supports xxHash64
