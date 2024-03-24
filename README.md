@@ -211,30 +211,36 @@ Everything else:
 * Regexp data extraction component
 * Text replacement
 
-TODO:
-
-* brackets using OOB marker
-* filtering on object structures in sexp fashion
-* "XPath"-like filtering on sexp object structures
-* building of header (K/V) and body structure in sexp fashion - then it is on par with Go and JavaFBP implementation
-
-TODO (copy from Go version):
+TODO components:
 
 * TCP client and server
 * Unix domain client (abstract and path-based)
 * TLS client and server
 * SSH client (without using OpenSSH client)
-* Bridges between different network parts, and thus...
-* Distribution of the network across multiple machines
-* Modification of frame headers (via sexp objects using brackets)
-* Routing based on frame contents or header values (sexp objects using brackets)
-* Counter for packet sizes and packets matching by header field (on sexp objects)
-* Example login prompt and command-line interaction component
-* Example terminal UI component sending messages into the network
 * Compression and decompression in XZ/LZMA2 and Brotli formats
-* Load balancing components with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * WebSocket server and client with retry on connection establishment
+
+TODO connection, disconnection and reconnection (0.4 milestone):
+
+* Load balancing components with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
+* Bridges between different network parts, and thus...
+* Distribution of the network across multiple machines
+
+TODO objects (0.5 milestone):
+
+* brackets using OOB marker
+* filtering on object structures in sexp fashion
+* "XPath"-like filtering on sexp object structures
+* building of header (K/V) and body structure in sexp fashion - then it is on par with Go and JavaFBP implementation
+* Modification of frame headers (via sexp objects using brackets)
+* Routing based on frame contents or header values (sexp objects using brackets)
+* Counter packets matching by header field (on sexp objects)
+
+TODO interaction components (0.7 milestone):
+
+* Example login prompt and command-line interaction component
+* Example terminal UI component sending messages into the network
 
 
 ## Next Steps
