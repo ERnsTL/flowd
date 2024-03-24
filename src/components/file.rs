@@ -248,7 +248,7 @@ impl Component for FileTailerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("conents of the given file"),
+                    description: String::from("contents of the given file(s)"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
