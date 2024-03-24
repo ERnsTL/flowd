@@ -188,6 +188,8 @@ Everything else:
 * LibComponent (work in progress - for loading components from C API libraries)
 * Unix domain socket server, TODO support for abstract address
 * File reader
+* File tailing resp. following including detection of replaced or truncated file
+* File writer
 * Trim for removing trailing and heading whitespace
 * Split lines
 * Count for packets, size of packets and sum of packet values
@@ -206,7 +208,6 @@ Everything else:
 * IMAP e-mail fetch+idle (receiver)
 * OpenAI Chat component ("ChatGPT component")
 * Tera template component, which includes control flow and logic usable for simple scripts
-* File tailing resp. following including detection of replaced or truncated file
 * Regexp data extraction component
 
 TODO:
@@ -224,7 +225,6 @@ TODO (copy from Go version):
 * SSH client (without using OpenSSH client)
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
-* File writing
 * Modification of frame headers (via sexp objects using brackets)
 * Routing based on frame contents or header values (sexp objects using brackets)
 * Counter for packet sizes and packets matching by header field (on sexp objects)
