@@ -73,7 +73,7 @@ tokio = "1.36.0"
 # for TeraTemplateComponent
 tera = "1.0"
 
-# for FileTailer
+# for FileTailerComponent
 #fs-tail = "0.1.4"
 #timeout-iterator = { version = "1.1.7", default-features = false, features = ["sync"] }
 #chase = "0.1.8"
