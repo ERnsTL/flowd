@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 pub struct CountComponent {
+    conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
@@ -64,6 +65,8 @@ impl Component for CountComponent {
 
         // main loop
         let mut packets: usize = 0;
+        let mut packetsize: usize = 0;
+        let mut sum: u64 = 0; //TODO count u64 or f64?
         let start = chrono::Utc::now();
         let mut start_1st = chrono::Utc::now();
         loop {
@@ -96,8 +99,32 @@ impl Component for CountComponent {
                 // drop IP and count it
                 if let Ok(chunk) = inn.read_chunk(inn.slots()) {
                     //debug!("got {} packets", chunk.len());
-                    packets += chunk.len();
-                    chunk.commit_all();
+                    //TODO optimize - instead of if on every IP, prepare Fn and apply it without branching
+                    match mode {
+                        Mode::Packets => {
+                            packets += chunk.len();
+                            chunk.commit_all();
+                        }
+                        Mode::Size => {
+                            for ip in chunk.into_iter() {
+                                packetsize += ip.len();
+                            }
+                            // NOTE: no need for commit_all(), because into_iter() does that automatically
+                        },
+                        Mode::Sum => {
+                            for ip in chunk {  //TODO optimize - is into_iter() optimal?
+                                // convert ip value to numeric type and add it
+                                //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse-number-from-u8/104487/8
+                                //TODO optimize - atoi_simd crate
+                                if let Some(value) = atoi::atoi::<u64>(&ip) {
+                                    sum += value;
+                                } else {
+                                    error!("value if IP cannot be summed up: {:?} - skipping", ip);
+                                }
+                            }
+                            // NOTE: no need for commit_all(), because into_iter() does that automatically
+                        },
+                    }
                     // TODO optimize, when we got a full buffer, we could assume there is more coming and wait a bit longer
                 } else {
                     break;
@@ -109,8 +136,14 @@ impl Component for CountComponent {
                 // send final report
                 info!("EOF on inport, shutting down");
                 let end = chrono::Utc::now();
-                info!("received {} packets, total time: {}, since 1st packet: {}", packets, end - start, end - start_1st);
-                out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT");   //TODO optimize https://docs.rs/itoa/latest/itoa/
+
+                info!("total time: {}, since 1st packet: {}", end - start, end - start_1st);
+                match mode {
+                    //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
+                    Mode::Packets => { out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT"); },
+                    Mode::Size => { out.push(format!("{}", packetsize).into_bytes()).expect("could not push into OUT"); },
+                    Mode::Sum => { out.push(format!("{}", sum).into_bytes()).expect("could not push into OUT"); },
+                };
                 drop(out);
                 out_wakeup.unpark();
                 break;
