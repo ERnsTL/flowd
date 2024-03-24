@@ -209,6 +209,7 @@ Everything else:
 * OpenAI Chat component ("ChatGPT component")
 * Tera template component, which includes control flow and logic usable for simple scripts
 * Regexp data extraction component
+* Text replacement
 
 TODO:
 
