@@ -114,7 +114,7 @@ impl Component for FileReaderComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("conents of the given files"),
+                    description: String::from("contents of the given file(s)"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -248,7 +248,7 @@ impl Component for FileTailerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("contents of the given file(s)"),
+                    description: String::from("contents of the given file"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
