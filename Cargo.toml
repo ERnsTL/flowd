@@ -7,6 +7,9 @@ license = "LGPL-3.0-or-later"
 description = "inter-language runtime for Flow-based Programming (FBP)"
 edition = "2018"
 
+[[bin]]
+name = "flowd-rs"
+
 [dependencies]
 # remove logging level output more detailed than certain level, at compile-time (!)
 log = {version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
@@ -79,6 +82,3 @@ tera = "1.0"
 # ^ uses callback, which necessitates a separate thread and
 # the callback cannot control that thread, so the callback cannot signal "stop tailing", also not the forks
 staart = "0.7"
-
-[[bin]]
-name = "flowd-rs"
