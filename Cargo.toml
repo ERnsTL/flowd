@@ -87,5 +87,9 @@ tera = "1.0"
 # the callback cannot control that thread, so the callback cannot signal "stop tailing", also not the forks
 staart = "0.7"
 
+# for ZeroconfResponderComponent and ZeroconfQueryComponent
+simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
+#mdns-sd = "0.10.4"
+
 # for RegexpExtractComponent
 regex = "1.10"
