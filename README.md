@@ -294,6 +294,25 @@ Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesou
 * [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
 
 
+## Goals in General
+
+To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
+
+* Reliability and Robustness: The FBP runtime should be stable and reliable to ensure uninterrupted execution of critical applications. It should be able to handle errors robustly to avoid or at least minimize failures.
+
+* Scalability: The runtime environment should be capable of handling growing demands and workloads to ensure efficient execution of applications. This may involve scaling vertically (on larger machines) or horizontally (by adding more instances).
+
+* Monitoring and Debugging: There should be mechanisms for monitoring and troubleshooting to analyze performance, identify bottlenecks, and debug issues. This can be achieved through logging, dashboards, tracing, and other tools.
+
+* Security: The runtime environment should provide security mechanisms to ensure data integrity, confidentiality, and availability. This may include authentication, authorization, encryption, and protection against attacks such as injection attacks and denial-of-service attacks.
+
+* Transaction Support: It is important that the FBP runtime supports transactions to ensure data consistency and meet the Atomicity, Consistency, Isolation, and Durability (ACID) properties.
+
+* Integration: The runtime environment should seamlessly integrate with other systems and services to support data flows between different applications, platforms, and external services. This can be done through APIs, protocols such as HTTP, messaging systems, and other mechanisms.
+
+* Documentation and Support: Comprehensive documentation and supportive community can help increase developer productivity and efficiently solve issues. A good FBP runtime should have clear documentation, tutorials, examples, and support channels.
+
+By fulfilling these characteristics, an FBP runtime environment can be made suitable for production and reliable applications to support stable, scalable, and reliable workflows.
 
 
 
