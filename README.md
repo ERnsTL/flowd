@@ -211,6 +211,7 @@ Everything else:
 * Regexp data extraction component
 * Text replacement
 * Compression and decompression in XZ (LZMA2) format
+* Compression and decompression in Brotli format
 
 TODO components:
 
@@ -218,7 +219,6 @@ TODO components:
 * Unix domain client (abstract and path-based)
 * TLS client and server
 * SSH client (without using OpenSSH client)
-* Compression and decompression in Brotli format
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * WebSocket server and client with retry on connection establishment
 
