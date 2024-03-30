@@ -3,7 +3,7 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 
 // component-specific
 use std::io::prelude::*;
-use brotli::CompressorWriter;
+use brotli::{CompressorWriter, DecompressorWriter};
 
 pub struct BrotliCompressComponent {
     //conf: ProcessEdgeSource,
@@ -226,21 +226,21 @@ impl Component for BrotliDecompressComponent {
                     // nothing to do
 
                     // decompress
-                    //###
                     //TODO optimize - currently, every packet is processed with a new Decoder instance
                     //TODO support for chunks via open bracket, closing bracket
-                    /*
-                    let vec_buf = Vec::new();
-                    let mut decompressor = XzDecoder::new(vec_buf);
-                    decompressor.write(&ip).expect("failed to write into decoder");
-                    debug!("decompression: {} bytes in, {} bytes out", decompressor.total_in(), decompressor.total_out());
-                    let vec_out = decompressor.finish().expect("failed to finish decoding");
-                    */
+                    let mut vec_out = Vec::new();
+                    let mut writer = DecompressorWriter::new(
+                        &mut vec_out,
+                        BROTLI_BUFFER_SIZE
+                        );
+                    writer.write(&ip).expect("failed to write into decompressor");
+                    //TODO is that flush necessary or will it do that automatically during drop?
+                    writer.flush().expect("failed to flush decompressor into output buffer");
+                    drop(writer);   // so that vec_out output buffer becomes un-borrowed and can be sent
                     
                     // send it
                     debug!("sending...");
-                    //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(ip).expect("could not push into OUT");
+                    out.push(vec_out).expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
