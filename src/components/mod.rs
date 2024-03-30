@@ -24,3 +24,4 @@ pub mod regexp;
 pub mod text;
 pub mod zeroconf;
 pub mod xz;
+pub mod brotli;
