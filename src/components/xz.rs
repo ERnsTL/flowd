@@ -74,14 +74,16 @@ impl Component for XzCompressComponent {
 
                     // compress
                     //TODO optimize - currently, every packet is processed with a new Encoder instance
+                    //TODO support for chunks via open bracket, closing bracket
                     let vec_buf = Vec::new();
                     let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
                     compressor.write(&ip).expect("failed to write into encoder");
+                    //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
                     debug!("compression: {} bytes in, {} bytes out", compressor.total_in(), compressor.total_out());
                     let vec_out = compressor.finish().expect("failed to finish encoding");
 
                     // send it
-                    debug!("forwarding...");
+                    debug!("sending...");
                     out.push(vec_out).expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
@@ -107,8 +109,8 @@ impl Component for XzCompressComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("XzCompress"),
-            description: String::from("Reads IPs as UTF-8 strings, applies text replacements and forwards the processed string IPs."),  //###
-            icon: String::from("cut"),  //###
+            description: String::from("Reads data IPs, compresses each using XZ (LZMA2) and sends the compressed data to the OUT port."),
+            icon: String::from("compress"),
             subgraph: false,
             in_ports: vec![
                 /*
@@ -129,7 +131,7 @@ impl Component for XzCompressComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("string IPs to process"),
+                    description: String::from("IPs to compress"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -141,7 +143,7 @@ impl Component for XzCompressComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("IPs with strings, replacements applied"),
+                    description: String::from("compressed IPs"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -213,35 +215,22 @@ impl Component for XzDecompressComponent {
             loop {
                 if let Ok(ip) = inn.pop() {
                     // prepare packet
-                    // nothing to do
                     debug!("got a packet, decompressing...");
+                    // nothing to do
 
-                    // decompress //###
-                    //TODO optimize - currently, every packet is processed with a new Encoder instance
+                    // decompress
+                    //TODO optimize - currently, every packet is processed with a new Decoder instance
+                    //TODO support for chunks via open bracket, closing bracket
                     let vec_buf = Vec::new();
-                    let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
-                    compressor.write(&ip).expect("failed to write into encoder");
-                    debug!("decompression: {} bytes in, {} bytes out", compressor.total_in(), compressor.total_out());
-                    let vec_out = compressor.finish().expect("failed to finish encoding");
-
+                    let mut decompressor = XzDecoder::new(vec_buf);
+                    decompressor.write(&ip).expect("failed to write into decoder");
+                    debug!("decompression: {} bytes in, {} bytes out", decompressor.total_in(), decompressor.total_out());
+                    let vec_out = decompressor.finish().expect("failed to finish decoding");
                     
-                    // Round trip some bytes from a byte source, into a compressor, into a
-                    // decompressor, and finally into a vector.
-                    /*
-                    let data = "Hello, World!".as_bytes();
-                    let compressor = XzEncoder::new(data, 9);
-                    let mut decompressor = XzDecoder::new(compressor);
-
-                    let mut contents = String::new();
-                    decompressor.read_to_string(&mut contents).unwrap();
-                    assert_eq!(contents, "Hello, World!");
-                    */
-                    //###
-
                     // send it
                     debug!("sending...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(ip).expect("could not push into OUT");
+                    out.push(vec_out).expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -266,8 +255,8 @@ impl Component for XzDecompressComponent {
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
             name: String::from("XzDecompress"),
-            description: String::from("Reads IPs as UTF-8 strings, applies text replacements and forwards the processed string IPs."),  //###
-            icon: String::from("cut"),  //###
+            description: String::from("Reads IPs, applies XZ (LZMA2) decompression and forwards the decompressed data to OUT port."),
+            icon: String::from("expand"),
             subgraph: false,
             in_ports: vec![
                 /*
@@ -288,7 +277,7 @@ impl Component for XzDecompressComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("string IPs to process"),
+                    description: String::from("compressed XZ data"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -300,7 +289,7 @@ impl Component for XzDecompressComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("IPs with strings, replacements applied"),
+                    description: String::from("decompressed data"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
