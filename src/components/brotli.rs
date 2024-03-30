@@ -2,7 +2,8 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-//use std::io::prelude::*;
+use std::io::prelude::*;
+use brotli::CompressorWriter;
 
 pub struct BrotliCompressComponent {
     //conf: ProcessEdgeSource,
@@ -13,7 +14,9 @@ pub struct BrotliCompressComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
-const COMPRESSION_LEVEL: u32 = 9;   //TODO maybe make configurable
+const BROTLI_BUFFER_SIZE: usize = 4096;
+const BROTLI_QUALITY: u32 = 9;   // 0 to 11 for Rust implementation, C implementation has 0 to 9
+const BROTLI_LG_WINDOW_SIZE: u32 = 22;   // 20 to 22
 
 impl Component for BrotliCompressComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -44,7 +47,7 @@ impl Component for BrotliCompressComponent {
         //let Ok(opts) = conf.pop() else { trace!("no config IP received - exiting"); return; };
 
         // configure
-        // NOTE: nothing to be done here
+        //###let encoder_params = BrotliEncoderParams::default();
 
         // main loop
         loop {
@@ -74,12 +77,16 @@ impl Component for BrotliCompressComponent {
                     // compress//###
                     //TODO optimize - currently, every packet is processed with a new Encoder instance
                     //TODO support for chunks via open bracket, closing bracket
-                    let vec_buf = Vec::new();
-                    let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
-                    compressor.write(&ip).expect("failed to write into encoder");
-                    //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
-                    debug!("compression: {} bytes in, {} bytes out", compressor.total_in(), compressor.total_out());
-                    let vec_out = compressor.finish().expect("failed to finish encoding");
+                    let mut vec_out = Vec::new();
+                    let mut writer = CompressorWriter::new
+                        (&mut vec_out,
+                        BROTLI_BUFFER_SIZE,
+                        BROTLI_QUALITY,
+                        BROTLI_LG_WINDOW_SIZE
+                    );
+                    writer.write(&ip).expect("failed to write into compressor");
+                    writer.flush().expect("failed to flush compressor into output buffer"); // TODO optimize - is the flush necessary or does it do that automatically on drop?
+                    drop(writer);   // so that the vec_out becomes borrow-free
 
                     // send it
                     debug!("sending...");
@@ -221,16 +228,18 @@ impl Component for BrotliDecompressComponent {
                     //###
                     //TODO optimize - currently, every packet is processed with a new Decoder instance
                     //TODO support for chunks via open bracket, closing bracket
+                    /*
                     let vec_buf = Vec::new();
                     let mut decompressor = XzDecoder::new(vec_buf);
                     decompressor.write(&ip).expect("failed to write into decoder");
                     debug!("decompression: {} bytes in, {} bytes out", decompressor.total_in(), decompressor.total_out());
                     let vec_out = decompressor.finish().expect("failed to finish decoding");
+                    */
                     
                     // send it
                     debug!("sending...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(vec_out).expect("could not push into OUT");
+                    out.push(ip).expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
