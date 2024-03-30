@@ -47,7 +47,7 @@ impl Component for BrotliCompressComponent {
         //let Ok(opts) = conf.pop() else { trace!("no config IP received - exiting"); return; };
 
         // configure
-        //###let encoder_params = BrotliEncoderParams::default();
+        // nothing needed here
 
         // main loop
         loop {
@@ -74,7 +74,7 @@ impl Component for BrotliCompressComponent {
                     debug!("got a packet, compressing...");
                     // nothing to do
 
-                    // compress//###
+                    // compress
                     //TODO optimize - currently, every packet is processed with a new Encoder instance
                     //TODO support for chunks via open bracket, closing bracket
                     let mut vec_out = Vec::new();
@@ -85,7 +85,8 @@ impl Component for BrotliCompressComponent {
                         BROTLI_LG_WINDOW_SIZE
                     );
                     writer.write(&ip).expect("failed to write into compressor");
-                    writer.flush().expect("failed to flush compressor into output buffer"); // TODO optimize - is the flush necessary or does it do that automatically on drop?
+                    // TODO optimize - is the flush necessary or does it do that automatically on drop?
+                    writer.flush().expect("failed to flush compressor into output buffer");
                     drop(writer);   // so that the vec_out becomes borrow-free
 
                     // send it
