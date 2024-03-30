@@ -63,7 +63,11 @@ use components::openai::OpenAIChatComponent;
 use components::template::TeraTemplateComponent;
 use components::regexp::RegexpExtractComponent;
 use components::text::TextReplaceComponent;
+<<<<<<< Updated upstream
 use components::zeroconf::ZeroconfResponderComponent;
+=======
+use components::xz::{XzCompressComponent, XzDecompressComponent};
+>>>>>>> Stashed changes
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -127,7 +131,12 @@ fn main() {
         RegexpExtractComponent::get_metadata(),
         FileWriterComponent::get_metadata(),
         TextReplaceComponent::get_metadata(),
+<<<<<<< Updated upstream
         ZeroconfResponderComponent::get_metadata(),
+=======
+        XzCompressComponent::get_metadata(),
+        XzDecompressComponent::get_metadata(),
+>>>>>>> Stashed changes
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1844,6 +1853,8 @@ impl RuntimeRuntimePayload {
                     "FileWriter" => { FileWriterComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TextReplace" => { TextReplaceComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "ZeroconfResponder" => { ZeroconfResponderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "XzCompressComponent" => { XzCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "XzDecompressComponent" => { XzDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }

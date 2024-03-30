@@ -23,3 +23,4 @@ pub mod template;
 pub mod regexp;
 pub mod text;
 pub mod zeroconf;
+pub mod xz;

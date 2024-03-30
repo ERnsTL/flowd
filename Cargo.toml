@@ -93,3 +93,6 @@ simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"]
 
 # for RegexpExtractComponent
 regex = "1.10"
+
+# for XzCompressComponent, XzDecompressComponent
+xz = "0.1"
