@@ -215,12 +215,15 @@ Everything else:
 
 TODO components:
 
-* TCP client and server
+* TCP client
+* TCP server
 * Unix domain client (abstract and path-based)
-* TLS client and server
+* TLS client
+* TLS server
 * SSH client (without using OpenSSH client)
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
-* WebSocket server and client with retry on connection establishment
+* WebSocket server
+* WebSocket client with retry on connection establishment
 
 TODO connection, disconnection and reconnection (0.4 milestone):
 
