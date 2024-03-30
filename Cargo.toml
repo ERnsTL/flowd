@@ -96,3 +96,6 @@ regex = "1.10"
 
 # for XzCompressComponent, XzDecompressComponent
 xz = "0.1"
+
+# for BrotliCompressComponent, BrotliDecompressComponent
+brotli = "3.5"
