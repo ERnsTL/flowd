@@ -153,6 +153,8 @@ impl Component for ZeroconfQueryComponent {
         debug!("channel: {}", channel);
 
         // connect
+        //###
+        /*
         let client = redis::Client::open(url_str).expect("failed to open client");
         let mut connection = client.get_connection().expect("failed to get connection on client");
         let mut pubsub = connection.as_pubsub();
@@ -160,6 +162,7 @@ impl Component for ZeroconfQueryComponent {
         //TODO enable reconnection - or is this done automatically via .iter()?
         pubsub.subscribe(channel).expect("failed to subscribe to channel");
         pubsub.set_read_timeout(RECV_TIMEOUT).expect("failed to set read timeout");    //TODO optimize Some packaging
+        */
 
         // main loop
         loop {
@@ -182,6 +185,8 @@ impl Component for ZeroconfQueryComponent {
             }
 
             // receive packets
+            //###
+            /*
             while let Ok(msg) = pubsub.get_message() {
                 //TODO optimize get_payload() there is some FromRedisType conversion involved
                 let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
@@ -193,6 +198,7 @@ impl Component for ZeroconfQueryComponent {
                 out_wakeup.unpark();
                 debug!("done");
             }
+            */
             //TODO handle Err case - is is temporary error or permanent error?
 
             // are we done?

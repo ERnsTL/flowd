@@ -128,12 +128,9 @@ fn main() {
         RegexpExtractComponent::get_metadata(),
         FileWriterComponent::get_metadata(),
         TextReplaceComponent::get_metadata(),
-<<<<<<< Updated upstream
         ZeroconfResponderComponent::get_metadata(),
-=======
         XzCompressComponent::get_metadata(),
         XzDecompressComponent::get_metadata(),
->>>>>>> Stashed changes
     ])));
     //TODO actually load components
     info!("component library initialized");
