@@ -1847,8 +1847,8 @@ impl RuntimeRuntimePayload {
                     "FileWriter" => { FileWriterComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TextReplace" => { TextReplaceComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "ZeroconfResponder" => { ZeroconfResponderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "XzCompressComponent" => { XzCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "XzDecompressComponent" => { XzDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "XzCompress" => { XzCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "XzDecompress" => { XzDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
