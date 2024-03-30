@@ -210,6 +210,7 @@ Everything else:
 * Tera template component, which includes control flow and logic usable for simple scripts
 * Regexp data extraction component
 * Text replacement
+* Compression and decompression in XZ (LZMA2) format
 
 TODO components:
 
@@ -217,7 +218,7 @@ TODO components:
 * Unix domain client (abstract and path-based)
 * TLS client and server
 * SSH client (without using OpenSSH client)
-* Compression and decompression in XZ/LZMA2 and Brotli formats
+* Compression and decompression in Brotli format
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * WebSocket server and client with retry on connection establishment
 
