@@ -1,6 +1,11 @@
 use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
+// component-specific
+use std::os::unix::net::UnixDatagram;
+use std::io::prelude::*;
+use std::os::unix::net::UnixStream;
+
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
@@ -24,7 +29,6 @@ impl Component for UnixSocketClientComponent {
 
     fn run(self) {
         debug!("UnixSocketClient is now run()ning!");
-        debug!("TextReplace is now run()ning!");
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
@@ -37,7 +41,11 @@ impl Component for UnixSocketClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(file_name) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let Ok(socket_addr) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        //TODO abstract or path-based?
+        //TODO buffer size?
+        //TODO stream or datagram?
+        // -> needs to be an URL
 
         // configure
         // NOTE: nothing to be done here
@@ -78,6 +86,28 @@ impl Component for UnixSocketClientComponent {
 
                 debug!("got {} packets, dropping them.", inn.slots());  //###
                 inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
+
+                //TODO automatic reconnection - reconnect timeout of 30s, then error out.
+
+                //###
+                //let sock = match UnixDatagram::unbound()
+                //TODO bind
+                //TODO connect = bind + connect_addr
+                // unbound -> connect
+                let socket = UnixDatagram::bind("/path/to/my/socket").expect("failed to bind");
+                socket.send_to(b"hello world", "/path/to/other/socket").expect("failed to send");
+                let mut buf = [0; 100];
+                let (count, address) = socket.recv_from(&mut buf).expect("failed to receive");
+                println!("socket {:?} sent {:?}", address, &buf[..count]);
+
+                //TODO stream
+                /*
+                let mut stream = UnixStream::connect("/path/to/my/socket")?;
+                stream.write_all(b"hello world")?;
+                let mut response = String::new();
+                stream.read_to_string(&mut response)?;
+                println!("{response}");
+                 */
             }
 
             // are we done?
