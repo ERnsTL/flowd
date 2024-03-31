@@ -88,6 +88,8 @@ impl Component for UnixSocketClientComponent {
                 inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
 
                 //TODO automatic reconnection - reconnect timeout of 30s, then error out.
+                //TODO which io error is returned for "connection closed because server going offline"?
+                //TODO which io error is returned for "server unreachable"?
 
                 //###
                 //let sock = match UnixDatagram::unbound()
