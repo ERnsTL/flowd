@@ -3,8 +3,13 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 
 // component-specific
 use std::os::unix::net::UnixDatagram;
-use std::io::prelude::*;
+/*
 use std::os::unix::net::UnixStream;
+use std::io::prelude::*;
+*/
+use std::str::FromStr;
+use std::os::unix::net::SocketAddr;
+use std::os::linux::net::SocketAddrExt;
 
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
@@ -13,6 +18,12 @@ pub struct UnixSocketClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+}
+
+//TODO optimize - u8?
+enum SocketType {
+    Datagram,
+    Stream
 }
 
 impl Component for UnixSocketClientComponent {
@@ -31,8 +42,8 @@ impl Component for UnixSocketClientComponent {
         debug!("UnixSocketClient is now run()ning!");
         let mut conf = self.conf;
         let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let _out = self.out.sink;
+        let _out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -41,11 +52,55 @@ impl Component for UnixSocketClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(socket_addr) = conf.pop() else { trace!("no config IP received - exiting"); return; };
-        //TODO abstract or path-based?
-        //TODO buffer size?
+        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+
+        // prepare connection arguments
+        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        let url = url::Url::parse(&url_str).expect("failed to parse URL");
+        let mut query_pairs = url.query_pairs();
+        // get abstract y/n
+        let address_abstract: bool;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "abstract") {
+            address_abstract = std::primitive::bool::from_str(&value).expect("failed to parse query pair value for abstract as true|false");
+        } else {
+            address_abstract = false;
+        }
+        // get address from URL
+        let mut address_str = url.path();
+        if address_str.is_empty() || address_str == "/" {
+            error!("no socket address given in config URL path, exiting");
+            return;
+        }
+        // remove leading slash if abstract
+        if address_abstract {
+            address_str = address_str.trim_start_matches('/');
+        }
+        // prepare socket address
+        let socket_addr: SocketAddr;
+        if address_abstract {
+            socket_addr = SocketAddr::from_abstract_name(address_str).expect("failed to parse abstract socket address into SocketAddr");
+        } else {
+            socket_addr = SocketAddr::from_pathname(address_str).expect("failed to parse path-based socket address into SocketAddr");
+        }
+        // get buffer size from URL
+        let buffer_size: u32;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "buffer") {
+            buffer_size = value.to_string().parse::<u32>().expect("failed to parse query pair value for buffer as integer");
+        } else {
+            buffer_size = 4096;
+        }
         //TODO stream or datagram?
-        // -> needs to be an URL
+        // get socket type from URL
+        let socket_type: SocketType;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "buffer") {
+            socket_type = match value.to_string().as_str() {
+                "dgram"|"datagram" => SocketType::Datagram,
+                "stream" => SocketType::Stream,
+                _ => { panic!("failed to parse query pair value type into dgram|datagram|stream"); }
+            };
+        } else {
+            socket_type = SocketType::Datagram;
+        }
 
         // configure
         // NOTE: nothing to be done here
