@@ -66,6 +66,7 @@ use components::text::TextReplaceComponent;
 use components::zeroconf::ZeroconfResponderComponent;
 use components::xz::{XzCompressComponent, XzDecompressComponent};
 use components::brotli::{BrotliCompressComponent, BrotliDecompressComponent};
+use components::unixsocketclient::UnixSocketClientComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -134,6 +135,7 @@ fn main() {
         XzDecompressComponent::get_metadata(),
         BrotliCompressComponent::get_metadata(),
         BrotliDecompressComponent::get_metadata(),
+        UnixSocketClientComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1854,6 +1856,7 @@ impl RuntimeRuntimePayload {
                     "XzDecompress" => { XzDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "BrotliCompress" => { BrotliCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "BrotliDecompress" => { BrotliDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "UnixSocketClient" => { UnixSocketClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
