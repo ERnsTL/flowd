@@ -135,8 +135,8 @@ impl Component for ZeroconfQueryComponent {
     fn run(self) {
         debug!("ZeroconfQuery is now run()ning!");
         let mut conf = self.conf;
-        let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let _out = self.out.sink;
+        let _wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // check config port
         trace!("read config IP");
