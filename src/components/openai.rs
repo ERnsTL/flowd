@@ -39,10 +39,11 @@ impl Component for OpenAIChatComponent {
 
         // get configuration arguments
         let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
-        let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        //let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
         // get API key
         let api_key;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "apikey") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "apikey") {
             api_key = value.to_string();
         } else {
             error!("no API key found in configuration URL - exiting");
@@ -50,7 +51,7 @@ impl Component for OpenAIChatComponent {
         }
         // get model
         let model;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "model") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "model") {
             model = value.to_string();  //TODO optimize and use &str
         } else {
             trace!("no model found in configuration URL - assuming default");
@@ -58,7 +59,7 @@ impl Component for OpenAIChatComponent {
         }
         // get context
         let context: bool;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "context") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "context") {
             context = value.parse().expect("could not parse context value in configuration URL as boolean");
         } else {
             trace!("no context found in configuration URL - assuming default");
@@ -66,7 +67,7 @@ impl Component for OpenAIChatComponent {
         }
         // get initial prompt
         let initialprompt: bool;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "initialprompt") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "initialprompt") {
             initialprompt = value.parse().expect("could not parse initialprompt value in configuration URL as boolean");
         } else {
             trace!("no initial prompt found in configuration URL - assuming default");
