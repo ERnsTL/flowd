@@ -212,12 +212,12 @@ Everything else:
 * Text replacement
 * Compression and decompression in XZ (LZMA2) format
 * Compression and decompression in Brotli format
+* Unix domain socket client (path-based and abstract socket addresses, support for SEQPACKET)
 
 TODO components:
 
 * TCP client
 * TCP server
-* Unix domain client (abstract and path-based)
 * TLS client
 * TLS server
 * SSH client (without using OpenSSH client)
