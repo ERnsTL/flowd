@@ -45,10 +45,11 @@ impl Component for CountComponent {
         let Ok(url_vec) = conf.pop() else { trace!("no config IP received - exiting"); return; };
         let url_str = "https://makeurlhappy/?".to_owned() + std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(url_str.as_str()).expect("failed to parse configuration URL");
-        let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        //let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
+        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
         // get API key
         let mode: Mode;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "mode") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "mode") {
             match value.to_string().as_str() {   //TODO optimize
                 "packets" => { mode = Mode::Packets; }
                 "size" => { mode = Mode::Size; }
