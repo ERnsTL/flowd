@@ -108,11 +108,12 @@ impl Component for UnixSocketClientComponent {
         }
         debug!("got socket address: {}", &address_str);
         // get buffer size from URL
-        let read_buffer_size;
+        //TODO implement - currently variables are not used
+        let _read_buffer_size;
         if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
-            read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
+            _read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
         } else {
-            read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
+            _read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
         }
         // get read timeout from URL
         //TODO differentiate internal read timeout and read timeout when connection has to be reconnected
@@ -126,14 +127,14 @@ impl Component for UnixSocketClientComponent {
         let socket_type: SocketType;
         if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "socket_type") {
             socket_type = match value.to_string().as_str() {
-                "dgram"|"datagram" => SocketType::Datagram,
-                "stream" => SocketType::Stream,
                 "seqpacket" => SocketType::SeqPacket,
-                _ => { panic!("failed to parse query pair value for key \"socket_type\" into dgram|datagram|stream"); }
+                "stream" => SocketType::Stream,
+                "dgram"|"datagram" => SocketType::Datagram,
+                _ => { panic!("failed to parse query pair value for key socket_type into dgram|datagram|stream|seqpacket"); }
             };
         } else {
-            //socket_type = DEFAULT_SOCKET_TYPE;
-            error!("failed to get socket type from config URL, missing query key \"socket_type\"");
+            // NOTE: not setting a default type, because this may produce "unable to connect" errors because of unexpected socket type (and the default might change in the future)
+            error!("failed to get socket type from config URL, missing query key socket_type");
             return;
         }
 
@@ -154,17 +155,15 @@ impl Component for UnixSocketClientComponent {
         };
 
         // prepare socket client
-        /*
+        //TODO implement - support stream and datagram sockets
         let client_seqpacket;
-        let client_stream;
-        let client_dgram;
+        //let client_stream;
+        //let client_dgram;
         match socket_type {
             SocketType::SeqPacket => { client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address).expect("failed to connect"); }
-            SocketType::Stream|SocketType::Stream => { client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
-            SocketType::Datagram => { client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
+            SocketType::Stream => { unimplemented!(); } //client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
+            SocketType::Datagram => { unimplemented!(); } //client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
         };
-        */
-        let client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address).expect("failed to connect");
 
         // prepare buffered reader
         // NOTE: this is needed because POSIX does not have a function to give the available bytes, therefore must read 2x at least. I would prefer 1 call for number of bytes and 2nd call to all available bytes in one exactly-fitting buffer.
