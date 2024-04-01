@@ -99,3 +99,6 @@ xz = "0.1"
 
 # for BrotliCompressComponent, BrotliDecompressComponent
 brotli = "3.5"
+
+# for UnixSocketClientComponent
+uds = "0.4.2"
