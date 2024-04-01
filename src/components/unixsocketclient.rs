@@ -3,13 +3,16 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 
 // component-specific
 use std::os::unix::net::UnixDatagram;
-/*
 use std::os::unix::net::UnixStream;
 use std::io::prelude::*;
-*/
 use std::str::FromStr;
 use std::os::unix::net::SocketAddr;
 use std::os::linux::net::SocketAddrExt;
+use std::io::ErrorKind;
+use std::time::Duration;
+use std::io::BufReader;
+use uds::UnixSocketAddr;
+use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
 
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
@@ -20,11 +23,33 @@ pub struct UnixSocketClientComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
+/*
+Situation 2024-04:
+* socket types:  https://www.man7.org/linux/man-pages/man7/unix.7.html
+* the best type is seqpacket
+* https://internals.rust-lang.org/t/pre-rfc-adding-sock-seqpacket-unix-sockets-to-std/7323
+* https://github.com/rust-lang-nursery/unix-socket/pull/25
+* https://github.com/rust-lang/rust/pull/50348
+* they want to have it on crates.io first and - if popular enough - put it into std, pfff
+* that crate is:  https://crates.io/crates/uds
+* problem is that for example credential-passing and ancillary data has been added to std, but not do uds crate, but seqpacket is in uds but not in std
+* best place to add SeqPacket socket support would be in std::os::linux::net::UnixSocketExt
+* wtf
+* if flowd ever moves from threading to tokio, then there is already https://crates.io/crates/tokio-seqpacket
+*/
 //TODO optimize - u8?
 enum SocketType {
     Datagram,
-    Stream
+    Stream,
+    SeqPacket
+    // NOTE: what is seqpacket, it is the way to go unless really streaming is employed and many many messages are received since 1 read syscall will yield only 1 seqpacket=message.
+    // http://www.ccplusplus.com/2011/08/understanding-sockseqpacket-socket-type.html
 }
+
+const DEFAULT_ADDRESS_ABSTRACT: bool = false;
+const DEFAULT_SOCKET_TYPE: SocketType = SocketType::SeqPacket;
+const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
+const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for UnixSocketClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -42,8 +67,8 @@ impl Component for UnixSocketClientComponent {
         debug!("UnixSocketClient is now run()ning!");
         let mut conf = self.conf;
         let mut inn = self.inn;
-        let _out = self.out.sink;
-        let _out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let mut out = self.out.sink;
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -59,51 +84,94 @@ impl Component for UnixSocketClientComponent {
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         let mut query_pairs = url.query_pairs();
         // get abstract y/n
-        let address_abstract: bool;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "abstract") {
-            address_abstract = std::primitive::bool::from_str(&value).expect("failed to parse query pair value for abstract as true|false");
+        let address_is_abstract: bool;
+        if url.has_host() {
+            address_is_abstract = true;
+        } else if url.path().len() > 0 {
+            address_is_abstract = false;
         } else {
-            address_abstract = false;
-        }
+            panic!("failed to determine if socket address is abstract or path-based");
+        };
         // get address from URL
-        let mut address_str = url.path();
-        if address_str.is_empty() || address_str == "/" {
-            error!("no socket address given in config URL path, exiting");
-            return;
-        }
-        // remove leading slash if abstract
-        if address_abstract {
-            address_str = address_str.trim_start_matches('/');
-        }
-        // prepare socket address
-        let socket_addr: SocketAddr;
-        if address_abstract {
-            socket_addr = SocketAddr::from_abstract_name(address_str).expect("failed to parse abstract socket address into SocketAddr");
+        let address_str ;
+        if address_is_abstract {
+            // get abstract socket address from URL host
+            address_str = url.host_str().expect("failed to get abstract socket address from URL host");
         } else {
-            socket_addr = SocketAddr::from_pathname(address_str).expect("failed to parse path-based socket address into SocketAddr");
+            // get path-based socket address from URL path
+            address_str = url.path();
+            if address_str.is_empty() || address_str == "/" {
+                error!("no socket address given in config URL path, exiting");
+                return;
+            }
         }
+        debug!("got socket address: {}", &address_str);
         // get buffer size from URL
-        let buffer_size: u32;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "buffer") {
-            buffer_size = value.to_string().parse::<u32>().expect("failed to parse query pair value for buffer as integer");
+        let read_buffer_size;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "rbuffer") {
+            read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
         } else {
-            buffer_size = 4096;
+            read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
         }
-        //TODO stream or datagram?
+        // get read timeout from URL
+        //TODO differentiate internal read timeout and read timeout when connection has to be reconnected
+        let read_timeout: Duration;
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "rtimeout") {
+            read_timeout = Duration::from_millis(value.to_string().parse::<u64>().expect("failed to parse query pair value for read timeout as integer"));
+        } else {
+            read_timeout = DEFAULT_READ_TIMEOUT;
+        }
         // get socket type from URL
         let socket_type: SocketType;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "buffer") {
+        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "socket_type") {
             socket_type = match value.to_string().as_str() {
                 "dgram"|"datagram" => SocketType::Datagram,
                 "stream" => SocketType::Stream,
-                _ => { panic!("failed to parse query pair value type into dgram|datagram|stream"); }
+                "seqpacket" => SocketType::SeqPacket,
+                _ => { panic!("failed to parse query pair value for socket_type into dgram|datagram|stream"); }
             };
         } else {
-            socket_type = SocketType::Datagram;
+            //socket_type = DEFAULT_SOCKET_TYPE;
+            error!("failed to get socket type from config URL, missing query key socket_type");
+            return;
         }
 
         // configure
-        // NOTE: nothing to be done here
+
+        // prepare socket address
+        let socket_address;
+        if address_is_abstract {
+            // std variant
+            //socket_address = SocketAddr::from_abstract_name(address_str).expect("failed to parse abstract socket address into SocketAddr");
+            // uds variant
+            socket_address = UnixSocketAddr::from_abstract(address_str).expect("failed to parse abstract socket address into UnixSocketAddr");
+        } else {
+            // std variant
+            //socket_address = SocketAddr::from_pathname(address_str).expect("failed to parse path-based socket address into SocketAddr");
+            // uds variant
+            socket_address = UnixSocketAddr::from_path(address_str).expect("failed to parse path-based socket address into UnixSocketAddr");
+        };
+
+        // prepare socket client
+        /*
+        let client_seqpacket;
+        let client_stream;
+        let client_dgram;
+        match socket_type {
+            SocketType::SeqPacket => { client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address).expect("failed to connect"); }
+            SocketType::Stream|SocketType::Stream => { client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
+            SocketType::Datagram => { client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
+        };
+        */
+        let client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address).expect("failed to connect");
+
+        // prepare buffered reader
+        // NOTE: this is needed because POSIX does not have a function to give the available bytes, therefore must read 2x at least. I would prefer 1 call for number of bytes and 2nd call to all available bytes in one exactly-fitting buffer.
+        //let bufreader = BufReader::with_capacity(DEFAULT_READ_BUFFER_SIZE, &client_seqpacket);
+        let mut buf = [0u8; DEFAULT_READ_BUFFER_SIZE];
+
+        // set read timeout to avoid blocking forever and watchdog thread marking the process as non-responding
+        client_seqpacket.set_read_timeout(Some(read_timeout)).expect("failed to set socket read timeout");
 
         // main loop
         loop {
@@ -139,38 +207,75 @@ impl Component for UnixSocketClientComponent {
                 //_ = inn.pop().ok();
                 //debug!("got a packet, dropping it.");
 
-                debug!("got {} packets, dropping them.", inn.slots());  //###
-                inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
+                debug!("got {} packets, sending into socket...", inn.slots());
+                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
 
-                //TODO automatic reconnection - reconnect timeout of 30s, then error out.
-                //TODO which io error is returned for "connection closed because server going offline"?
-                //TODO which io error is returned for "server unreachable"?
+                for ip in chunk.into_iter() {
+                    match client_seqpacket.send(ip.as_ref()) {
+                        Ok(_) => {},
+                        Err(err) => {
+                            //TODO handle disconnection and reconnection here
+                            //TODO automatic reconnection - reconnect timeout of 30s, then error out.
+                            //TODO which io error is returned for "connection closed because server going offline"?
+                            //TODO which io error is returned for "server unreachable"?
+                            error!("{:?}: {}", err.kind(), err);
+                            /*
+                            match err.kind() {
+                                ErrorKind::AddrInUse
+                                EndOfFile => break,
+                                SomeOtherError => do_something(),
+                                _ => panic!("Can't read from file: {}, err {}", filename, e),
+                            };
+                            */
+                        }
+                    }
 
-                //###
-                //let sock = match UnixDatagram::unbound()
-                //TODO bind
-                //TODO connect = bind + connect_addr
-                // unbound -> connect
-                let socket = UnixDatagram::bind("/path/to/my/socket").expect("failed to bind");
-                socket.send_to(b"hello world", "/path/to/other/socket").expect("failed to send");
-                let mut buf = [0; 100];
-                let (count, address) = socket.recv_from(&mut buf).expect("failed to receive");
-                println!("socket {:?} sent {:?}", address, &buf[..count]);
-
-                //TODO stream
-                /*
-                let mut stream = UnixStream::connect("/path/to/my/socket")?;
-                stream.write_all(b"hello world")?;
-                let mut response = String::new();
-                stream.read_to_string(&mut response)?;
-                println!("{response}");
-                 */
+                    //TODO stream
+                    /*
+                    let mut stream = UnixStream::connect("/path/to/my/socket")?;
+                    stream.write_all(b"hello world")?;
+                    let mut response = String::new();
+                    stream.read_to_string(&mut response)?;
+                    println!("{response}");
+                    */
+                }
             }
+
+            // receive
+            //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
+            //let mut ip_out = Vec::with_capacity(DEFAULT_READ_BUFFER_SIZE);
+            //TODO handle case of message longer than read buffer using while loop; how to detect continuing seqpacket?
+            match client_seqpacket.recv(&mut buf) {
+                Ok(bytes_in) => {
+                    debug!("got packet with {} bytes, repeating...", bytes_in);
+                    debug!("repeating packet...");
+                    out.push(Vec::from(&buf[0..bytes_in])).expect("could not push into OUT");
+                    out_wakeup.unpark();
+                    debug!("done");
+                },
+                Err(err) => {
+                    //TODO handle disconnection and reconnection here
+                    //TODO automatic reconnection - reconnect timeout of 30s, then error out.
+                    //TODO which io error is returned for "connection closed because server going offline"?
+                    //TODO which io error is returned for "server unreachable"?
+                    error!("{:?}: {}", err.kind(), err);
+                    /*
+                    match err.kind() {
+                        ErrorKind::AddrInUse
+                        EndOfFile => break,
+                        SomeOtherError => do_something(),
+                        _ => panic!("Can't read from file: {}, err {}", filename, e),
+                    };
+                    */
+                }
+            };
 
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                //out_wakeup.unpark();
+                //TODO close socket
+                drop(out);
+                out_wakeup.unpark();
                 break;
             }
 
