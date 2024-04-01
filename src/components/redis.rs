@@ -38,7 +38,8 @@ impl Component for RedisPublisherComponent {
         // get destination from URL
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
-        let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
+        //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
+        let channel_queryparam = url.query_pairs().find( |(key, _)| key.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
         let channel_bytes = channel_queryparam.1.as_bytes();
         let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
         debug!("channel: {}", channel);
