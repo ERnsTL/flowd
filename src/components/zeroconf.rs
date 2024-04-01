@@ -37,12 +37,13 @@ impl Component for ZeroconfResponderComponent {
         let socket_address = url.host_str().expect("failed to get socket address from connection URL").to_owned() + ":" + &url.port().expect("failed to get port from connection URL").to_string();
         let instance_name = url.path().strip_prefix("/").expect("failed to strip prefix '/' from instance name in configuration URL path").to_owned();
 
-        let service_name_queryparam = url.query_pairs().find( |kv| kv.0.eq("service") ).expect("failed to get service from connection URL");
+        //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
+        let service_name_queryparam = url.query_pairs().find( |(key, _)| key.eq("service") ).expect("failed to get service from connection URL");
         let service_name_bytes = service_name_queryparam.1.as_bytes();
         let service_name = std::str::from_utf8(service_name_bytes).expect("failed to convert socket address to str");
 
         let ttl: u32;
-        if let Some(ttl_queryparam)  = url.query_pairs().find( |kv| kv.0.eq("ttl") ) {
+        if let Some(ttl_queryparam)  = url.query_pairs().find( |(key, _)| key.eq("ttl") ) {
             let ttl_bytes = ttl_queryparam.1.as_bytes();
             ttl = std::str::from_utf8(ttl_bytes).expect("failed to convert channel name to str").parse::<u32>().expect("failed to parse ttl as u32");
         } else {
