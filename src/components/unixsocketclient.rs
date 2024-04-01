@@ -46,7 +46,6 @@ enum SocketType {
     // http://www.ccplusplus.com/2011/08/understanding-sockseqpacket-socket-type.html
 }
 
-const DEFAULT_ADDRESS_ABSTRACT: bool = false;
 const DEFAULT_SOCKET_TYPE: SocketType = SocketType::SeqPacket;
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
@@ -82,7 +81,8 @@ impl Component for UnixSocketClientComponent {
         // prepare connection arguments
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        let mut query_pairs = url.query_pairs();
+        //let mut query_pairs = url.query_pairs();
+        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
         // get abstract y/n
         let address_is_abstract: bool;
         if url.has_host() {
@@ -92,6 +92,7 @@ impl Component for UnixSocketClientComponent {
         } else {
             panic!("failed to determine if socket address is abstract or path-based");
         };
+        debug!("got abstract socket address: {}", address_is_abstract);
         // get address from URL
         let address_str ;
         if address_is_abstract {
@@ -108,7 +109,7 @@ impl Component for UnixSocketClientComponent {
         debug!("got socket address: {}", &address_str);
         // get buffer size from URL
         let read_buffer_size;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "rbuffer") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
             read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
         } else {
             read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
@@ -116,23 +117,23 @@ impl Component for UnixSocketClientComponent {
         // get read timeout from URL
         //TODO differentiate internal read timeout and read timeout when connection has to be reconnected
         let read_timeout: Duration;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "rtimeout") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rtimeout") {
             read_timeout = Duration::from_millis(value.to_string().parse::<u64>().expect("failed to parse query pair value for read timeout as integer"));
         } else {
             read_timeout = DEFAULT_READ_TIMEOUT;
         }
         // get socket type from URL
         let socket_type: SocketType;
-        if let Some((_key, value)) = query_pairs.find(|(key, _)| key == "socket_type") {
+        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "socket_type") {
             socket_type = match value.to_string().as_str() {
                 "dgram"|"datagram" => SocketType::Datagram,
                 "stream" => SocketType::Stream,
                 "seqpacket" => SocketType::SeqPacket,
-                _ => { panic!("failed to parse query pair value for socket_type into dgram|datagram|stream"); }
+                _ => { panic!("failed to parse query pair value for key \"socket_type\" into dgram|datagram|stream"); }
             };
         } else {
             //socket_type = DEFAULT_SOCKET_TYPE;
-            error!("failed to get socket type from config URL, missing query key socket_type");
+            error!("failed to get socket type from config URL, missing query key \"socket_type\"");
             return;
         }
 
