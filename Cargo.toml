@@ -102,3 +102,7 @@ brotli = "3.5"
 
 # for UnixSocketClientComponent
 uds = "0.4.2"
+
+# for TLSClientComponent
+rustls = "0.23.4"
+webpki-roots = "0.26"
