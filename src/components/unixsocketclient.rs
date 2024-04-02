@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
+/*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;
 use std::io::prelude::*;
@@ -9,10 +10,11 @@ use std::str::FromStr;
 use std::os::unix::net::SocketAddr;
 use std::os::linux::net::SocketAddrExt;
 use std::io::ErrorKind;
-use std::time::Duration;
 use std::io::BufReader;
-use uds::UnixSocketAddr;
 use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
+*/
+use std::time::Duration;
+use uds::UnixSocketAddr;
 
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
@@ -46,7 +48,6 @@ enum SocketType {
     // http://www.ccplusplus.com/2011/08/understanding-sockseqpacket-socket-type.html
 }
 
-const DEFAULT_SOCKET_TYPE: SocketType = SocketType::SeqPacket;
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
 
