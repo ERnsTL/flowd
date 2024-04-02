@@ -18,7 +18,7 @@ pub struct TLSClientComponent {
 //const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
-const READ_BUFFER: usize = 65536;
+const READ_BUFFER: usize = 65536;   // is allocated once and re-used for each read() call
 
 impl Component for TLSClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
