@@ -28,3 +28,4 @@ pub mod brotli;
 pub mod unixsocketclient;
 pub mod html;
 pub mod ws;
+pub mod tcp;
