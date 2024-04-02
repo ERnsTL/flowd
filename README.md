@@ -216,15 +216,15 @@ Everything else:
 * strip HTML tags to get the contained content for further processing
 * WebSocket client (TODO retry on connection establishment, TODO reconnection)
 * TCP client
+* TLS client
 
 TODO components (0.4 milestone - basic versions):
 
-* TCP server
-* TLS client
-* TLS server
-* SSH client (without using OpenSSH client)
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
+* TCP server
+* TLS server
 * WebSocket server
+* SSH client (without using OpenSSH client)
 
 TODO connection, disconnection and reconnection (0.4 milestone):
 
