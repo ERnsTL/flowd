@@ -111,6 +111,7 @@ impl Component for TCPClientComponent {
                 let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
 
                 for ip in chunk.into_iter() {
+                    //TODO handle WouldBlock error, which is not an actual error
                     client.write(&ip).expect("failed to write into TCP client");
                 }
 
