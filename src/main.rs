@@ -71,6 +71,7 @@ use components::unixsocketclient::UnixSocketClientComponent;
 use components::html::HTMLStripComponent;
 use components::ws::WSClientComponent;
 use components::tcp::TCPClientComponent;
+use components::tls::TLSClientComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -143,6 +144,7 @@ fn main() {
         HTMLStripComponent::get_metadata(),
         WSClientComponent::get_metadata(),
         TCPClientComponent::get_metadata(),
+        TLSClientComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1867,6 +1869,7 @@ impl RuntimeRuntimePayload {
                     "HTMLStrip" => { HTMLStripComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "WSClient" => { WSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TCPClient" => { TCPClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "TLSClient" => { TLSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
