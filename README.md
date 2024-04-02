@@ -213,6 +213,7 @@ Everything else:
 * Compression and decompression in XZ (LZMA2) format
 * Compression and decompression in Brotli format
 * Unix domain socket client (path-based and abstract socket addresses, support for SEQPACKET)
+* strip HTML tags to get the contained content for further processing
 
 TODO components (0.4 milestone - basic versions):
 
