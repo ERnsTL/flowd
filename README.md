@@ -214,6 +214,7 @@ Everything else:
 * Compression and decompression in Brotli format
 * Unix domain socket client (path-based and abstract socket addresses, support for SEQPACKET)
 * strip HTML tags to get the contained content for further processing
+* WebSocket client (TODO retry on connection establishment, TODO reconnection)
 
 TODO components (0.4 milestone - basic versions):
 
@@ -224,7 +225,6 @@ TODO components (0.4 milestone - basic versions):
 * SSH client (without using OpenSSH client)
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * WebSocket server
-* WebSocket client with retry on connection establishment
 
 TODO connection, disconnection and reconnection (0.4 milestone):
 
