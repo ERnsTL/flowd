@@ -215,10 +215,10 @@ Everything else:
 * Unix domain socket client (path-based and abstract socket addresses, support for SEQPACKET)
 * strip HTML tags to get the contained content for further processing
 * WebSocket client (TODO retry on connection establishment, TODO reconnection)
+* TCP client
 
 TODO components (0.4 milestone - basic versions):
 
-* TCP client
 * TCP server
 * TLS client
 * TLS server
