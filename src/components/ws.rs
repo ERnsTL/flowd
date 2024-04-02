@@ -126,7 +126,8 @@ impl Component for WSClientComponent {
             }
 
             trace!("-- end of iteration");
-            //TODO optimize - hacky way to avoid busy waiting
+            //TODO optimize - hacky way to avoid busy waiting;
+            //  better to use a separate thread for WebSocket read and close the connection when the inport is abandoned, leading to the read thread exiting
             //std::thread::park();
             std::thread::sleep(READ_TIMEOUT);
         }
