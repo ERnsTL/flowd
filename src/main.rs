@@ -68,6 +68,7 @@ use components::xz::{XzCompressComponent, XzDecompressComponent};
 use components::brotli::{BrotliCompressComponent, BrotliDecompressComponent};
 use components::unixsocketclient::UnixSocketClientComponent;
 use components::html::HTMLStripComponent;
+use components::ws::WSClientComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -138,6 +139,7 @@ fn main() {
         BrotliDecompressComponent::get_metadata(),
         UnixSocketClientComponent::get_metadata(),
         HTMLStripComponent::get_metadata(),
+        WSClientComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1860,6 +1862,7 @@ impl RuntimeRuntimePayload {
                     "BrotliDecompress" => { BrotliDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "UnixSocketClient" => { UnixSocketClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "HTMLStrip" => { HTMLStripComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "WSClient" => { WSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
