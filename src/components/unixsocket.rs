@@ -358,7 +358,7 @@ impl Component for UnixSocketServerComponent {
     fn run(mut self) {
         debug!("UnixSocketServer is now run()ning!");
         let mut conf = self.conf;
-        trace!("spinning for listen path on CONF...");
+        trace!("spinning for configuration IP...");
         while conf.is_empty() {
             thread::yield_now();
         }
