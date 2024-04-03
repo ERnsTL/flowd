@@ -170,7 +170,7 @@ impl Component for UnixSocketServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("response data from downstream proess for each connection"),
+                    description: String::from("response data from downstream process for each connection"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
@@ -182,7 +182,7 @@ impl Component for UnixSocketServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("signal and content data for Unix socket connections"),
+                    description: String::from("signal and content data from client connections"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
