@@ -3,7 +3,7 @@ pub mod drop;
 pub mod output;
 
 pub mod libcomponent;
-pub mod unixsocketserver;
+pub mod unixsocket;
 pub mod file;
 pub mod trim;
 pub mod splitlines;
@@ -25,7 +25,6 @@ pub mod text;
 pub mod zeroconf;
 pub mod xz;
 pub mod brotli;
-pub mod unixsocketclient;
 pub mod html;
 pub mod ws;
 pub mod tcp;
