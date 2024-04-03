@@ -1,9 +1,12 @@
-use std::{io::{Read, Write}, net::TcpStream, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-use std::net::SocketAddr;
 use std::time::Duration;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::thread::{self};
+use std::collections::HashMap;
 
 pub struct TCPClientComponent {
     conf: ProcessEdgeSource,
@@ -198,6 +201,202 @@ impl Component for TCPClientComponent {
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs to be sent as TCP bytes"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            ..Default::default()
+        }
+    }
+}
+
+pub struct TCPServerComponent {
+    conf: ProcessEdgeSource,
+    resp: ProcessEdgeSource,
+    out: ProcessEdgeSink,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
+    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+}
+
+impl Component for TCPServerComponent {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+        TCPServerComponent {
+            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
+            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
+            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            signals_in: signals_in,
+            signals_out: signals_out,
+            //graph_inout: graph_inout,
+        }
+    }
+
+    fn run(mut self) {
+        debug!("TCPServer is now run()ning!");
+        let mut conf = self.conf;
+
+        // get configuration IP
+        trace!("spinning for listen path on CONF...");
+        while conf.is_empty() {
+            thread::yield_now();
+        }
+        //TODO optimize string conversions to on an address
+        let config = conf.pop().expect("not empty but still got an error on pop");
+        let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
+        trace!("got listen address {}", listen_addr);
+
+        // set configuration
+        let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
+        let resp = &mut self.resp;
+        let out = Arc::new(Mutex::new(self.out.sink));
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+
+        // prepare variables for listen thread
+        let sockets: Arc<Mutex<HashMap<u32, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sockets_ref = Arc::clone(&sockets);
+        let out_ref = Arc::clone(&out);
+        let out_wakeup_ref = out_wakeup.clone();
+        //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
+        //TODO fix - the listener thread is not stopped when the component is stopped, it will continue to listen and accept connections and on network restart the listen address will be already in use
+        let _listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+            // listener loop
+            let mut socketnum: u32 = 0;
+            loop {
+                debug!("listening for a client");
+                match listener.accept() {
+                    Ok((mut socket, addr)) => {
+                        println!("handling client: {addr:?}");
+                        socketnum += 1;
+                        sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
+                        let sockets_ref2 = Arc::clone(&sockets_ref);
+                        let out_ref2 = Arc::clone(&out_ref);
+                        let out_wakeup_ref2 = out_wakeup_ref.clone();
+                        thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
+                            let socketnum_inner = socketnum;
+
+                            // receive loop and send to component OUT tagged with socketnum
+                            debug!("handling client connection");
+                            loop {
+                                // read from client
+                                trace!("reading from client");
+                                let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
+                                if let Ok(bytes) = socket.read(&mut buf) {
+                                    if bytes == 0 {
+                                        // correctly closed (or given buffer had size 0)
+                                        debug!("connection closed ok, exiting connection handler");
+                                        break;
+                                    }
+
+                                    debug!("got data from client, pushing data to OUT");
+                                    buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
+                                    //TODO optimize ^ do not truncate, but re-use the buffer and copy the bytes into a new Vec = the output IP
+                                    out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
+
+                                    trace!("unparking OUT thread");
+                                    out_wakeup_ref2.unpark();
+                                } else {
+                                    debug!("connection non-ok result, exiting connection handler");
+                                    break;
+                                };
+                                trace!("-- end of iteration")
+                            }
+
+                            // when socket closed, remove myself from list of known/open sockets resp. socket handlers
+                            sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                            debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
+                        }).expect("could not start connection handler thread");
+                    },
+                    Err(e) => {
+                        error!("accept failed: {e:?} - exiting");
+                        break;
+                    },
+                }
+            }
+        });
+
+        // main loop
+        debug!("entering main loop");
+        loop {
+            trace!("begin of iteration");
+
+            // check signals
+            //TODO optimize, there is also try_recv() and recv_timeout()
+            if let Ok(ip) = self.signals_in.try_recv() {
+                //TODO optimize string conversions
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                // stop signal
+                if ip == b"stop" {
+                    info!("got stop signal, exiting");
+                    break;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
+
+            // check in port
+            //TODO while !inn.is_empty() {
+            loop {
+                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                    // output the packet data with newline
+                    debug!("got a packet, writing into client socket...");
+
+                    // send into client socket
+                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
+                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
+                    debug!("done");
+                } else {
+                    break;
+                }
+            }
+
+            // check socket
+            //NOTE: happens in connection handler threads, see above
+
+            trace!("end of iteration");
+            std::thread::park();
+        }
+        info!("exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+        ComponentComponentPayload {
+            name: String::from("TCPServer"),
+            description: String::from("TCP server"),
+            icon: String::from("server"),
+            subgraph: false,
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("configuration value, currently the IP and port to listen on"),
+                    values_allowed: vec![],
+                    value_default: String::from("localhost:1234")
+                },
+                ComponentPort {
+                    name: String::from("RESP"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("response data from downstream process for each connection"),
+                    values_allowed: vec![],
+                    value_default: String::from("")
+                }
+            ],
+            out_ports: vec![
+                ComponentPort {
+                    name: String::from("OUT"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("signal and content data from the client connections"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
