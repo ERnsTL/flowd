@@ -218,11 +218,11 @@ Everything else:
 * TCP client
 * TLS client
 * TCP server
+* TLS server
 
 TODO components (0.4 milestone - basic versions):
 
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
-* TLS server
 * WebSocket server
 * SSH client (without using OpenSSH client)
 
