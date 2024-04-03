@@ -217,11 +217,11 @@ Everything else:
 * WebSocket client (TODO retry on connection establishment, TODO reconnection)
 * TCP client
 * TLS client
+* TCP server
 
 TODO components (0.4 milestone - basic versions):
 
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
-* TCP server
 * TLS server
 * WebSocket server
 * SSH client (without using OpenSSH client)
