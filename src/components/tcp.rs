@@ -236,7 +236,7 @@ impl Component for TCPServerComponent {
         let mut conf = self.conf;
 
         // get configuration IP
-        trace!("spinning for listen path on CONF...");
+        trace!("spinning for configuration IP...");
         while conf.is_empty() {
             thread::yield_now();
         }
