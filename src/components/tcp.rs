@@ -295,6 +295,7 @@ impl Component for TCPServerComponent {
                                     trace!("unparking OUT thread");
                                     out_wakeup_ref2.unpark();
                                 } else {
+                                    //TODO fix - handle WouldBlock error, which is not an actual error
                                     debug!("connection non-ok result, exiting connection handler");
                                     break;
                                 };
