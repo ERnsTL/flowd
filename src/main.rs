@@ -73,6 +73,7 @@ use components::tcp::TCPClientComponent;
 use components::tls::TLSClientComponent;
 use components::tcp::TCPServerComponent;
 use components::tls::TLSServerComponent;
+use components::ws::WSServerComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -148,6 +149,7 @@ fn main() {
         TLSClientComponent::get_metadata(),
         TCPServerComponent::get_metadata(),
         TLSServerComponent::get_metadata(),
+        WSServerComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1875,6 +1877,7 @@ impl RuntimeRuntimePayload {
                     "TLSClient" => { TLSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TCPServer" => { TCPServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TLSServer" => { TLSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "WSServer" => { WSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
