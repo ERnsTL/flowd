@@ -9,7 +9,6 @@ use rustls::{RootCertStore, ServerConnection};
 use std::thread::{self};
 use std::io::{BufReader, Read, Write};
 use std::collections::HashMap;
-use rustls_pemfile;
 
 pub struct TLSClientComponent {
     conf: ProcessEdgeSource,
