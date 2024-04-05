@@ -56,7 +56,7 @@ impl Component for CmdComponent {
 
         // read configuration
         let mut mode = Mode::Each;
-        let mut retry: bool;
+        let mut retry = false;
         let mut parser = lexopt::Parser::from_args(vec![OsString::from(std::str::from_utf8(&conf.pop().expect("could not read IP from CONF configuration inport")).expect("invalid utf-8"))]);
         while let Some(arg) = parser.next().expect("could not call next()") {
             match arg {
@@ -112,42 +112,51 @@ impl Component for CmdComponent {
                     //    .args(["-p","name", "/dev/shm/test.rec"])
                     //let mut child = Command::new("bash")
                     //    .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
-                    let mut child = Command::new(cmd_program)   //TODO optimize pre-construct Command once
-                        .args(&cmd_args)    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::piped())
-                        .spawn()
-                        .expect("could not start sub-process");
+                    match mode {
+                        Mode::Each => {
+                            let mut child = Command::new(cmd_program)   //TODO optimize pre-construct Command once
+                                .args(&cmd_args)    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::piped())
+                                .spawn()
+                                .expect("could not start sub-process");
+                            if retry {
+                                //TODO implement
+                                unimplemented!();
+                            }
 
-                    // set up reader from child STDOUT
-                    let reader = BufReader::new(child
-                        .stdout
-                        .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
-                        .expect("could not get standard output")    //TODO optimize looks like duplication from above line
-                    );
-                    // set up writer into child STDIN
-                    let mut writer = child
-                        .stdin
-                        //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
-                        //.expect("could not get standard input")    //TODO optimize looks like duplication from above line
-                        .take()
-                        .expect("could not get standard input");
+                            // set up reader from child STDOUT
+                            let reader = BufReader::new(child
+                                .stdout
+                                .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
+                                .expect("could not get standard output")    //TODO optimize looks like duplication from above line
+                            );
+                            // set up writer into child STDIN
+                            let mut writer = child
+                                .stdin
+                                //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
+                                //.expect("could not get standard input")    //TODO optimize looks like duplication from above line
+                                .take()
+                                .expect("could not get standard input");
 
-                    // deliver the trigger IP contents into child STDIN
-                    writer.write(ip.as_slice()).expect("could not write into child STDIN");
-                    drop(writer);   // close STDIN
+                            // deliver the trigger IP contents into child STDIN
+                            writer.write(ip.as_slice()).expect("could not write into child STDIN");
+                            drop(writer);   // close STDIN
 
-                    // read child STDOUT until closed
-                    reader
-                        .lines()
-                        .filter_map(|line| line.ok())
-                        //.filter(|line| line.find("usb").is_some())
-                        //.for_each(|line| println!("{}", line));
-                        .for_each(|line| {
-                            //debug!("repeating packet...");
-                            out.push(line.into_bytes()).expect("could not push into OUT");
-                            out_wakeup.unpark();
-                        });
+                            // read child STDOUT until closed
+                            reader
+                                .lines()
+                                .filter_map(|line| line.ok())
+                                //.filter(|line| line.find("usb").is_some())
+                                //.for_each(|line| println!("{}", line));
+                                .for_each(|line| {
+                                    //debug!("repeating packet...");
+                                    out.push(line.into_bytes()).expect("could not push into OUT");
+                                    out_wakeup.unpark();
+                                });
+                        },
+                        Mode::One => { unimplemented!(); }  //TODO implement
+                    }
 
                     debug!("done");
                 } else {
