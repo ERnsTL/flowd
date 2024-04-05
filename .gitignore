@@ -37,3 +37,7 @@ Cargo.lock
 *.sh
 vendor/
 tmp/
+
+# LibComponent external components
+libwordcounter.so
+libwordcounter.v
