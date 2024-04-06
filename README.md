@@ -159,6 +159,7 @@ Maintenance, Operations:
 * Ability to use a network bridge or protocol client like TCP, WebSocket etc. which uses the transport protocol and serialization format of your choice, to connect multiple FBP networks, subgraphs or sub-networks.
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
+* Dynamic discovery of FBP network instances and network parts in order to provide redundancy and ability to shut down parts of the whole system for maintenance.
 
 Testing:
 * Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
