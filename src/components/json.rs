@@ -181,7 +181,7 @@ impl Component for JSONQueryComponent {
                     is_arrayport: false,
                     description: String::from("IPs to process, expected to contain JSON data"),
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from("[\"Hello\", \"world\"]")
                 }
             ],
             out_ports: vec![
