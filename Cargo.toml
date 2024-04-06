@@ -112,3 +112,9 @@ webpki-roots = "0.26"
 
 # for TLSServerComponent
 rustls-pemfile = "2"
+
+# for JSONQueryComponent
+jaq-interpret = "1.2.1"
+jaq-parse = "1.0.2"
+jaq-core = "1.2.1"
+jaq-std = "1.2.1"
