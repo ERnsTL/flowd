@@ -76,6 +76,7 @@ use components::tls::TLSServerComponent;
 use components::ws::WSServerComponent;
 use components::zeroconf::ZeroconfBrowserComponent;
 use components::json::JSONQueryComponent;
+use components::html::HTMLQueryComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -154,6 +155,7 @@ fn main() {
         WSServerComponent::get_metadata(),
         ZeroconfBrowserComponent::get_metadata(),
         JSONQueryComponent::get_metadata(),
+        HTMLQueryComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1884,6 +1886,7 @@ impl RuntimeRuntimePayload {
                     "WSServer" => { WSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "ZeroconfBrowser" => { ZeroconfBrowserComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "JSONQuery" => { JSONQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "HTMLQuery" => { HTMLQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
