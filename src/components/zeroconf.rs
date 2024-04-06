@@ -2,14 +2,15 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
 use std::time::Duration;
 use std::thread;
 
 /*
-goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
-Ability for multiple flowd instances to find each other AKA "where is my other peer to connect to"
-in order to easily form a multi-machine, multi-network FBP network with zero configuration.
+Goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
+Ability for multiple flowd instances to find each other AKA "where is my other peer component's inport to connect to"
+in order to easily form a multi-machine, multi-network FBP network with zero configuration,
+for example via a TCP <-> TCP or WebSocket <-> WebSocket bridge.
 */
 
 pub struct ZeroconfResponderComponent {
