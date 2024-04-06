@@ -2,11 +2,9 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-//use simple_mdns::sync_discovery::ServiceDiscovery;
-//use simple_mdns::InstanceInformation;
-use simple_mdns::sync_discovery::SimpleMdnsResponder;
-use simple_dns::{Name, CLASS, ResourceRecord, rdata::{RData, A, SRV}};
-use std::net::Ipv4Addr;
+use mdns_sd::{ServiceDaemon, ServiceInfo};
+use std::time::Duration;
+use std::thread;
 
 /*
 goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
@@ -20,8 +18,6 @@ pub struct ZeroconfResponderComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
-
-const TTL_DEFAULT: u32 = 60;
 
 impl Component for ZeroconfResponderComponent {
     fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
@@ -42,61 +38,31 @@ impl Component for ZeroconfResponderComponent {
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
         let url_str = std::str::from_utf8(&url_vec).expect("configuration URL is invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
-
-        let socket_address = url.host_str().expect("failed to get socket address from connection URL").to_owned() + ":" + &url.port().expect("failed to get port from connection URL").to_string();
+        // get instance name
         let instance_name = url.path().strip_prefix("/").expect("failed to strip prefix '/' from instance name in configuration URL path").to_owned();
-
+        // get service name
         //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
         let service_name_queryparam = url.query_pairs().find( |(key, _)| key.eq("service") ).expect("failed to get service from connection URL");
         let service_name_bytes = service_name_queryparam.1.as_bytes();
         let service_name = std::str::from_utf8(service_name_bytes).expect("failed to convert socket address to str");
-
-        let ttl: u32;
-        if let Some(ttl_queryparam)  = url.query_pairs().find( |(key, _)| key.eq("ttl") ) {
-            let ttl_bytes = ttl_queryparam.1.as_bytes();
-            ttl = std::str::from_utf8(ttl_bytes).expect("failed to convert channel name to str").parse::<u32>().expect("failed to parse ttl as u32");
-        } else {
-            trace!("failed to get ttl from connection URL");
-            ttl = TTL_DEFAULT;
-        }
+        //TODO add support for publishing on defined interface
 
         // configure
-        // start service discovery responder
-        // TODO optimize parameters
-        /*
-        let mut discovery = ServiceDiscovery::new(
-            InstanceInformation::new("a".to_owned()).with_socket_address(socket_address.parse().expect("invalid socket address for responder")),
+        // set up responder
+        let responder = ServiceDaemon::new().expect("failed to create responder");
+        // prepare service record
+        let host_name = url.host_str().expect("failed to get socket address from connection URL").to_owned() + ".local.";
+        //let properties = [("property_1", "test"), ("property_2", "1234")];
+        let my_service = ServiceInfo::new(
             service_name,
-            ttl
-            ).expect("failed to start service discovery responder");
-        debug!("responder started");
-        discovery.announce(false);
-        */
-
-        let mut responder = SimpleMdnsResponder::new(10);
-        let srv_name = Name::new_unchecked(service_name);   //TODO harden - check if valid domain name
-        // TODO this wants a Name<'static> but that is not possible when using a variable which is generated at runtime, and I dont want to leak memory
-
-        // TODO add support for AAAA records - how to hand over IPv6 address in configuration URL?
-        // add A record - has no port information
-        responder.add_resource(ResourceRecord::new(
-            srv_name.clone(),
-            CLASS::IN,
-            ttl,
-            RData::A(A { address: Ipv4Addr::parse_ascii(url.host_str().expect("failed to get host part from configuration URL").as_bytes()).expect("failed to parse configuration URL hostname part as IPv4 address").to_bits() }),
-        ));
-        // add SRV record - which has port information
-        responder.add_resource(ResourceRecord::new(
-            srv_name.clone(),
-            CLASS::IN,
-            ttl,
-            RData::SRV(SRV {
-                port: url.port().expect("failed to get port from configuration URL"),
-                priority: 0,
-                weight: 0,
-                target: srv_name
-            })
-        ));
+            &instance_name,
+            &host_name,
+            url.host_str().expect("failed to get socket address from connection URL"),
+            url.port().expect("failed to get port from configuration URL"),
+            None    //&properties[..],
+        ).unwrap();
+        // register service with responder, which will publish it
+        responder.register(my_service).expect("Failed to register our service");
         debug!("responder started");
 
         // FBP main loop
@@ -123,8 +89,8 @@ impl Component for ZeroconfResponderComponent {
         }
 
         // shut down
-        //discovery.remove_service_from_discovery();
-        responder.clear();
+        responder.shutdown().expect("failed to shut down responder");
+        thread::sleep(Duration::from_millis(500));    // give it some time to shut down
         info!("exiting");
     }
 
@@ -143,7 +109,7 @@ impl Component for ZeroconfResponderComponent {
                     is_arrayport: false,
                     description: String::from("configuration URL with options"),
                     values_allowed: vec![],
-                    value_default: String::from("mdns://192.168.1.123:8090/myweb?service=_http._tcp.local&ttl=60")
+                    value_default: String::from("mdns://192.168.1.123:1234/flowd_subnetwork_abc?service=_fbp._tcp.local.")
                 }
             ],
             out_ports: vec![],
