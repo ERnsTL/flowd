@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 //component-specific
+use ssh2::Session;
 use std::ffi::{OsStr,OsString};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
@@ -109,6 +110,29 @@ impl Component for SSHClientComponent {
                     // output the packet data with newline
                     debug!("got a packet, starting sub-process:");
                     //println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
+
+                    //###
+                    let mut session = ssh::create_session()
+                        .username("ubuntu")
+                        .password("password")
+                        .private_key_path("./id_rsa")
+                        .connect("127.0.0.1:22")
+                        .unwrap()
+                        .run_local();
+                    let exec = session.open_exec().unwrap();
+                    let vec: Vec<u8> = exec.send_command("ls -all").unwrap();
+                    println!("{}", String::from_utf8(vec).unwrap());
+
+                    let mut exec = session.open_exec().unwrap();
+                    exec.exec_command("no_command").unwrap();
+                    let vec = exec.get_output().unwrap();
+                    println!("output: {}", String::from_utf8(vec).unwrap());
+                    println!("exit status: {}", exec.exit_status().unwrap());
+                    println!("terminated msg: {}", exec.terminate_msg().unwrap());
+                    let _ = exec.close();
+
+                    // Close session.
+                    session.close();
 
                     //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
                     //FIXME be responsive during longer-running sub-processes or for server sub-processes
