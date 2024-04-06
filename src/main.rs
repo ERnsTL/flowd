@@ -151,6 +151,7 @@ fn main() {
         TCPServerComponent::get_metadata(),
         TLSServerComponent::get_metadata(),
         WSServerComponent::get_metadata(),
+        ZeroconfBrowserComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1879,6 +1880,7 @@ impl RuntimeRuntimePayload {
                     "TCPServer" => { TCPServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "TLSServer" => { TLSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "WSServer" => { WSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "ZeroconfBrowser" => { ZeroconfBrowserComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
