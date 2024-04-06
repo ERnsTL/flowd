@@ -42,13 +42,12 @@ impl Component for TCPClientComponent {
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
         // read configuration
-        trace!("read config IPs");
-        /*
+        trace!("read config IP...");
         while conf.is_empty() {
             thread::yield_now();
         }
-        */
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        trace!("got config IP");
 
         // prepare connection arguments
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
