@@ -14,6 +14,8 @@ Use case is for example getting sensor value out of a JSON data structure loaded
 
 structure from https://github.com/01mf02/jaq/blob/101619985b3b99707be8863727fa1c08f350559c/jaq/src/main.rs#L418
 and https://docs.rs/jaq-interpret/1.2.1/jaq_interpret/
+
+TODO add options from jaq, for example if result is a string if it should be quoted or not
 */
 
 pub struct JSONQueryComponent {
