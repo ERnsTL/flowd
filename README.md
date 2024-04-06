@@ -155,6 +155,11 @@ Signaling, Monitoring:
 * Export of monitoring data, API server or visualization is currently not implemented.
 * The watchdog thread recognizes network self-shutdown and calls the runtime to stop and signal all FBP protocol clients about the status change.
 
+Maintenance, Operations:
+* Ability to use a network bridge or protocol client like TCP, WebSocket etc. which uses the transport protocol and serialization format of your choice, to connect multiple FBP networks, subgraphs or sub-networks.
+* Bridges between different network parts, and thus...
+* Distribution of the network across multiple machines
+
 Testing:
 * Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
 
@@ -174,7 +179,6 @@ Present in Go version to reach feature parity:
 * TODO Gracelful shutdown once all data has been processed and all components shut down
 * TODO Visualization of the given network in GraphViz format
 * TODO Display of required components and file dependencies of the given network for deployment
-* TODO Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice
 
 Everything else:
 * Maybe I forgot about something important, please post it as a Github issue.
@@ -220,17 +224,15 @@ Everything else:
 * TCP server
 * TLS server
 * WebSocket server
+* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour and DNS-SD
 
 TODO components (0.4 milestone - basic versions):
 
-* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * SSH client (without using OpenSSH client)
 
 TODO connection, disconnection and reconnection (0.4 milestone):
 
 * Load balancing components with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
-* Bridges between different network parts, and thus...
-* Distribution of the network across multiple machines
 
 TODO objects (0.5 milestone):
 
