@@ -2,8 +2,11 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-use simple_mdns::sync_discovery::ServiceDiscovery;
-use simple_mdns::InstanceInformation;
+//use simple_mdns::sync_discovery::ServiceDiscovery;
+//use simple_mdns::InstanceInformation;
+use simple_mdns::sync_discovery::SimpleMdnsResponder;
+use simple_dns::{Name, CLASS, ResourceRecord, rdata::{RData, A, SRV}};
+use std::net::Ipv4Addr;
 
 pub struct ZeroconfResponderComponent {
     conf: ProcessEdgeSource,
@@ -54,11 +57,38 @@ impl Component for ZeroconfResponderComponent {
         // configure
         // start service discovery responder
         // TODO optimize parameters
+        /*
         let mut discovery = ServiceDiscovery::new(
-            InstanceInformation::new(instance_name).with_socket_address(socket_address.parse().expect("invalid socket address for responder")),
+            InstanceInformation::new("a".to_owned()).with_socket_address(socket_address.parse().expect("invalid socket address for responder")),
             service_name,
             ttl
             ).expect("failed to start service discovery responder");
+        debug!("responder started");
+        discovery.announce(false);
+        */
+
+        let mut responder = SimpleMdnsResponder::new(10);
+        let srv_name = Name::new_unchecked("_fbp._tcp.local");   //TODO harden
+
+        // add A record - has no port information
+        responder.add_resource(ResourceRecord::new(
+            srv_name.clone(),
+            CLASS::IN,
+            ttl,
+            RData::A(A { address: Ipv4Addr::LOCALHOST.into() }),    //###
+        ));
+        // add SRV record - has port information
+        responder.add_resource(ResourceRecord::new(
+            srv_name.clone(),
+            CLASS::IN,
+            ttl,
+            RData::SRV(SRV {
+                port: url.port().expect("failed to get port from configuration URL"),
+                priority: 0,
+                weight: 0,
+                target: srv_name
+            })
+        ));
         debug!("responder started");
 
         // FBP main loop
@@ -85,7 +115,8 @@ impl Component for ZeroconfResponderComponent {
         }
 
         // shut down
-        discovery.remove_service_from_discovery();
+        //discovery.remove_service_from_discovery();
+        responder.clear();
         info!("exiting");
     }
 
