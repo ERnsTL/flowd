@@ -74,6 +74,7 @@ use components::tls::TLSClientComponent;
 use components::tcp::TCPServerComponent;
 use components::tls::TLSServerComponent;
 use components::ws::WSServerComponent;
+use components::zeroconf::ZeroconfBrowserComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));

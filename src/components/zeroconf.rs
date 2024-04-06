@@ -50,7 +50,7 @@ impl Component for ZeroconfResponderComponent {
 
         // configure
         // set up responder
-        let responder = ServiceDaemon::new().expect("failed to create responder");
+        let responder = ServiceDaemon::new().expect("failed to create mDNS-SD daemon");
         // prepare service record
         let host_name = url.host_str().expect("failed to get socket address from connection URL").to_owned() + ".local.";
         //let properties = [("property_1", "test"), ("property_2", "1234")];
@@ -119,7 +119,7 @@ impl Component for ZeroconfResponderComponent {
     }
 }
 
-pub struct ZeroconfQueryComponent {
+pub struct ZeroconfBrowserComponent {
     conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
@@ -127,9 +127,11 @@ pub struct ZeroconfQueryComponent {
     //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
 }
 
-impl Component for ZeroconfQueryComponent {
+const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
+
+impl Component for ZeroconfBrowserComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
-        ZeroconfQueryComponent {
+        ZeroconfBrowserComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
@@ -141,35 +143,45 @@ impl Component for ZeroconfQueryComponent {
     fn run(self) {
         debug!("ZeroconfQuery is now run()ning!");
         let mut conf = self.conf;
-        let _out = self.out.sink;
-        let _wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let mut out = self.out.sink;
+        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
 
-        // check config port
+        // get configuration
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-
-        // prepare connection arguments
-        // get destination from URL
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
+        
+        // get service name from URL
+        let service_name = url.host_str().expect("failed to get service name from connection URL").to_owned();
+
+        // get instance name from URL
+        let instance_name: &str;
+        if url.path().is_empty() {
+            instance_name = "";
+        } else {
+            instance_name = url.path().strip_prefix("/").expect("failed to strip prefix '/' from instance name in configuration URL path");
+        }
+
+        //TODO add support for domains other than "local"
+        /*
         //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
         let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
         let channel_bytes = channel_queryparam.1.as_bytes();
         let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
         debug!("channel: {}", channel);
-
-        // connect
-        //###
-        /*
-        let client = redis::Client::open(url_str).expect("failed to open client");
-        let mut connection = client.get_connection().expect("failed to get connection on client");
-        let mut pubsub = connection.as_pubsub();
-        // subscribe to given topic
-        //TODO enable reconnection - or is this done automatically via .iter()?
-        pubsub.subscribe(channel).expect("failed to subscribe to channel");
-        pubsub.set_read_timeout(RECV_TIMEOUT).expect("failed to set read timeout");    //TODO optimize Some packaging
         */
+
+        //TODO add support for mode selection: one-shot, continuous, etc.
+        //TODO add support for timeout in one-shot mode
+        //TODO add support for selecting output format, which parameters to return
+
+        // set configuration
+        let client = ServiceDaemon::new().expect("failed to create mDNS-SD daemon");
+        // set up query
+        let receiver = client.browse(&service_name).expect("Failed to browse");
+        debug!("query started");
 
         // main loop
         loop {
@@ -191,38 +203,69 @@ impl Component for ZeroconfQueryComponent {
                 }
             }
 
-            // receive packets
-            //###
-            /*
-            while let Ok(msg) = pubsub.get_message() {
-                //TODO optimize get_payload() there is some FromRedisType conversion involved
-                let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
-                debug!("Received payload from redis channel: {:?}", payload);
+            // receive responses
+            if let Ok(event) = receiver.recv_timeout(RECEIVE_TIMEOUT) {
+                trace!("received event from resolver: {:?}", event);
 
-                // send it
-                debug!("forwarding redis payload...");
-                out.push(payload).expect("could not push into OUT");    //TODO optimize conversion
-                out_wakeup.unpark();
-                debug!("done");
+                // process
+                match event {
+                    ServiceEvent::ServiceResolved(info) => {
+                        trace!("got a resolved service of given service name: {}", info.get_fullname());
+
+                        // check instance name - it is part of the fullname up until the first dot
+                        let instance_name_this = info.get_fullname().split('.').next().expect("failed to get instance name from fullname");
+                        if instance_name_this.contains(instance_name) {
+                            debug!("got a resolved service with matching instance name, sending...");
+
+                            //TODO add support for multiple IP addresses
+                            //TODO add support for IPv6 address and which is prefferred result - IPv4 or IPv6
+                            //TODO add support for TXT record properties in result
+
+                            // send it
+                            // NOTE: the first address is not always the best one, it could be a local address or an IP address that is not reachable from the network like a VPN address - OTOH, that is up to the publisher to do properly. Just FYI.
+                            let address = info.get_addresses().iter().next().expect("failed to get first IP address");
+                            let address_str;
+                            if address.is_ipv6() {
+                                address_str = format!("[{}]", address); //TODO better use URL instead of this formatting exception, which does this automatically
+                            } else {
+                                address_str = address.to_string();
+                            }
+                            let result = format!(
+                                "tcp://{}:{}/{}",
+                                address_str,
+                                info.get_port(),
+                                instance_name_this
+                                ).into_bytes();
+                            out.push(result).expect("could not push into OUT");    //TODO optimize conversion
+                            out_wakeup.unpark();
+                            debug!("done");
+                        } else {
+                            trace!("service name matches, but instance name mismatch: {} != {}, discarding result", instance_name_this, instance_name);
+                        }
+
+                        // what to do next?
+                        break;
+                    }
+                    other_event => {
+                        // NOTE: for example, before the ServiceResolved event, there is a ServiceFound event, but it has no addresses yet so it is not useful
+                        trace!("received other event: {:?} - discarding", &other_event);
+                    }
+                }
             }
-            */
-            //TODO handle Err case - is is temporary error or permanent error?
-
-            // are we done?
-            //TODO handle EOF on redis connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
-            //TODO add automatic reconnection via crate "connection-manager" feature
 
             trace!("-- end of iteration");
-            //NOTE: dont park thread here - this is done by recv_timeout()
+            //NOTE: dont park thread here - this is achieved by recv_timeout()
         }
+        client.shutdown().expect("failed to shut down client");
+        thread::sleep(Duration::from_millis(500));    // give it some time to shut down
         info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
-            name: String::from("ZeroconfQuery"),
-            description: String::from("Subscribes to the Redis MQ pub/sub channel given in CONF and forwards received message data to the OUT outport."),
-            icon: String::from("cloud-download"),   // or arrow-circle-down
+            name: String::from("ZeroconfBrowser"),
+            description: String::from("Starts an mDNS-SD browser and tries to find service instance based on the given service name in CONF and sends found responses to OUT outport."),
+            icon: String::from("search"),
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
@@ -231,9 +274,9 @@ impl Component for ZeroconfQueryComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see redis crate documentation"),  // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
+                    description: String::from("query URL - instance in the URL path is optional"),
                     values_allowed: vec![],
-                    value_default: String::from("rediss://user:pass@server.com/db_number?channel=channel_name")
+                    value_default: String::from("mdns://_fbp._tcp.local./instancename")
                 }
             ],
             out_ports: vec![
@@ -243,7 +286,7 @@ impl Component for ZeroconfQueryComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("contents of received messages on given Redis MQ channel"),
+                    description: String::from("service response in URL format, eg. tcp://1.2.3.4:1234/instancename"),
                     values_allowed: vec![],
                     value_default: String::from("")
                 }
