@@ -74,16 +74,18 @@ impl Component for ZeroconfResponderComponent {
         */
 
         let mut responder = SimpleMdnsResponder::new(10);
-        let srv_name = Name::new_unchecked("_fbp._tcp.local");   //TODO harden
+        let srv_name = Name::new_unchecked(service_name);   //TODO harden - check if valid domain name
+        // TODO this wants a Name<'static> but that is not possible when using a variable which is generated at runtime, and I dont want to leak memory
 
+        // TODO add support for AAAA records - how to hand over IPv6 address in configuration URL?
         // add A record - has no port information
         responder.add_resource(ResourceRecord::new(
             srv_name.clone(),
             CLASS::IN,
             ttl,
-            RData::A(A { address: Ipv4Addr::LOCALHOST.into() }),    //###
+            RData::A(A { address: Ipv4Addr::parse_ascii(url.host_str().expect("failed to get host part from configuration URL").as_bytes()).expect("failed to parse configuration URL hostname part as IPv4 address").to_bits() }),
         ));
-        // add SRV record - has port information
+        // add SRV record - which has port information
         responder.add_resource(ResourceRecord::new(
             srv_name.clone(),
             CLASS::IN,

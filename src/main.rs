@@ -2,6 +2,7 @@
 #![feature(io_error_more)]
 #![feature(map_try_insert)]
 #![feature(addr_parse_ascii)]   // for TCPClientComponent -> SocketAddr::parse_ascii()
+#![feature(ip_bits)]    // for ZeroconfResponderComponent -> Ipv4Addr::to_bits()
 
 use std::net::{TcpListener, TcpStream};
 use std::str;
