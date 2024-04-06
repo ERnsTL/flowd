@@ -72,9 +72,10 @@ impl Component for TCPClientComponent {
         */
 
         // configure
-        let mut client = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server - timeout");
+        let mut client = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server");
         client.set_read_timeout(READ_TIMEOUT).expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
         client.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on TCP client");
+        debug!("connected to {}", addr);
 
         // main loop
         //let mut bytes_in;
