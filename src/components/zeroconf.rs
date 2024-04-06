@@ -8,6 +8,12 @@ use simple_mdns::sync_discovery::SimpleMdnsResponder;
 use simple_dns::{Name, CLASS, ResourceRecord, rdata::{RData, A, SRV}};
 use std::net::Ipv4Addr;
 
+/*
+goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
+Ability for multiple flowd instances to find each other AKA "where is my other peer to connect to"
+in order to easily form a multi-machine, multi-network FBP network with zero configuration.
+*/
+
 pub struct ZeroconfResponderComponent {
     conf: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
