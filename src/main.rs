@@ -91,7 +91,7 @@ fn main() {
             .set_level_padding(simplelog::LevelPadding::Right)
             .add_filter_ignore_str("rumqttc")   //TODO optimize - unfortunately the rumqttc crate sends debug! about PingReq every few seconds in https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L416 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/v5/state.rs#L589 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L357
             .add_filter_ignore_str("rustls")   //TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
-            .add_filter_ignore_str("simple_mdns")   // TODO optimize - unfortunately simle_mdns sends debug! about every packet received
+            .add_filter_ignore_str("mdns_sd")   //TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
             .build(),
         simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
         simplelog::ColorChoice::Auto    // depending on whether interactive or not
