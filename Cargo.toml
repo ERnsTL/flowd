@@ -88,11 +88,11 @@ tera = "1.0"
 staart = "0.7"
 
 # for ZeroconfResponderComponent and ZeroconfQueryComponent
-simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
+#simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
 # NOTE: simple-mdns has dependency on a different version than the latest version on crates.io, for example ResourceRecord has different generic arguments
 # need to use the same version as simple-mdns depends on
-simple-dns = "0.6.2"
-#mdns-sd = "0.10.4"
+#simple-dns = "0.6.2"
+mdns-sd = "0.10.4"
 
 # for RegexpExtractComponent
 regex = "1.10"
