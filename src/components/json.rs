@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
-use serde_json::json; //, Value};
+use serde_json::Value;
 use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};   //Error};
 use jaq_parse;
 //use jaq_core::core;
@@ -104,7 +104,7 @@ impl Component for JSONQueryComponent {
                 if let Ok(ip) = inn.pop() {
                     // prepare packet
                     debug!("got a packet, processing...");
-                    let input = json!(ip);
+                    let input: Value = serde_json::from_slice(&ip).expect("could not parse JSON from input IP");
 
                     // iterator over the output values
                     //TODO support for chunks via open bracket, closing bracket
@@ -119,7 +119,8 @@ impl Component for JSONQueryComponent {
                     for value in result {
                         match value {
                             Ok(val) => {
-                                let vec_out = val.to_string().into_bytes();
+                                // prepare packet
+                                let vec_out = format!("{}", val).into_bytes();  //TODO optimize - get rid of format!() maybe possible using .to_string() but what if result is a number or an object etc.?
 
                                 // send it
                                 debug!("sending...");
