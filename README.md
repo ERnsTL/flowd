@@ -226,6 +226,7 @@ Everything else:
 * TLS server
 * WebSocket server
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour and DNS-SD
+* JSON query component using jaq/jq filter syntax
 
 TODO components (0.4 milestone - basic versions):
 
