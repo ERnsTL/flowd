@@ -15,6 +15,7 @@ TODO scp file transfer
 TODO use custom identity file
 
 Usage example: https://crates.io/crates/ssh-rs#how-to-use
+TODO what does https://crates.io/crates/ssh-key do? maybe useful for key management
 */
 
 pub struct SSHClientComponent {
