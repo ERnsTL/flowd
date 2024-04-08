@@ -228,7 +228,7 @@ Everything else:
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour and DNS-SD
 * JSON query component using jaq/jq filter syntax
 * XPath filtering on HTML and simple XML data (note that CSS selectors are a subset of XPath query and can be converted into it)
-* SSH client (without using OpenSSH client or libssh) with streaming capability of remote program output
+* SSH client (without using OpenSSH client or libssh) TODO streaming capability of remote program output
 
 TODO components (0.4 milestone):
 
