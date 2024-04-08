@@ -57,6 +57,7 @@ impl Component for CmdComponent {
         // read configuration
         let mut mode = Mode::Each;
         let mut retry = false;
+        //TODO must split the configuration into words with shell_words::split() and then parse the arguments with lexopt, like already done in SSH client component
         let mut parser = lexopt::Parser::from_args(vec![OsString::from(std::str::from_utf8(&conf.pop().expect("could not read IP from CONF configuration inport")).expect("invalid utf-8"))]);
         while let Some(arg) = parser.next().expect("could not call next()") {
             match arg {
