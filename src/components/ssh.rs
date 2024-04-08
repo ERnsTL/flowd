@@ -30,7 +30,7 @@ pub struct SSHClientComponent {
 }
 
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(7));
-const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(2000));     //TODO should be set to 500ms for streaming mode
 
 enum Mode { One, Each }
 
@@ -58,6 +58,8 @@ impl Component for SSHClientComponent {
         // read sub-process program and args
         let cmd_ip = cmd.pop().expect("could not read IP from CMD configuration inport");
         let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
+        // NOTE: ssh does the parsing of the command-line itself, we just pass it as a str
+        /*
         let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
         let mut cmd_args: Vec<OsString> = vec![];
         if cmd_words.len() > 0 {
@@ -66,6 +68,7 @@ impl Component for SSHClientComponent {
         }
         let cmd_program = cmd_words.pop().expect("could not pop program name");
         debug!("got program {} with arguments {:?}", cmd_program, cmd_args);
+        */
 
         // read configuration
         let mut username: Option<String> = None;
@@ -74,7 +77,10 @@ impl Component for SSHClientComponent {
         let mut mode = Mode::Each;
         let mut retry = false;
         let mut pipe_out: bool = false;
-        let mut parser = lexopt::Parser::from_args(vec![OsString::from(std::str::from_utf8(&conf.pop().expect("could not read IP from CONF configuration inport")).expect("invalid utf-8"))]);
+        let conf_vec = conf.pop().expect("could not read IP from CONF configuration inport");
+        let conf_words_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+        let conf_words = shell_words::split(conf_words_str).expect("failed to parse command-line of sub-process");
+        let mut parser = lexopt::Parser::from_args(conf_words);
         let mut address_port: Option<String> = None;
         while let Some(arg) = parser.next().expect("could not call next()") {
             match arg {
@@ -104,12 +110,31 @@ impl Component for SSHClientComponent {
                 Value(val) => {
                     // check for address:port
                     if address_port.is_none() {
-                        address_port = Some(val.into_string().expect("could not convert address_port to string"));
+                        // check if the format is address:port or user@address:port
+                        let val = val.into_string().expect("could not convert val to string");
+                        if val.contains('@') {
+                            // split user@address:port
+                            let parts: Vec<&str> = val.split('@').collect();
+                            if parts.len() != 2 {
+                                error!("invalid address:port format: {}", val);
+                                return;
+                            }
+                            username = Some(parts[0].to_string());
+                            address_port = Some(parts[1].to_string());
+                            //TODO add check if there is a port included, but because of IPv6 with its ":" this is not trivial
+                        } else {
+                            // just address:port
+                            address_port = Some(val);
+                        }
                     } else {
-                        warn!("ignoring extra value: {:?}", val);
+                        error!("got extra free argument: {:?} - exiting", val);
+                        return;
                     }
                 }
-                _ => { unreachable!(); }
+                _ => {
+                    error!("got unexpected argument: {:?} - exiting", arg);
+                    return;
+                }
             }
         }
         // check configuration
@@ -171,12 +196,16 @@ impl Component for SSHClientComponent {
 
                     // open session
                     let mut session = session_builder
+                        // connect does not support SSH-tpyical user@host:port syntax but only the basic from TcpStream.connect("host:port")
                         .connect_with_timeout(&address_port, CONNECT_TIMEOUT)   //TODO optimize - avoid unwrap, could do unwrap_unchecked because of previous check
                         .unwrap()
                         .run_local();
 
                     // run remote command
                     //TODO funtional overlap with mode = one
+                    // NOTE: in send_command() mode, the read_write_timeout is applied to the command execution time (how unexpected)
+                    //  but in exec_shell resp. streaming mode it is read from the channel, and then there is nothing available yet,
+                    //  then we just do another iteration, able to handle singals
                     let out_vec: Vec<u8>;
                     if pipe_out {   // stream data from SSH command to next component
                         // open and execute command in SSH channel in session
@@ -191,7 +220,7 @@ impl Component for SSHClientComponent {
                     } else { // one command execution per inport packet
                         // capture of output desired
                         let exec = session.open_exec().expect("failed to open exec");
-                        out_vec = exec.send_command(&cmd_program).expect("failed to send command");
+                        out_vec = exec.send_command(cmd_line).expect("failed to send command");
 
                         // no capture of output needed
                         //TODO make configurable
@@ -262,7 +291,7 @@ impl Component for SSHClientComponent {
                     is_arrayport: false,
                     description: String::from("POSIX shell-compatible path and arguments for the remote process"),
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from("ls -alh /dev/shm/")
                 },
                 ComponentPort {
                     name: String::from("CONF"),
@@ -270,9 +299,9 @@ impl Component for SSHClientComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("configuration parameters: --retry default false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance)"),
+                    description: String::from("configuration parameters: --retry default false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance) - most parameters are optional"),
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from("--mode=each|one --pipeout=true --user=username --pass=password -i /home/user/.ssh/id_ed25519 username@address:port")
                 },
             ],
             out_ports: vec![
