@@ -97,6 +97,9 @@ fn main() {
             .add_filter_ignore_str("rustls")   //TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
             .add_filter_ignore_str("mdns_sd")   //TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
             .add_filter_ignore_str("ssh")   //TODO optimize - sends many info messages about SSH connection establishment etc. - how to disable that if not needed?
+            .add_filter_ignore_str("reqwest")   // TODO optimize - some messages about opening connections etc. in TelegramBotComponent
+            .add_filter_ignore_str("hyper") //TODO optimize - debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
+            .add_filter_ignore_str("teloxide")  // TODO optimize - sends some messages about the Telegram API in TelegramBotComponent
             .build(),
         simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
         simplelog::ColorChoice::Auto    // depending on whether interactive or not
