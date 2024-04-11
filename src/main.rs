@@ -78,6 +78,7 @@ use components::zeroconf::ZeroconfBrowserComponent;
 use components::json::JSONQueryComponent;
 use components::html::HTMLQueryComponent;
 use components::ssh::SSHClientComponent;
+use components::telegram::TelegramBotComponent;
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
@@ -159,6 +160,7 @@ fn main() {
         JSONQueryComponent::get_metadata(),
         HTMLQueryComponent::get_metadata(),
         SSHClientComponent::get_metadata(),
+        TelegramBotComponent::get_metadata(),
     ])));
     //TODO actually load components
     info!("component library initialized");
@@ -1891,6 +1893,7 @@ impl RuntimeRuntimePayload {
                     "JSONQuery" => { JSONQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "HTMLQuery" => { HTMLQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     "SSHClient" => { SSHClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
+                    "TelegramBot" => { TelegramBotComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
                     _ => {
                         error!("unknown component in network start! exiting thread.");
                     }
