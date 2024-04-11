@@ -5976,9 +5976,10 @@ type ProcessInports = MultiMap<String, ProcessEdgeSource>;
 type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
 type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
+type ProcessEdgeSinkConnection = rtrb::Producer<MessageBuf>;
 #[derive(Debug)]
 struct ProcessEdgeSink {
-    sink: rtrb::Producer<MessageBuf>,
+    sink: ProcessEdgeSinkConnection,
     wakeup: Option<WakeupNotify>,
     proc_name: Option<String>,
 }
