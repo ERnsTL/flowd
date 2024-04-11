@@ -124,3 +124,8 @@ skyscraper = "0.6.3"
 
 # for SSHClientComponent
 ssh-rs = "0.5.0"
+
+# for TelegramBotComponent
+# list of features:  https://github.com/teloxide/teloxide/blob/master/crates/teloxide/Cargo.toml
+# specifically, no Ctrl+C handler
+teloxide = { version = "0.12.2", default-features = false, features = ["native-tls"] }  # or rustls
