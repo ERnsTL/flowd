@@ -230,10 +230,7 @@ Everything else:
 * XPath filtering on HTML and simple XML data (note that CSS selectors are a subset of XPath query and can be converted into it)
 * SSH client (without using OpenSSH client or libssh) TODO streaming capability of remote program output
 * Telegram component using Bot API supporting text messages
-
-TODO components (0.4 milestone):
-
-* Matrix component
+* Matrix client component
 
 TODO connection, disconnection and reconnection (0.4 milestone):
 
