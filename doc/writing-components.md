@@ -10,3 +10,4 @@
   * reading list of inputs 
   * TODO using sub-threads
   * TODO how to handle shutdown
+  * having to start something in a tokio worker thread - telegram, matrix components as template
