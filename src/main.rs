@@ -101,6 +101,7 @@ fn main() {
             .add_filter_ignore_str("reqwest")   // TODO optimize - some messages about opening connections etc. in TelegramBotComponent
             .add_filter_ignore_str("hyper") //TODO optimize - debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
             .add_filter_ignore_str("teloxide")  // TODO optimize - sends some messages about the Telegram API in TelegramBotComponent
+            .add_filter_ignore_str("matrix_sdk")    //TODO optimize - this sends alot of messages about Matrix protocol messages, can this be shut off "at the source"?
             .build(),
         simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
         simplelog::ColorChoice::Auto    // depending on whether interactive or not
