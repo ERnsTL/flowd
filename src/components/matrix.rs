@@ -11,6 +11,7 @@ use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
 use matrix_sdk::event_handler::Ctx;
 
 /*
+TODO add one more filter - some other module is sending debug logging lines
 TODO add support for sending and receiving more data types besides text messages
 TODO add support to join the given room given in URL path - needs more testing
 TODO add support for responding to verification request so that the session goes to verified state
