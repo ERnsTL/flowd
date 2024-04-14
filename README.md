@@ -164,6 +164,21 @@ Maintenance, Operations:
 Testing:
 * Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
 
+Persistence:
+* TODO
+
+    in order to not having to build up the network again after restart ;-)
+    "never lose your data"
+    TODO where is the button in noflo-ui to trigger persistence?
+    TODO automatic saving in time intervals?
+    TODO integrity checker
+        critical and non-critical errors
+        critical - cannot load, cannot start network
+        noncritical - found missing connections, unconnected ports, unavailable components.
+    TODO keep .bak file of previous version
+    TODO saving on ctrl-c? No, ctrl-c means "abort".
+
+
 Checkpointing:
 * Planned, much later.
 
