@@ -183,49 +183,74 @@ fn main() {
     //TODO actually load components
     info!("component library initialized");
 
-    //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
-    let graph: Arc<RwLock<Graph>> = Arc::new(RwLock::new(Graph::new(
-        String::from("main_graph"),
-        String::from("basic description"),
-        String::from("usd")
-    )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
-    // holder for a copy of the TcpStreams = connections of the clients and the graph exported inports and outports (for the graph inport and graph outport handler threads)
+    // graph inport and outport holder
     let graph_inout: Arc<Mutex<GraphInportOutportHolder>> = Arc::new(Mutex::new(GraphInportOutportHolder { inports: None, outports: None, websockets: HashMap::new() }));
-    info!("graph initialized");
+    // graph itself
+    let graph: Arc<RwLock<Graph>>;
+    if Path::new(PERSISTENCE_FILE_NAME).exists() {
+        // load graph from file
+        // open the file in read-only mode with buffer
+        //let file = File::open(path)?;
+        //let reader = BufReader::new(file);
 
-    // add graph exported/published inport and outport
-    graph.write().expect("lock poisoned").inports.insert("GRAPHIN".to_owned(), GraphPort {
-        process: "Repeat_31337".to_owned(),
-        port: "IN".to_owned(),
-        metadata: GraphPortMetadata {
-            x: 36,
-            y: 72,
-        }
-    });
-    graph.write().expect("lock poisoned").outports.insert("GRAPHOUT".to_owned(), GraphPort {
-        process: "Repeat_31338".to_owned(),
-        port: "OUT".to_owned(),
-        metadata: GraphPortMetadata {
-            x: 468,
-            y: 72,
-        }
-    });
-    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
-    //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
-    graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
-    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
-    // add components required for test suite
-    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
-    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()) }).expect("add_node() failed");
-    graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()) }).expect("add_node() failed");
-    graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
-    graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
-    graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+        // read the JSON contents of the file as an instance of Graph.
+        //graph = serde_json::from_reader(reader).expect("failed to parse graph from persistence file");
 
+        //TODO optimize - read the file in one go or buffered? or via &[u8] or better directly into &str?
+        let json_data = std::fs::read_to_string(PERSISTENCE_FILE_NAME).expect("could not read persistence file");
+        graph = Arc::new(RwLock::new(serde_json::from_str(&json_data).expect("failed to parse graph from persistence file")));
+
+        //TODO validate input from file
+        //TODO move into function on Graph
+
+        info!("graph loaded from persistence file");
+    } else {
+        //TODO graph (or runtime?) should check if the components used in the graph are actually available in the component library
+        graph = Arc::new(RwLock::new(Graph::new(
+            String::from("main_graph"),
+            String::from("basic description"),
+            String::from("usd")
+        )));  //TODO check if an RwLock is OK (multiple readers possible, but what if writer deletes that thing being read?) or if Mutex needed
+        // holder for a copy of the TcpStreams = connections of the clients and the graph exported inports and outports (for the graph inport and graph outport handler threads)
+
+        // add graph exported/published inport and outport
+        graph.write().expect("lock poisoned").inports.insert("GRAPHIN".to_owned(), GraphPort {
+            process: "Repeat_31337".to_owned(),
+            port: "IN".to_owned(),
+            metadata: GraphPortMetadata {
+                x: 36,
+                y: 72,
+            }
+        });
+        graph.write().expect("lock poisoned").outports.insert("GRAPHOUT".to_owned(), GraphPort {
+            process: "Repeat_31338".to_owned(),
+            port: "OUT".to_owned(),
+            metadata: GraphPortMetadata {
+                x: 468,
+                y: 72,
+            }
+        });
+        graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
+        //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
+        graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+        graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
+        // add components required for test suite
+        graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) }).expect("add_node() failed");
+        graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()) }).expect("add_node() failed");
+        graph.write().expect("lock poisoned").add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()) }).expect("add_node() failed");
+        graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+        graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+        graph.write().expect("lock poisoned").add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) }).expect("add_edge() failed");
+
+        info!("graph initialized");
+    }
+
+    // start network
     let bind_addr = "localhost:3569";
     let server = TcpListener::bind(bind_addr).unwrap();
     info!("management listening on {} - manage via GUI at https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569", bind_addr);   //TODO URL escape of bind_addr in URL - currently static
 
+    // start listening for incoming connections
     for stream_res in server.incoming() {
         if let Ok(stream) = stream_res {
             // create Arc pointers for the new thread
