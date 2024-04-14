@@ -162,27 +162,26 @@ Maintenance, Operations:
 * Dynamic discovery of FBP network instances and network parts in order to provide redundancy and ability to shut down parts of the whole system for maintenance.
 
 Testing:
+
 * Planned, there is support in the FBP Network Protocol and in other runtimes for comparison. (TODO)
 
 Persistence:
-* TODO
 
-    in order to not having to build up the network again after restart ;-)
-    "never lose your data"
-    TODO where is the button in noflo-ui to trigger persistence?
-    TODO automatic saving in time intervals?
-    TODO integrity checker
-        critical and non-critical errors
-        critical - cannot load, cannot start network
-        noncritical - found missing connections, unconnected ports, unavailable components.
-    TODO keep .bak file of previous version
-    TODO saving on ctrl-c? No, ctrl-c means "abort".
-
+* Persisting the network graph data structure 1:1 to disk upon network:persist message.
+* Goal:  Never lose your network definition.
+* (planned) Sending persist message from the GUI designer. (where is the button in noflo-ui to trigger persist message?)
+* (planned) Automatic saving of changed network every x minutes.
+* (planned) Integrity checker of loaded and saved graphs, showing critical (cannot load, cannot start this graph) and non-critical errors (missing connections, unconnected ports, unavailable components).
+* (planned) Keep a previous version of the persisted graph (.bak file)
+* Ability to abort the flowd instance, Ctrl+C does not save and overwrite persistence file.
 
 Checkpointing:
+
 * Planned, much later.
+* Goal:  Never lose your data (packets).
 
 Present in Go version to reach feature parity:
+
 * TODO Sub-networks resp. composite components
 * TODO Can inspect, debug and interact with network components using standard Unix tools
 * TODO Can run a terminal UI component - and then bring it to the web using gotty :-)
