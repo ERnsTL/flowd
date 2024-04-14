@@ -9,6 +9,9 @@ use std::sync::{Arc, RwLock, Mutex};
 use std::thread::{self, Thread};
 use std::time::Duration;
 
+use std::io::prelude::*;
+use std::fs::File;
+
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::handshake::HandshakeRole;
 use tungstenite::{accept_hdr, Error, HandshakeError, Message, Result};
@@ -30,6 +33,7 @@ use chrono::prelude::*;
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
 const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
+const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
 
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
@@ -361,7 +365,8 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         info!("got network:persist message");
                         //TODO check secret
                         // persist and send either network:persist or network:error
-                        match runtime.read().expect("lock poisoned").persist() {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
+                        //###
+                        match runtime.read().expect("lock poisoned").persist(&graph.write().expect("lock poisoned")) {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
                             Ok(_) => {
                                 info!("response: sending network:persist message");
                                 websocket
