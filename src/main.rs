@@ -3,29 +3,37 @@
 #![feature(map_try_insert)]
 #![feature(addr_parse_ascii)]   // for TCPClientComponent -> SocketAddr::parse_ascii()
 
-use std::net::{TcpListener, TcpStream};
+// basics and threading
 use std::str;
 use std::sync::{Arc, RwLock, Mutex};
 use std::thread::{self, Thread};
-use std::time::Duration;
 
-use std::io::prelude::*;
-use std::fs::File;
-
+// network and WebSocket
+use std::net::{TcpListener, TcpStream};
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::handshake::HandshakeRole;
 use tungstenite::{accept_hdr, Error, HandshakeError, Message, Result};
 
+// persistence
+use std::io::prelude::*;
+use std::fs::File;
+use std::path::Path;
+
+// logging
 #[macro_use] extern crate log;
 extern crate simplelog; //TODO check the paris feature flag for tags, useful?
 
+// JSON serialization and deserialization
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 
+// data structures
 use std::collections::HashMap;
 use multimap::MultiMap;
 //use dashmap::DashMap;
 
+// timekeeping in watchdog thread etc.
+use std::time::Duration;
 use chrono::prelude::*;
 
 
