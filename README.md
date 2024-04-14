@@ -188,6 +188,7 @@ Persistence:
 * (planned) Integrity checker of loaded and saved graphs, showing critical (cannot load, cannot start this graph) and non-critical errors (missing connections, unconnected ports, unavailable components).
 * (planned) Keep a previous version of the persisted graph (.bak file)
 * Ability to abort the flowd instance, Ctrl+C does not save and overwrite persistence file.
+* Exlusion of the default persistence file from VCS.
 
 Checkpointing:
 
