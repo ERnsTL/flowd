@@ -399,7 +399,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                         //TODO check secret
                         // persist and send either network:persist or network:error
                         //###
-                        match runtime.read().expect("lock poisoned").persist(&graph.write().expect("lock poisoned")) {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
+                        match runtime.read().expect("lock poisoned").persist(&graph.read().expect("lock poisoned")) {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
                             Ok(_) => {
                                 info!("response: sending network:persist message");
                                 websocket
