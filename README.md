@@ -40,7 +40,7 @@ cargo run
 
 Next, [open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
 
-You should see a predefined test network, can re-arrange them, start/stop the network. You will see output on your terminal.
+You should see a predefined test network, can re-arrange the components, start/stop the network etc. You will see output on your terminal.
 
 It should look roughly like this:
 
