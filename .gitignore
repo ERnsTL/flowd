@@ -41,3 +41,6 @@ tmp/
 # LibComponent external components
 libwordcounter.so
 libwordcounter.v
+
+# flowd persistence file
+flowd.graph.json
