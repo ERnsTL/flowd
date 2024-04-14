@@ -1520,8 +1520,14 @@ impl RuntimeRuntimePayload {
         }
     }
 
-    fn persist(&self) -> std::result::Result<(), std::io::Error> {
-        //TODO implement
+    fn persist(&self, graph: &Graph) -> std::result::Result<(), std::io::Error> {
+        //###
+        // get source
+        let net_source = graph.get_source(self.graph.clone())?; //TODO optimize clone - accept &str?
+
+        // save to file
+        let mut output = File::create(PERSISTENCE_FILE_NAME)?;
+        output.write(net_source.code.as_bytes())?;
         Ok(())
     }
 
@@ -5799,8 +5805,9 @@ impl Graph {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
     }
 
-    fn get_source(&mut self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
+    fn get_source(&self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
         //TODO optimize: the message handler has already checked the graph name outside
+        //###
         if name == self.properties.name {
             return Ok(ComponentSourcePayload {
                 name: name,
