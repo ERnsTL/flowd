@@ -210,8 +210,8 @@ Present in Go version to reach feature parity:
 * TODO Display of required components and file dependencies of the given network for deployment
 
 Everything else:
-* Maybe I forgot about something important, please post it as a Github issue.
 
+* Maybe I forgot about something important, please post it as a Github issue.
 
 ## Included Components
 
@@ -279,7 +279,6 @@ TODO interaction components (0.7 milestone):
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
 
-
 ## Next Steps
 
 Check the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
@@ -292,7 +291,6 @@ Create first applications using these and add features to support these use-case
 
 Finally, become production-ready with management, roles, ACLs, security, hardening overall, monitoring.
 
-
 ## Architecture
 
 TODO
@@ -302,34 +300,31 @@ TODO
 
 TODO
 
-
 ## Development aka Hacking on ```flowd```
 
 Running tests:
 
-  ```
-  GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
-  ```
+```sh
+GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
+```
 
 Running benchmarks:
 
-  ```
-  GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
-  ```
+```sh
+GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
+```
 
 Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
 
-  ```
-  fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
-  ```
+```sh
+fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
+```
 
 Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
-
 
 ## Documentation
 
 * [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
-
 
 ## Goals in General
 
@@ -378,9 +373,12 @@ By fulfilling these characteristics, an FBP runtime environment can be made suit
 TODO
 
 Three stages usually:
-1. read and packetize
+
+1. read and packetize data structures into IPs
 2. filter and transform
 3. assemble packets and output
+
+TODO difference is that this goes beyond ETL. It also goes beyond the DAGs, which seem fashionable these days.
 
 TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which results should be produced (see JPM book).
 
@@ -389,7 +387,6 @@ TODO no conceptual dissonance between design and implementation stages.
 TODO straight implementation, almost waterfall-like, fewer refactorings.
 
 TODO Linear maintenance cost in relation to program size.
-
 
 ## FBP Runtimes
 
@@ -405,11 +402,8 @@ There are a few categories of FBP runtimes:
 
 The different ```flowd``` implementations have different approaches and focuses.
 
-
-
 * [flowd-rs](flowd-rs/README-Rust.go#FBP Runtimes)
 * [flowd-go](README-Go.go#FBP Runtimes)
-
 
 ## Integration with other FBP Runtimes
 
@@ -423,11 +417,9 @@ For more optimal and tighter integration, there are gateway components and proto
 * with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
 * others: Fractalide? ...?
 
-
 ## License
 
 GNU LGPLv3+
-
 
 ## Contributing
 
@@ -437,12 +429,10 @@ GNU LGPLv3+
 4. quality check
 5. merged!
 
-
 ## Further documentation
 
 * TODO
 * Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further documentation)
-
 
 ## Community
 
@@ -469,7 +459,6 @@ GNU LGPLv3+
 
 
 > This is alpha software. It works, is quite optimized, but not all of the planned features are currently present. The API may change unexpectedly.
-
 
 ## Features
 
