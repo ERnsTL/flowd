@@ -457,7 +457,6 @@ The different ```flowd``` implementations have different approaches and focuses.
 * [flowd-rs](flowd-rs/README-Rust.go#FBP Runtimes)
 * [flowd-go](README-Go.go#FBP Runtimes)
 
-
 ### FBP Runtimes
 
 TODO rewrite for flowd-rs
@@ -497,6 +496,12 @@ For more optimal and tighter integration, there are gateway components and proto
 * with plumber: [gateway component planned](https://github.com/ERnsTL/flowd/issues/124)
 * with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
 * others: Fractalide? ...?
+
+## Performance, Bechmarks
+
+TODO
+
+TODO add criterion perf tracking
 
 ## Writing Applications
 
