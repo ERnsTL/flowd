@@ -32,6 +32,10 @@ More, humans are terrible at writing, maintaining and understanding code, refer 
 
 ## Installation and Running
 
+TODO Download
+
+TODO Compile and install ```flowd``` and all example components
+
 Run it with:
 
 ```sh
@@ -50,9 +54,70 @@ For how to use the online editor, see the [manual of noflo-ui](https://github.co
 
 ## Examples
 
-TODO
+TODO bots for example
+
+TODO rewrite for flowd-rs and/or move to "developing applications"
+
+Several example components and example processing networks are included.
+
+Compile the network orchestrator and runtime ```flowd```, then run examples like this:
+
+```
+bin/flowd src/github.com/ERnsTL/flowd/examples/chat-server.fbp
+```
+
+This particular example comprises a small chat or console server over TCP. Upon starting ```flowd```, it should show that all components have started up and that the TCP server component is ready for connections.
+
+Then connect to it using, for example:
+
+```
+nc -v localhost 4000
+```
+
+When you connect, you should see a message that it has accepted your connection. When you send data, you should see it sent to an intermediary copy component and further back to ```tcp-server```'s response port and back out via TCP to your client.
+
+The flag ```-quiet``` removes the frame passing information, in case you do not want to see it.
+
+The data flow is as follows:
+
+```
+TCP in -> tcp-server OUT port -> chat IN port -> chat server logic -> chat OUT port -> tcp-server IN port (responses) -> TCP out
+```
+
+Also, an *initial information packet* (IIP) is sent to the ```ARGS``` input port of the ```tcp-server``` component, as defined in the network specification:
+
+```
+'localhost:4000' -> ARGS tcp-server
+```
+
+This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior. When sending an IIP to the ARGS port, this is converted to program arguments.
+
+A more complete, parser-exercising example is located in ```examples/example.fbp```.
+
+You can find out more about the ```.fbp``` network description grammar here:
+
+* [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
+* [his .fbp parser source](https://github.com/jpaulm/parsefbp)
+* [format explanation by NoFlo](https://noflojs.org/documentation/graphs/#fbp)
+* [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
+* [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
+* [FBP DSL syntax](https://github.com/flowbased/flowbased.org/wiki/FBP-DSL)
+
+## Visualization Example
+
+TODO rewrite for flowd-rs
+
+*flowd* can export the network graph structure into *GraphViz* format for visualization.
+
+The following commands will export a network to STDOUT, convert it to a PNG raster image, view it and clean up:
+
+```
+bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
+```
 
 ## Features and Current Status
+
+> This is alpha software. It works, is quite optimized, but not all of the planned features are currently present and it is not ready for business operations having continuity requiments met. The API may change unexpectedly.
 
 FBP network protocol:
 
@@ -282,194 +347,12 @@ TODO interaction components (0.7 milestone):
 * Example login prompt and command-line interaction component
 * Example terminal UI component sending messages into the network
 
-## Next Steps
-
-Check the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
-
-Basically, implement most functionality using in-memory data structures, then break down the structure into different parts (network backends, component API) and allow the component API to be fulfilled by components from shared objects, scripts etc.
-
-Then add more components, port the Go components or add a wrapper for running them (running components as an external process using STDIN and STDOUT makes sense and will be one of the supported execution models).
-
-Create first applications using these and add features to support these use-cases and evolve in tandem with these.
-
-Finally, become production-ready with management, roles, ACLs, security, hardening overall, monitoring.
-
-## Architecture
-
-TODO
-
-
-## Writing Components
-
-TODO
-
-## Development aka Hacking on ```flowd```
-
-Running tests:
-
-```sh
-GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
-```
-
-Running benchmarks:
-
-```sh
-GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
-```
-
-Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
-
-```sh
-fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
-```
-
-Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
-
-## Documentation
-
-* [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
-
-## Goals in General
-
-To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
-
-* Reliability and Robustness: The FBP runtime should be stable and reliable to ensure uninterrupted execution of critical applications. It should be able to handle errors robustly to avoid or at least minimize failures.
-
-* Scalability: The runtime environment should be capable of handling growing demands and workloads to ensure efficient execution of applications. This may involve scaling vertically (on larger machines) or horizontally (by adding more instances).
-
-* Monitoring and Debugging: There should be mechanisms for monitoring and troubleshooting to analyze performance, identify bottlenecks, and debug issues. This can be achieved through logging, dashboards, tracing, and other tools.
-
-* Security: The runtime environment should provide security mechanisms to ensure data integrity, confidentiality, and availability. This may include authentication, authorization, encryption, and protection against attacks such as injection attacks and denial-of-service attacks.
-
-* Transaction Support: It is important that the FBP runtime supports transactions to ensure data consistency and meet the Atomicity, Consistency, Isolation, and Durability (ACID) properties.
-
-* Integration: The runtime environment should seamlessly integrate with other systems and services to support data flows between different applications, platforms, and external services. This can be done through APIs, protocols such as HTTP, messaging systems, and other mechanisms.
-
-* Documentation and Support: Comprehensive documentation and supportive community can help increase developer productivity and efficiently solve issues. A good FBP runtime should have clear documentation, tutorials, examples, and support channels.
-
-By fulfilling these characteristics, an FBP runtime environment can be made suitable for production and reliable applications to support stable, scalable, and reliable workflows.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Writing Applications
-
-TODO
-
-Three stages usually:
-
-1. read and packetize data structures into IPs
-2. filter and transform
-3. assemble packets and output
-
-TODO difference is that this goes beyond ETL. It also goes beyond the DAGs, which seem fashionable these days.
-
-TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which results should be produced (see JPM book).
-
-TODO no conceptual dissonance between design and implementation stages.
-
-TODO straight implementation, almost waterfall-like, fewer refactorings.
-
-TODO Linear maintenance cost in relation to program size.
-
-## FBP Runtimes
-
-There exist several FBP *runtimes*, which emphasize different aspects of FBP and realize the underlying concept in different ways.
-
-There are a few categories of FBP runtimes:
-
-1. Single-language systems and libraries. Everything is running inside the same process and is written in the same programming language. Often, the network is defined using this programming language as well. This class has the best performance but is also very specialized.
-
-2. Tighly-integrated systems. These try to pull all components into the same process using dynamic loading of libraries (.so / .dll) and thus into the same address space to save on context switches. To communicate, shared memory is usually used. It is possible to integrate components written in different programming languages, but requires strict conformance and conversion to a common binary message layout and flow of program execution (ABI, application binary interface). Definition of FBP processing networks is done declaratively or using own scripting languages.
-
-3. Loosely-coupled inter-language systems. The different components run as separate processes and communicate using sockets, named pipes, message queueing systems etc. This category requires little effort, tailoring and no special libraries to get started. They can integrate components and even existing non-FBP-aware programs into its processing networks. The chosen data formats, protocols etc. are based on common, widespread formats which are easy to implement. Definition of networks is usually done in a declarative format.
-
-The different ```flowd``` implementations have different approaches and focuses.
-
-* [flowd-rs](flowd-rs/README-Rust.go#FBP Runtimes)
-* [flowd-go](README-Go.go#FBP Runtimes)
-
-## Integration with other FBP Runtimes
-
-One feature of FBP is the ability to freely transform data. Thus as a general solution, common IPC mechanisms like TCP, WebSocket or Unix domain sockets can be used to bridge FBP networks running in different FBP runtimes. flowd can also start other runtimes as subprocesses using the ```cmd``` component.
-
-For more optimal and tighter integration, there are gateway components and protocols as follows:
-
-* with JavaFBP: gateway component planned, [Java parser of framing format planned](https://github.com/ERnsTL/flowd/issues/130)
-* with NoFlo: implementation of JSON FBP protocol [planned, partway started](https://github.com/ERnsTL/flowd/issues/55)
-* with plumber: [gateway component planned](https://github.com/ERnsTL/flowd/issues/124)
-* with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
-* others: Fractalide? ...?
-
-## License
-
-GNU LGPLv3+
-
-## Contributing
-
-1. open an issue or pick an existing one
-2. discuss your idea
-3. send pull request
-4. quality check
-5. merged!
-
-## Further documentation
-
-* TODO
-* Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further documentation)
-
-## Community
-
-* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
-* [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-> This is alpha software. It works, is quite optimized, but not all of the planned features are currently present. The API may change unexpectedly.
-
-## Features
+TODO merge following into flowd-rs section on this
 
 Currently present features:
 
 * Parsing of ```.fbp``` network specifications
 * Parsing of ```.drw``` network specifications made using [DrawFBP](http://www.jpaulmorrison.com/fbp/software.html#DrawFBP)
-* Starting a network of the specified components
 * Simple and easy to implement framing format
 * Multi-core use resp. parallel processing
 * Closing of ports and close detection
@@ -490,17 +373,9 @@ Currently present features:
 
 The included example components cover:
 
-* TCP client and server
-* Unix domain client and server (abstract and path-based)
-* TLS client and server
-* SSH client
-* Simple HTTP server and client
 * Re-use of any existing programs and their output or for transformation of data
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
-* File reading and writing
-* Line splitting
-* File tailing resp. following
 * Modification of frame headers
 * Extraction of data from frame body
 * Routing based on frame contents or header values
@@ -521,8 +396,25 @@ Planned features:
 * Integration with other FBP runtimes
 * For more, see the issues list!
 
+## Next Steps
+
+Check the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
+
+Basically, implement most functionality using in-memory data structures, then break down the structure into different parts (network backends, component API) and allow the component API to be fulfilled by components from shared objects, scripts etc.
+
+Then add more components, port the Go components or add a wrapper for running them (running components as an external process using STDIN and STDOUT makes sense and will be one of the supported execution models).
+
+Create first applications using these and add features to support these use-cases and evolve in tandem with these.
+
+Finally, become production-ready with management, roles, ACLs, security, hardening overall, monitoring.
 
 ## Architecture
+
+TODO
+
+### Architecture comparison flowd-rs to flowd-go
+
+TODO rewrite and integrate
 
 All components are either normal programs or scripts, which do not have to be specially modified to be used in a ```flowd``` network (wrapped in a ```cmd``` component) or they are programs, which understand the ```flowd``` framing format. Raw binary data streams are also possible, eg. a compressed data stream.
 
@@ -546,91 +438,29 @@ For more information on the framing format see [the Go implementation source cod
 
 Using several components, a network can be built. It is like a graph of components or like workers in a data factory doing one step in the processing. The application developer connects the output ports to other components' input ports and parameterizes the components. Most of the components will be off-the-shelf ones, though usually a few have to be written for the specific application project. In this fashion, the application is built.
 
+### FBP Runtimes
 
-## Installation
+TODO rewrite for flowd-rs
 
-Download:
+There exist several FBP *runtimes*, which emphasize different aspects of FBP and realize the underlying concept in different ways.
 
-```
-GOPATH=`pwd` go get -u github.com/ERnsTL/flowd
-```
+There are a few categories of FBP runtimes:
 
-Compile and install ```flowd``` and all example components:
+1. Single-language systems and libraries. Everything is running inside the same process and is written in the same programming language. Often, the network is defined using this programming language as well. This class has the best performance but is also very specialized.
 
-```
-GOPATH=`pwd` go install github.com/ERnsTL/flowd/...
-```
+2. Tighly-integrated systems. These try to pull all components into the same process using dynamic loading of libraries (.so / .dll) and thus into the same address space to save on context switches. To communicate, shared memory is usually used. It is possible to integrate components written in different programming languages, but requires strict conformance and conversion to a common binary message layout and flow of program execution (ABI, application binary interface). Definition of FBP processing networks is done declaratively or using own scripting languages.
 
+3. Loosely-coupled inter-language systems. The different components run as separate processes and communicate using sockets, named pipes, message queueing systems etc. This category requires little effort, tailoring and no special libraries to get started. They can integrate components and even existing non-FBP-aware programs into its processing networks. The chosen data formats, protocols etc. are based on common, widespread formats which are easy to implement. Definition of networks is usually done in a declarative format.
 
-## Examples
+The different ```flowd``` implementations have different approaches and focuses.
 
-Several example components and example processing networks are included.
-
-Compile the network orchestrator and runtime ```flowd```, then run examples like this:
-
-```
-bin/flowd src/github.com/ERnsTL/flowd/examples/chat-server.fbp
-```
-
-This particular example comprises a small chat or console server over TCP. Upon starting ```flowd```, it should show that all components have started up and that the TCP server component is ready for connections.
-
-Then connect to it using, for example:
-
-```
-nc -v localhost 4000
-```
-
-When you connect, you should see a message that it has accepted your connection. When you send data, you should see it sent to an intermediary copy component and further back to ```tcp-server```'s response port and back out via TCP to your client.
-
-The flag ```-quiet``` removes the frame passing information, in case you do not want to see it.
-
-The data flow is as follows:
-
-```
-TCP in -> tcp-server OUT port -> chat IN port -> chat server logic -> chat OUT port -> tcp-server IN port (responses) -> TCP out
-```
-
-Also, an *initial information packet* (IIP) is sent to the ```ARGS``` input port of the ```tcp-server``` component, as defined in the network specification:
-
-```
-'localhost:4000' -> ARGS tcp-server
-```
-
-This is the first packet/frame sent to this component. It usually contains configuration information and is used to *parametrize* this component's behavior. When sending an IIP to the ARGS port, this is converted to program arguments.
-
-A more complete, parser-exercising example is located in ```examples/example.fbp```.
-
-You can find out more about the ```.fbp``` network description grammar here:
-
-* [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
-* [his .fbp parser source](https://github.com/jpaulm/parsefbp)
-* [format explanation by NoFlo](https://noflojs.org/documentation/graphs/#fbp)
-* [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme).
-* [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
-* [FBP DSL syntax](https://github.com/flowbased/flowbased.org/wiki/FBP-DSL)
+* [flowd-rs](flowd-rs/README-Rust.go#FBP Runtimes)
+* [flowd-go](README-Go.go#FBP Runtimes)
 
 
-## Visualization Example
+### FBP Runtimes
 
-*flowd* can export the network graph structure into *GraphViz* format for visualization.
-
-The following commands will export a network to STDOUT, convert it to a PNG raster image, view it and clean up:
-
-```
-bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
-```
-
-
-## Writing Components
-
-Decide if your program shall implement the ```flowd``` framing format or be wrapped in a ```cmd``` component.
-
-If wrapped, you can decide for the program to be called for each incoming frame in order to process it or if your program should process a stream of frame bodies. If one-off, the program will receive data on STDIN, which will be closed after the frame body has been delivered; the program can the output a result, which will be forwarded into the FBP network for further processing. It is then expected to either close STDOUT or exit the program. In the one-instance mode, STDIN and STDOUT will remain open; your program will receive data from incoming frame bodies to be processed and any output will be framed by the ```cmd``` component and again forwarded into the network.
-
-Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open the named pipes given and will then be connected with the neighbor components. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration. Port closing detection is done using regular EOF on the named pipe; this is usually the signal that all data has arrived from the preceding component and that it shut down; it can also be re-opened if that is the use-case. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact; packet tracing is also implemented using marker values in the header. Output frames, if any, are then to be sent to the output named pipes. That way, the frames from your component are sent directly to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
-
-
-## FBP Runtimes
+TODO rewrite for flowd-rs
 
 As currently implemented, ```flowd-go``` positions itself on the most performant border of the third category, without requiring conformance and internal data conversion to an ABI. Named pipes are the fastest IPC mechanism behind shared memory. The framing format used is easy to implement and parse with modest processing overhead, assumed to be in the range of the data conversion overhead required by the second category for ABI conformance.
 
@@ -654,25 +484,113 @@ The downsides of the approach taken by ```flowd```:
 
 If you rather want to do FBP in Go, but prefer an in-process-communicating runtime/library for a single machine, then you might be interested in [goflow](https://github.com/trustmaster/goflow) or [flowbase](https://github.com/flowbase/flowbase). Also check out the FBP runtimes and systems by J. Paul Morrison and *NoFlo* and their compatible runtimes.
 
+### Integration with other FBP Runtimes
+
+TODO rewrite with flowd-rs
+
+One feature of FBP is the ability to freely transform data. Thus as a general solution, common IPC mechanisms like TCP, WebSocket or Unix domain sockets can be used to bridge FBP networks running in different FBP runtimes. flowd can also start other runtimes as subprocesses using the ```cmd``` component.
+
+For more optimal and tighter integration, there are gateway components and protocols as follows:
+
+* with JavaFBP: gateway component planned, [Java parser of framing format planned](https://github.com/ERnsTL/flowd/issues/130)
+* with NoFlo: implementation of JSON FBP protocol [planned, partway started](https://github.com/ERnsTL/flowd/issues/55)
+* with plumber: [gateway component planned](https://github.com/ERnsTL/flowd/issues/124)
+* with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
+* others: Fractalide? ...?
+
+## Writing Applications
+
+TODO rewrite section for flowd-rs
+
+Three stages usually:
+
+1. read and packetize data structures into IPs
+2. filter and transform
+3. assemble packets and output
+
+TODO difference is that this goes beyond ETL. It also goes beyond the DAGs, which seem fashionable these days.
+
+TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which results should be produced (see JPM book).
+
+TODO no conceptual dissonance between design and implementation stages.
+
+TODO straight implementation, almost waterfall-like, fewer refactorings.
+
+TODO Linear maintenance cost in relation to program size.
+
+## Writing Components
+
+TODO rewrite for flowd-rs.
+
+Decide if your program shall implement the ```flowd``` framing format or be wrapped in a ```cmd``` component.
+
+If wrapped, you can decide for the program to be called for each incoming frame in order to process it or if your program should process a stream of frame bodies. If one-off, the program will receive data on STDIN, which will be closed after the frame body has been delivered; the program can the output a result, which will be forwarded into the FBP network for further processing. It is then expected to either close STDOUT or exit the program. In the one-instance mode, STDIN and STDOUT will remain open; your program will receive data from incoming frame bodies to be processed and any output will be framed by the ```cmd``` component and again forwarded into the network.
+
+Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open the named pipes given and will then be connected with the neighbor components. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration. Port closing detection is done using regular EOF on the named pipe; this is usually the signal that all data has arrived from the preceding component and that it shut down; it can also be re-opened if that is the use-case. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact; packet tracing is also implemented using marker values in the header. Output frames, if any, are then to be sent to the output named pipes. That way, the frames from your component are sent directly to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
 
 ## Development aka Hacking on ```flowd```
 
+TODO rewrite for flowd-rs
+
 Running tests:
 
-  ```
-  GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
-  ```
+```sh
+GOPATH=`pwd` go test ./src/github.com/ERnsTL/flowd/...
+```
 
 Running benchmarks:
 
-  ```
-  GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
-  ```
+```sh
+GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
+```
 
 Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
 
-  ```
-  fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
-  ```
+```sh
+fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
+```
 
 Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
+
+## Goals in General
+
+To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
+
+* Reliability and Robustness: The FBP runtime should be stable and reliable to ensure uninterrupted execution of critical applications. It should be able to handle errors robustly to avoid or at least minimize failures.
+
+* Scalability: The runtime environment should be capable of handling growing demands and workloads to ensure efficient execution of applications. This may involve scaling vertically (on larger machines) or horizontally (by adding more instances).
+
+* Monitoring and Debugging: There should be mechanisms for monitoring and troubleshooting to analyze performance, identify bottlenecks, and debug issues. This can be achieved through logging, dashboards, tracing, and other tools.
+
+* Security: The runtime environment should provide security mechanisms to ensure data integrity, confidentiality, and availability. This may include authentication, authorization, encryption, and protection against attacks such as injection attacks and denial-of-service attacks.
+
+* Transaction Support: It is important that the FBP runtime supports transactions to ensure data consistency and meet the Atomicity, Consistency, Isolation, and Durability (ACID) properties.
+
+* Integration: The runtime environment should seamlessly integrate with other systems and services to support data flows between different applications, platforms, and external services. This can be done through APIs, protocols such as HTTP, messaging systems, and other mechanisms.
+
+* Documentation and Support: Comprehensive documentation and supportive community can help increase developer productivity and efficiently solve issues. A good FBP runtime should have clear documentation, tutorials, examples, and support channels.
+
+By fulfilling these characteristics, an FBP runtime environment can be made suitable for production and reliable applications to support stable, scalable, and reliable workflows.
+
+## License
+
+GNU LGPLv3+
+
+## Contributing
+
+1. open an issue or pick an existing one
+2. discuss your idea
+3. send pull request
+4. quality check
+5. merged!
+
+## Further documentation
+
+* [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
+* TODO
+* Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further documentation)
+
+## Community
+
+* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
+* [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
