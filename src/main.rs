@@ -1556,6 +1556,7 @@ impl RuntimeRuntimePayload {
     fn persist(&self, graph: &Graph) -> std::result::Result<(), std::io::Error> {
         //###
         // get source
+        //TODO is the source according to the FBP JSON Network Protocol the same as the specified FBP JSON Graph format or does it differ? In which do we want to persist?
         let net_source = graph.get_source(self.graph.clone())?; //TODO optimize clone - accept &str?
 
         // save to file
