@@ -28,12 +28,11 @@ You can find out more about this paradigm on J. Paul Morrison's website linked a
 
 More, humans are terrible at writing, maintaining and understanding code [talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). One solution proposed here is to keep programming on a humanly-understandable level by using these re-usable *black boxes*, which are individually all easily understandable, to compose software.
 
-
 ## Installation and Running
 
 Run it with:
 
-```
+```sh
 cargo run
 ```
 
@@ -47,15 +46,14 @@ It should look roughly like this:
 
 For how to use the online editor, see the [manual of noflo-ui](https://github.com/noflo/noflo-ui).
 
-
 ## Examples
 
 TODO
 
-
 ## Features and Current Status
 
 FBP network protocol:
+
 * Full serialization and deserialization of all specified messages in both directions.
 * Runtime behaviors are in mock stage, working with in-memory state and actual components.
 * Adding graph nodes, removing nodes, changing nodes and their connections is implemented.
@@ -72,11 +70,13 @@ FBP network protocol:
 * Array outports addressable by index with ability to see the target process name for debugging.
 
 Test suite of the FBP network protocol:
+
 * One of the next milestones (TODO).
 * Currently more focusing on practical usability via noflo-ui.
 * Several things to clarify with the developers of the test suite, especially error reporting is lacking.
 
 Graph support:
+
 * Full in-memory representation and serialization and deserialization to/from the FBP JSON Graph format is implemented.
 * All properties of the FBP JSON Graph data format are defined.
 * Loading and saving to/from disk is unimplemented.
@@ -84,11 +84,13 @@ Graph support:
 * Some things to clarify with developers of the spec.
 
 Component management:
+
 * Currently all components are compiled-in.
 * Currently no support for linking to components in external paths or repositories.
 * One C-API-based component exists called *LibComponent* that loads a component from a shared object and calls into it (very basic).
 
 Online editing:
+
 * Supported based on the FBP network protocol.
 * Currently used user interface us noflo-ui.
 * Currently only 1 graph inside the runtime is implemented, though the data structures are there to support multiple.
@@ -97,15 +99,18 @@ Online editing:
 * Much to clarify with developers of noflo-ui, status messages and documentation are terse.
 
 Security:
+
 * Currently unimplemented.
 * Basic token-based security and TLS support would be easy to add (TODO).
 * User and ACL management as well as ACL checking currently unimplemented (TODO).
 
 Multi-language feature:
+
 * Part of the next milestone (TODO).
 * Basic loading and unloading of a dlopen()'ed component is there (LibComponent).
 
 Multiple component APIs, component data formats:
+
 * Currently unimplemented.
 * Will likely develop in the direction of having
   1. core components written in Rust working directly with the in-memory data structures and
@@ -119,13 +124,16 @@ Multiple component APIs, component data formats:
 * Planned: Support for multiple data formats when communicating with the components: JSON, CBOR, ASN.1, netstrings etc. (TODO)
 
 Online network changes:
+
 * Currently unimplemented, the network has to be stopped and restarted for changes to take effect. (TODO)
 
 Component library:
+
 * Management of in-memory compiled-in Rust components is implemented.
 * One of the components, *LibComponent*, can load an external shared object and call a function to process data (very basic).
 
 Debugging, tracing:
+
 * Serialization and deserialization of the accoding messages is fully implemented.
 * Currently responds with mock responses but does not send any tracing data.
 * Processes can send copies of received and/or sent IPs out to FBP Network Protocol client(s) for debugging.
@@ -133,22 +141,27 @@ Debugging, tracing:
 * Process name is available on each outport and each connection of an array outport.
 
 Logging:
+
 * Runtime logging facilities to STDOUT with multiple levels, mentioning the thread name is implemented.
 * TODO logging to logfiles and syslog (-> log rotation)
 * Processes can send STDOUT- and STDERR-like information to the runtime logfile and/or to FBP Network Protocol client(s).
 
 Component repository from local files:
+
 * Planned, one of the next milestones (TODO).
 
 Component hub/repository in the internet:
+
 * Planned: Integration/registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))?
 * Planned, much later (TODO).
 
 Deployment and reproducible setups:
+
 * Currently using plain Cargo, no ability to include or compile-in any external/additional components.
 * Planned (TODO). Goal is to easily load components from a Github repository, build them and use them in a network. Naming and referencing to such external components by git repository.
 
 Signaling, Monitoring:
+
 * A background watchdog thread with ability to signal to and from all processes is implemented.
 * In addition, the main thread can issue one-way signaling to threads, eg. for a stop command.
 * The watchdog thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
@@ -156,6 +169,7 @@ Signaling, Monitoring:
 * The watchdog thread recognizes network self-shutdown and calls the runtime to stop and signal all FBP protocol clients about the status change.
 
 Maintenance, Operations:
+
 * Ability to use a network bridge or protocol client like TCP, WebSocket etc. which uses the transport protocol and serialization format of your choice, to connect multiple FBP networks, subgraphs or sub-networks.
 * Bridges between different network parts, and thus...
 * Distribution of the network across multiple machines
