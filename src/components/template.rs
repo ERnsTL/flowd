@@ -4,6 +4,10 @@ use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, Pr
 // component-specific
 use tera::Tera;
 
+/*
+TODO if too much time on hand - evaluate TT2 as alternative to Tera -> https://www.template-toolkit.org/#
+*/
+
 pub struct TeraTemplateComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
