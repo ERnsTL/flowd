@@ -280,9 +280,9 @@ fn main() {
 
 //fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, processes: Arc<RwLock<ProcessManager>>) -> Result<()> {
 fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> Result<()> {
-    stream
-        .set_write_timeout(Some(Duration::SECOND))
-        .expect("set_write_timeout call failed");
+    if let Err(err) = stream.set_write_timeout(Some(Duration::SECOND)) {
+        warn!("set_write_timeout call failed: {:?}", err);
+    }
     //stream.set_nodelay(true).expect("set_nodelay call failed");
 
     //TODO save stream clone/dup for graph outports process and pack into "cloned" WebSocket
