@@ -52,6 +52,12 @@ It should look roughly like this:
 
 For how to use the online editor, see the [manual of noflo-ui](https://github.com/noflo/noflo-ui).
 
+Running in a micro-VM using [Unikraft](https://unikraft.org/):
+
+```sh
+kraft run -M 256M -p 3569:3569
+```
+
 ## Examples
 
 TODO bots for example
