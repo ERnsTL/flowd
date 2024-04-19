@@ -1,6 +1,7 @@
 # flowd: *the data must flow*<sup>[1](https://en.wikiquote.org/wiki/Dune_(film)#Others)</sup>
 
 > There exist two implementations of ```flowd```:
+>
 >   * [flowd-rs](https://github.com/ERnsTL/flowd/) (main variant - this one)
 >   * [flowd-go](https://github.com/ERnsTL/flowd-go/)
 
@@ -68,7 +69,7 @@ Several example components and example processing networks are included.
 
 Compile the network orchestrator and runtime ```flowd```, then run examples like this:
 
-```
+```sh
 bin/flowd src/github.com/ERnsTL/flowd/examples/chat-server.fbp
 ```
 
@@ -76,7 +77,7 @@ This particular example comprises a small chat or console server over TCP. Upon 
 
 Then connect to it using, for example:
 
-```
+```sh
 nc -v localhost 4000
 ```
 
@@ -86,13 +87,13 @@ The flag ```-quiet``` removes the frame passing information, in case you do not 
 
 The data flow is as follows:
 
-```
+```fbp
 TCP in -> tcp-server OUT port -> chat IN port -> chat server logic -> chat OUT port -> tcp-server IN port (responses) -> TCP out
 ```
 
 Also, an *initial information packet* (IIP) is sent to the ```ARGS``` input port of the ```tcp-server``` component, as defined in the network specification:
 
-```
+```fbp
 'localhost:4000' -> ARGS tcp-server
 ```
 
@@ -117,7 +118,7 @@ TODO rewrite for flowd-rs
 
 The following commands will export a network to STDOUT, convert it to a PNG raster image, view it and clean up:
 
-```
+```sh
 bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
 ```
 
