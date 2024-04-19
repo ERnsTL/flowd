@@ -19,6 +19,9 @@ use std::io::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
+// arguments
+use std::env;
+
 // logging
 #[macro_use] extern crate log;
 extern crate simplelog; //TODO check the paris feature flag for tags, useful?
@@ -246,7 +249,14 @@ fn main() {
     }
 
     // start network
-    let bind_addr = "localhost:3569";
+    let bind_addr;
+    //TODO features - add better argument parsing. currently defaulting to localhost since no security checks are in place
+    let args: Vec<String> = env::args().collect();
+    if args.len() == 2 {
+        bind_addr = args[1].as_str();
+    } else {
+        bind_addr = "localhost:3569";
+    }
     let server = TcpListener::bind(bind_addr).unwrap();
     info!("management listening on {} - manage via GUI at https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569", bind_addr);   //TODO URL escape of bind_addr in URL - currently static
 
