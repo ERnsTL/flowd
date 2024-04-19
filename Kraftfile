@@ -1,0 +1,6 @@
+# find more Rust examples at https://github.com/unikraft/catalog/tree/main/examples
+
+spec: v0.6
+runtime: base:latest
+rootfs: ./Dockerfile
+cmd: ["/flowd-rs", "0.0.0.0:3569"]
