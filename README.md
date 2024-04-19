@@ -2,8 +2,8 @@
 
 > There exist two implementations of ```flowd```:
 >
->   * [flowd-rs](https://github.com/ERnsTL/flowd/) (main variant - this one)
->   * [flowd-go](https://github.com/ERnsTL/flowd-go/)
+> * [flowd-rs](https://github.com/ERnsTL/flowd/) (main variant - this one)
+> * [flowd-go](https://github.com/ERnsTL/flowd-go/)
 
 Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
 
@@ -464,7 +464,7 @@ The different ```flowd``` implementations have different approaches and focuses.
 * [flowd-rs](flowd-rs/README-Rust.go#FBP Runtimes)
 * [flowd-go](README-Go.go#FBP Runtimes)
 
-### FBP Runtimes
+### FBP Runtimes (again)
 
 TODO rewrite for flowd-rs
 
@@ -556,7 +556,7 @@ Running benchmarks:
 GOPATH=`pwd` go test -run=BENCHMARKSONLY -bench=. ./src/github.com/ERnsTL/flowd/libflowd/
 ```
 
-Running tests for the JSON FBP network protocol: Follow [the basic instructions](), but initialize with the following
+Running tests for the JSON FBP network protocol: Follow the basic instructions (TODO which? what? where?), but initialize with the following
 
 ```sh
 fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/github.com/ERnsTL/flowd/examples/chat-server.fbp" --collection tests
@@ -600,7 +600,7 @@ GNU LGPLv3+
 
 * [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
 * TODO
-* Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further documentation)
+* Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further%20documentation)
 
 ## Community
 
