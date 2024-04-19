@@ -251,6 +251,7 @@ fn main() {
     // start network
     let bind_addr;
     //TODO features - add better argument parsing. currently defaulting to localhost since no security checks are in place
+    // NOTE: dependencies - used by Kraftfile
     let args: Vec<String> = env::args().collect();
     if args.len() == 2 {
         bind_addr = args[1].as_str();
