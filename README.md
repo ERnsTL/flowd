@@ -59,6 +59,8 @@ Running in a micro-VM using [Unikraft](https://unikraft.org/):
 kraft run -M 256M -p 3569:3569
 ```
 
+Note for MacOS users: Best run the micro-VM via Qemu network backend "vmnet", which was added by the developer of AxleOS.
+
 ## Examples
 
 TODO bots for example
