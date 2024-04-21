@@ -44,3 +44,6 @@ libwordcounter.v
 
 # flowd persistence file
 flowd.graph.json
+
+# Unikraft build files
+.unikraft/
