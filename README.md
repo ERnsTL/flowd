@@ -25,7 +25,7 @@ The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution
 
 The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and visual kind of programming with direct feedback of the changes just made, based on the combination and connection of re-usable *black boxes* working together in a *visually drawable and mappable* processing network resp. application.
 
-Such an FBP processing network is not limited to linear pipes, ETL steps, a directed acyclic graph (DAG) structure etc. Instead, it is a versatile and generic superset allowing processing networks spanning multiple flowd instances and non-FBP processing systems and thus the creation of general and even interactive processing systems.
+Such an FBP processing network is not limited to linear pipes, ETL steps, a directed acyclic graph (DAG) structure, RPC request-response, client-server, publish-subscribe etc. Instead, it is a versatile and generic superset allowing processing networks spanning multiple flowd instances and non-FBP processing systems and thus the creation of general processing systems and even interactive applications.
 
 You can find out more about this paradigm on [J. Paul Morrison's website](http://www.jpaulmorrison.com/fbp/).
 
