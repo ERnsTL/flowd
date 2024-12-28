@@ -1,5 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use std::{borrow::BorrowMut, error::Error, sync::{Arc, Mutex}};
+use crate::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHolder, MessageBuf, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
+
+// component-specific imports
+use std::io::BufRead;
 
 pub struct SplitLinesComponent {
     inn: ProcessEdgeSource,
@@ -45,54 +48,62 @@ impl Component for SplitLinesComponent {
             loop {
                 if let Ok(ip) = inn.pop() {
                     // read packet - expecting UTF-8 string
-                    let text = std::str::from_utf8(&ip).expect("non utf-8 data");
                     debug!("got a text to split");
 
                     // split into lines and send them
-                    //TODO split by \r\n as well?
-                    //let split = text.split("\n"); //TODO optimize what is faster - this or text.lines() ?
-
-                    // send it
                     debug!("forwarding lines...");
-                    let mut iterations: usize = 0;
-                    //for line in split {
-                    for line in text.lines() {
-                        //TODO optimize - next process gets woken up only once outport is full
-                        //TODO optimize handover handling - maybe unpark every x lines?
-                        //TODO optimize error handling, all these Ok, or_else() seem unefficient
-                        /*
-                        out.push(Vec::from(line)).or_else(|_| {
-                            // wake up output component
-                            out_wakeup.unpark();
-                            while out.is_full() {
-                                // wait
-                            }
-                            // send nao
-                            out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
-                            Ok::<(), rtrb::PushError<MessageBuf>>(())
-                        }).expect("could not push into OUT");
-                        */
-                        if let Err(_) = out.push(Vec::from(line)) {
-                            // full, so wake up output-side component
-                            out_wakeup.unpark();
-                            //println!("out_wakeup has name: {}", out_wakeup.name().unwrap());
-                            while out.is_full() {
-                                out_wakeup.unpark();
-                                // wait     //TODO optimize
-                                std::thread::yield_now();
-                            }
-                            // send nao
-                            out.push(Vec::from(line)).expect("could not push into OUT - but said !is_full");
-                        }
 
-                        // wake up the output-side process once there is some data to work on
-                        // NOTE: This is an important optimization as otherwise the process on OUT port will only be woken up when the connection becomes full (see above)
-                        //TODO optimize - but increment and bitwise equality should be cheap?
-                        iterations += 1;
-                        if iterations == 50 {
-                            out_wakeup.unpark();
+                    //TODO check which variant is more efficient
+
+                    // variant 1 - blocks only on first line
+
+                    //let mut cur = std::io::Cursor::new(ip);
+                    //let ip_out: MessageBuf = vec![];
+                    //cur.read_until(b'\n', &mut ip_out);
+                    let mut line_iter = ip.split(|&x| x == b'\n').map(|x| x.to_vec());
+                    // check if there are more lines to write - unfortunately no peek available so we have to write the first line here and then write as much as possible in big chunk
+                    while let Some(line) = line_iter.next() {
+                        // write first line
+                        match out.push(line) {
+                            Ok(_) => {},
+                            Err(rtrb::PushError::Full(line)) => {
+                                // full, so wake up output-side component
+                                out_wakeup.unpark();
+                                while out.is_full() {
+                                    out_wakeup.unpark();
+                                    // wait
+                                    std::thread::yield_now();
+                                }
+                                // send first line now that outport is !full
+                                out.push(line).expect("could not push into OUT - but said !is_full");
+                            }
+                        }
+                        // write as much as possible from the iterator into outport ringbuffer
+                        if let Ok(chunk) = out.write_chunk_uninit(out.slots()) {
+                            chunk.fill_from_iter(&mut line_iter);
                         }
                     }
+
+                    // variant 2 - always blocks since we usually fill the outport fully
+                    /*
+                    let mut line_iter = ip.split(|&x| x == b'\n').map(|x| x.to_vec());
+                    loop {
+                        if let Ok(chunk) = out.write_chunk_uninit(out.slots()) {
+                            if chunk.fill_from_iter(&mut line_iter) == 0 {
+                                // no more lines to write = iterator sucked empty
+                                break;
+                            }
+                            //NOTE: problem is that it can return 0 because the target buffer is full, but the iterator is not empty - so we have to make sure that when we try again the ringbuffer is !full
+                            while out.is_full() {
+                                // we have filled the chunk, receiver has to work now so wake it up
+                                out_wakeup.unpark();
+                                // wait for receiver to free up space in the ringbuffer
+                                std::thread::yield_now();
+                            }
+                        }
+                    }
+                    */
+
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
