@@ -6083,4 +6083,26 @@ trait Component {
     fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized;
     fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
     fn get_metadata() -> ComponentComponentPayload where Self:Sized;
+
+    /*// to support reconnecting of inports and outports
+    fn reconfigure_connection(
+        &mut self,
+        source_port: &str,
+        target_component: &mut dyn Component,   //TODO optimize - is dyn fast?
+        target_port: &str,
+    ) -> std::result::Result<(), std::io::Error> {
+        // remove the current connection from the source process
+        self.get_outports_mut().retain(|port, _| port != source_port);
+
+        // remove the current connection from the target process
+        target_component.get_inports_mut().retain(|port, _| port != target_port);
+
+        // add the new connection
+        self.get_outports_mut().insert(source_port.to_string(), target_port.to_string());
+        target_component.get_inports_mut().insert(target_port.to_string(), source_port.to_string());
+
+        Ok(())
+    }
+    fn get_inports_mut(&mut self) -> &mut ProcessInports;
+    fn get_outports_mut(&mut self) -> &mut ProcessOutports;*/
 }
