@@ -1,8 +1,8 @@
-use std::{borrow::BorrowMut, error::Error, sync::{Arc, Mutex}};
+use std::sync::{Arc, Mutex};
 use crate::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHolder, MessageBuf, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
 
 // component-specific imports
-use std::io::BufRead;
+//use std::io::BufRead;
 
 pub struct SplitLinesComponent {
     inn: ProcessEdgeSource,
