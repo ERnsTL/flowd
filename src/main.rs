@@ -1628,7 +1628,7 @@ impl RuntimeRuntimePayload {
         // sending first packet of 10 should already wake the receiver.
         // but what if the sender is slower at producing than the receiver at consuming than the receiver?
         // -> batching would make sense. but only the producer knows how much how big its batch is and how many it will produce in the next time units.
-        // but batching increases latency 
+        // but batching increases latency
 
         // How thread sync is currently done:
         // 1. during edge generation, for each outport, save the process name in a separate data structure
@@ -6069,8 +6069,8 @@ NOTE: Vec<u8> is growable; Box<[u8]> is decidedly not growable, which just bring
 Vec is just 1 machine word larger than Box. There is more convenience API and From implementations for Vec.
 In the wild, there also seems less use of Box<[u8]>.
 
-NOTE: Changing to [u8] here and then having &[u8] in ProcessEdges creates an avalanche of lifetime problems where something does not live long enough, 
-maybe there are some possibilities to state "this lifetime is equal to that one" but problem is that we are actually handing over 
+NOTE: Changing to [u8] here and then having &[u8] in ProcessEdges creates an avalanche of lifetime problems where something does not live long enough,
+maybe there are some possibilities to state "this lifetime is equal to that one" but problem is that we are actually handing over
 data from thread A to thread B, so we are not allowing thread B to have a temporary look at the data, but it is actual message passing.
 And there is no "master" who owns the data - then we could give threads A and B pointers and borrows into that data, but that is not the case.
 */
