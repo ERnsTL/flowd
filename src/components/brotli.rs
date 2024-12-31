@@ -237,7 +237,7 @@ impl Component for BrotliDecompressComponent {
                     //TODO is that flush necessary or will it do that automatically during drop?
                     writer.flush().expect("failed to flush decompressor into output buffer");
                     drop(writer);   // so that vec_out output buffer becomes un-borrowed and can be sent
-                    
+
                     // send it
                     debug!("sending...");
                     out.push(vec_out).expect("could not push into OUT");
