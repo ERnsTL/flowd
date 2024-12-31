@@ -133,3 +133,6 @@ teloxide = { version = "0.12.2", default-features = false, features = ["native-t
 # for MatrixClientComponent
 #tokio 1.x
 matrix-sdk = { version = "0.7.1", default-features = false, features = ["e2e-encryption", "native-tls"] }   # or rustls
+
+# for Sexp
+assoc = "0.1.3"
