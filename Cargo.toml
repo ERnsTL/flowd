@@ -41,12 +41,11 @@ flowd-repeat = { path = "components/repeat" }
 flowd-drop = { path = "components/drop" }
 flowd-output = { path = "components/output" }
 flowd-libcomponent = { path = "components/libcomponent" }
+flowd-unixsocket = { path = "components/unixsocket" }
 
 # for CountComponent
 atoi = "2.0"
 #atoi_simd = "0.15"
-
-# for LibComponent
 
 # for CronComponent
 # also needs chrono
@@ -113,9 +112,6 @@ xz = "0.1"
 
 # for BrotliCompressComponent, BrotliDecompressComponent
 brotli = "3.5"
-
-# for UnixSocketClientComponent
-uds = "0.4.2"
 
 # for TLSClientComponent
 rustls = "0.23.4"

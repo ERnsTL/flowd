@@ -1,4 +1,3 @@
-pub mod unixsocket;
 pub mod file;
 pub mod trim;
 pub mod splitlines;

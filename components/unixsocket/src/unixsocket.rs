@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, trace, info, warn, error};
 
 // component-specific
+use std::sync::{Arc, Mutex};
 /*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;

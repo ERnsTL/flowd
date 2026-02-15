@@ -28,8 +28,13 @@ struct = "LibComponent"
 
 [[components.entry]]
 name = "UnixSocketServer"
-crate = "components::unixsocket"
+crate = "flowd-unixsocket"
 struct = "UnixSocketServerComponent"
+
+[[components.entry]]
+name = "UnixSocketClient"
+crate = "flowd-unixsocket"
+struct = "UnixSocketClientComponent"
 
 [[components.entry]]
 name = "FileReader"
@@ -176,11 +181,6 @@ struct = "BrotliCompressComponent"
 name = "BrotliDecompress"
 crate = "components::brotli"
 struct = "BrotliDecompressComponent"
-
-[[components.entry]]
-name = "UnixSocketClient"
-crate = "components::unixsocket"
-struct = "UnixSocketClientComponent"
 
 [[components.entry]]
 name = "HTMLStrip"
