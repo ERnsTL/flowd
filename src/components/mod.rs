@@ -1,4 +1,3 @@
-pub mod drop;
 pub mod output;
 
 pub mod libcomponent;

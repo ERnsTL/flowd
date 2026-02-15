@@ -13,7 +13,7 @@ struct = "RepeatComponent"
 
 [[components.entry]]
 name = "Drop"
-crate = "components::drop"
+crate = "flowd-drop"
 struct = "DropComponent"
 
 [[components.entry]]

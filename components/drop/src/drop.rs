@@ -1,4 +1,5 @@
-use crate::{ProcessEdgeSource, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{warn, info, debug, trace};
 
 pub struct DropComponent {
     inn: ProcessEdgeSource,
