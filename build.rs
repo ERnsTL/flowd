@@ -105,6 +105,16 @@ fn main() {
     generated.push_str("    }\n");
     generated.push_str("}\n");
 
+    // component log filters function
+    generated.push_str("pub fn register_component_log_filters(logger: &mut simplelog::ConfigBuilder) {\n");
+    for filter in &log_filters {
+        generated.push_str(&format!(
+            "    logger.add_filter_ignore_str(\"{}\");\n",
+            escape_rust_string(filter)
+        ));
+    }
+    generated.push_str("}\n\n");
+
     // write generated code to file
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = Path::new(&out_dir).join("build_generated.rs");
