@@ -1,7 +1,7 @@
 use std::{sync::{Arc, Mutex}, thread};
 use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
-use openai::chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole};
+use openai::{chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole}, Credentials};
 
 pub struct OpenAIChatComponent {
     conf: ProcessEdgeSource,
@@ -75,14 +75,14 @@ impl Component for OpenAIChatComponent {
         }
 
         // set configuration
-        // set API key
-        openai::set_key(api_key);
-        // set base URL
+        // set API key and base URL
+        let credentials;
         if url.host_str().expect("no host in URL") != "default" {
             let base_url = url.scheme().to_owned() + "://" + url.host_str().expect("no host in URL") + url.path();
-            openai::set_base_url(base_url);
+            credentials = Credentials::new(api_key, base_url);
         } else {
             debug!("using default base URL for OpenAI API");
+            credentials = Credentials::new(api_key, "");
         }
         // set initial prompt
         let mut messages = vec![];
@@ -98,6 +98,8 @@ impl Component for OpenAIChatComponent {
                         content: Some(initialprompt_str),
                         name: None,
                         function_call: None,
+                        tool_call_id: None,
+                        tool_calls: None,
                     });
                     break;
                 } else {
@@ -138,6 +140,8 @@ impl Component for OpenAIChatComponent {
                             content: Some(user_message_content),
                             name: None,
                             function_call: None,
+                            tool_call_id: None,
+                            tool_calls: None,
                         });
                     } else {
                         messages = vec![ChatCompletionMessage {
@@ -145,11 +149,13 @@ impl Component for OpenAIChatComponent {
                             content: Some(user_message_content),
                             name: None,
                             function_call: None,
+                            tool_call_id: None,
+                            tool_calls: None,
                         }];
                     }
 
                     // build request
-                    let chat_completion = ChatCompletion::builder(&model, messages.clone()).create();
+                    let chat_completion = ChatCompletion::builder(&model, messages.clone()).credentials(credentials.clone()).create();
                     // send request and wait for result
                     let returned_message_res = tokio::runtime::Runtime::new().unwrap().block_on(chat_completion); //TODO optimize
                     let returned_message_inner = returned_message_res.expect("failed to get OpenAI response");
