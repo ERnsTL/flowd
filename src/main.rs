@@ -56,45 +56,7 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
 // components
 //TODO optimize - currently organized as modules, because the components need certain structs from flowd-rs crate here. if putting each component into its own crate, this would create a circular dependency, which is not allowed with crates, but very well modules.
 mod components;
-use components::repeat::RepeatComponent;
-use components::drop::DropComponent;
-use components::output::OutputComponent;
-use components::libcomponent::LibComponent;
-use components::unixsocket::UnixSocketServerComponent;
-use components::file::{FileReaderComponent, FileTailerComponent, FileWriterComponent};
-use components::trim::TrimComponent;
-use components::splitlines::SplitLinesComponent;
-use components::count::CountComponent;
-use components::cron::CronComponent;
-use components::cmd::CmdComponent;
-use components::hasher::HasherComponent;
-use components::equals::EqualsComponent;
-use components::http::{HTTPClientComponent, HTTPServerComponent};
-use components::muxer::MuxerComponent;
-use components::mqtt::{MQTTPublisherComponent, MQTTSubscriberComponent};
-use components::redis::{RedisPublisherComponent, RedisSubscriberComponent};
-use components::imap::{IMAPAppendComponent, IMAPFetchIdleComponent};
-use components::openai::OpenAIChatComponent;
-use components::template::TeraTemplateComponent;
-use components::regexp::RegexpExtractComponent;
-use components::text::TextReplaceComponent;
-use components::zeroconf::ZeroconfResponderComponent;
-use components::xz::{XzCompressComponent, XzDecompressComponent};
-use components::brotli::{BrotliCompressComponent, BrotliDecompressComponent};
-use components::unixsocket::UnixSocketClientComponent;
-use components::html::HTMLStripComponent;
-use components::ws::WSClientComponent;
-use components::tcp::TCPClientComponent;
-use components::tls::TLSClientComponent;
-use components::tcp::TCPServerComponent;
-use components::tls::TLSServerComponent;
-use components::ws::WSServerComponent;
-use components::zeroconf::ZeroconfBrowserComponent;
-use components::json::JSONQueryComponent;
-use components::html::HTMLQueryComponent;
-use components::ssh::SSHClientComponent;
-use components::telegram::TelegramBotComponent;
-use components::matrix::MatrixClientComponent;
+include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
 fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
