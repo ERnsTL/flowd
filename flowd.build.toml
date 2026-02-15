@@ -38,8 +38,18 @@ struct = "UnixSocketClientComponent"
 
 [[components.entry]]
 name = "FileReader"
-crate = "components::file"
+crate = "flowd-file"
 struct = "FileReaderComponent"
+
+[[components.entry]]
+name = "FileWriter"
+crate = "flowd-file"
+struct = "FileWriterComponent"
+
+[[components.entry]]
+name = "FileTailer"
+crate = "flowd-file"
+struct = "FileTailerComponent"
 
 [[components.entry]]
 name = "Trim"
@@ -137,19 +147,9 @@ crate = "components::template"
 struct = "TeraTemplateComponent"
 
 [[components.entry]]
-name = "FileTailer"
-crate = "components::file"
-struct = "FileTailerComponent"
-
-[[components.entry]]
 name = "RegexpExtract"
 crate = "components::regexp"
 struct = "RegexpExtractComponent"
-
-[[components.entry]]
-name = "FileWriter"
-crate = "components::file"
-struct = "FileWriterComponent"
 
 [[components.entry]]
 name = "TextReplace"
