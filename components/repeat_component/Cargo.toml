@@ -1,0 +1,8 @@
+[package]
+name = "repeat_component"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
