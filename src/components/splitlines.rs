@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use crate::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHolder, MessageBuf, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
+use crate::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHolder, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
 
 // component-specific imports
 //use std::io::BufRead;
