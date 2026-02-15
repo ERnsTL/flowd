@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
 use teloxide::prelude::*;
@@ -19,11 +19,11 @@ pub struct TelegramBotComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 impl Component for TelegramBotComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         TelegramBotComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),

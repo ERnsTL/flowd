@@ -1,5 +1,4 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
 use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
@@ -17,11 +16,11 @@ pub struct ZeroconfResponderComponent {
     conf: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 impl Component for ZeroconfResponderComponent {
-    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         ZeroconfResponderComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             signals_in: signals_in,
@@ -124,13 +123,13 @@ pub struct ZeroconfBrowserComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for ZeroconfBrowserComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         ZeroconfBrowserComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
@@ -152,7 +151,7 @@ impl Component for ZeroconfBrowserComponent {
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        
+
         // get service name from URL
         let service_name = url.host_str().expect("failed to get service name from connection URL").to_owned();
 

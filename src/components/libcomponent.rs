@@ -1,5 +1,4 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 //component-specific
 use libloading::{Library, Symbol};
@@ -10,7 +9,7 @@ pub struct LibComponent { //<'a> {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
     //fn_process: Option<libloading::Symbol<'a, unsafe extern fn(&std::ffi::CStr) -> u32>>,
     lib: libloading::Library,
 }
@@ -40,7 +39,7 @@ fn flowd_init() {
 //TODO how can a component in a shared library become "active", meaning it can wait for some external event and decide by itself when it will generate some output?
 //TODO outputs are not only input-driven, but can also come from an external source...
 impl Component for LibComponent { //<'_> {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         unsafe {
             //TODO load the shared libary
             //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh

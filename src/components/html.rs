@@ -1,5 +1,4 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 // component-specific
 use skyscraper::html;
@@ -17,11 +16,11 @@ pub struct HTMLStripComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 impl Component for HTMLStripComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         HTMLStripComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
@@ -101,7 +100,7 @@ impl Component for HTMLStripComponent {
             std::thread::park();
         }
         info!("exiting");
-    }    
+    }
 
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
@@ -155,7 +154,7 @@ impl HTMLStripComponent {
         let mut result = Vec::new();
         let mut inside_tag = false;
         let mut inside_quotes = false;
-    
+
         for &byte in html.iter() {
             if byte == b'<' {
                 inside_tag = true;
@@ -167,7 +166,7 @@ impl HTMLStripComponent {
                 result.push(byte);
             }
         }
-    
+
         result
     }
 }
@@ -178,11 +177,11 @@ pub struct HTMLQueryComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 impl Component for HTMLQueryComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         HTMLQueryComponent {
             conf: inports.remove("QUERY").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
@@ -212,7 +211,7 @@ impl Component for HTMLQueryComponent {
 
         // configure
         let xpath_query = xpath::parse(query_str).expect("failed to parse XPath query");
-        
+
         // main loop
         loop {
             trace!("begin of iteration");
@@ -247,7 +246,7 @@ impl Component for HTMLQueryComponent {
                         for item in item_set.into_iter() {
                             // prepare packet
                             let vec_out = item.to_string().into_bytes();    //TODO currently, this quotes output strings - add option to disable quoting and other output paramaters, or add un-quote component :-)
-    
+
                             // send it
                             debug!("sending...");
                             out.push(vec_out).expect("could not push into OUT");

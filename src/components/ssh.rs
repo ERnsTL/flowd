@@ -1,8 +1,7 @@
-use std::sync::{Arc, Mutex};
-use std::vec;
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHolder, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 
 //component-specific
+use std::vec;
 use std::ffi::OsString;
 use lexopt::prelude::*;
 use ssh::TerminalSize;
@@ -26,7 +25,7 @@ pub struct SSHClientComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+    //graph_inout: GraphInportOutportHandle,
 }
 
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(7));
@@ -35,7 +34,7 @@ const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(2000)); 
 enum Mode { One, Each }
 
 impl Component for SSHClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         SSHClientComponent {
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             cmd: inports.remove("CMD").expect("found no CMD inport").pop().unwrap(),
@@ -238,7 +237,7 @@ impl Component for SSHClientComponent {
                     debug!("repeating remote process output...");
                     out.push(out_vec).expect("could not push into OUT");
                     out_wakeup.unpark();
-                    
+
                     // close session
                     //TODO optimize - reuse?
                     session.close();
