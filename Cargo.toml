@@ -10,8 +10,12 @@ edition = "2021"
 [[bin]]
 name = "flowd-rs"
 
+[workspace]
+members = [".", "component_api", "components/*"]
+
 [dependencies]
 # remove logging level output more detailed than certain level, at compile-time (!)
+#TODO if component crates do not declare the features, do they still get compiled with those features to save logging level checks?
 log = {version = "0.4", features = ["max_level_debug", "release_max_level_info"] }
 
 simplelog = "^0.12.0"
