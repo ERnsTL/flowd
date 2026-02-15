@@ -99,7 +99,7 @@ fn main() {
     generated.push_str("    outports: ProcessOutports,\n");
     generated.push_str("    signalsource: ProcessSignalSource,\n");
     generated.push_str("    watchdog_signalsink: ProcessSignalSink,\n");
-    generated.push_str("    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,\n");
+    generated.push_str("    graph_inout: GraphInportOutportHandle,\n");
     generated.push_str(") -> bool {\n");
     generated.push_str("    match name {\n");
     for entry in &config.components.entry {

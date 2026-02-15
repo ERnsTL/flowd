@@ -39,6 +39,14 @@ use multimap::MultiMap;
 use std::time::Duration;
 use chrono::prelude::*;
 
+// flowd component API crate
+pub use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutport,
+    GraphInportOutportHandle, MessageBuf, ProcessEdge, ProcessEdgeSink,
+    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
+    ProcessSignalSink, ProcessSignalSource, WakeupNotify, PROCESSEDGE_BUFSIZE,
+    PROCESSEDGE_IIP_BUFSIZE, PROCESSEDGE_SIGNAL_BUFSIZE,
+};
 
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
@@ -2273,6 +2281,9 @@ struct GraphInportOutportHolder {
     websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>
 }
 
+//TODO optimize - get rid of dyn (see component API declaration for GraphInportOutportHandle)
+impl GraphInportOutport for GraphInportOutportHolder {}
+
 impl GraphInportOutportHolder {
     // should not be used by components but only by GraphOutHandler (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
@@ -3538,96 +3549,6 @@ impl<'a> ComponentComponentMessage<'a> {
             command: String::from("component"),
             payload: payload,
         }
-    }
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ComponentComponentPayload {
-    name: String, // spec: component name in format that can be used in graphs. Should contain the component library prefix.
-    description: String,
-    icon: String, // spec: visual icon for the component, matching icon names in Font Awesome
-    subgraph: bool, // spec: is the component a subgraph?
-    in_ports: Vec<ComponentPort>, // spec: array. TODO could be modelled as a hashmap/object
-    out_ports: Vec<ComponentPort>, // spec: array. TODO clould be modelled as a hashmap/object ... OTOH, tere are usually not so many ports, can just as well iterate over 1/2/3/4 ports.
-    // flowd-specific
-    // TODO make extensible and versioned
-    #[serde(skip)]
-    support_health: bool,
-    #[serde(skip)]
-    support_perfdata: bool,
-    #[serde(skip)]
-    support_reconnect: bool,    //TODO should this belong to the ports (in_ports, out_ports fields)?
-}
-
-impl Default for ComponentComponentPayload {
-    fn default() -> Self {
-        ComponentComponentPayload {
-            name: String::from("main/Repeat"), //TODO Repeat, Drop, Output required for tests
-            description: String::from("description of the Repeat component"),
-            icon: String::from("fa-usd"), //TODO with fa- prefix? FontAwesome should not so much be our concern in a new()-like method
-            subgraph: false,
-            in_ports: vec![],
-            out_ports: vec![],
-            support_health: false,
-            support_perfdata: false,
-            support_reconnect: false,
-        }
-    }
-}
-
-#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema
-#[derive(Serialize, Debug)]
-struct ComponentPort {
-    #[serde(rename = "id")]
-    name: String,
-    #[serde(rename = "type")]
-    allowed_type: String, //TODO clarify spec: so if we define a boolean, we can send only booleans? What about struct/object types? How should the runtime verify that? //TODO map JSON types <-> Rust types
-    #[serde(default)]
-    schema: Option<String>, // spec: optional
-    #[serde(default)]
-    required: bool, // spec: optional, whether the port needs to be connected for the component to work (TODO add checks for that and notify user (how?) that a vital port is unconnected if required=true)
-    #[serde(default, rename = "addressable")]
-    is_arrayport: bool, // spec: optional
-    #[serde(default)]
-    description: String,  // spec: optional
-    #[serde(default, rename = "values")]
-    values_allowed: Vec<String>,  // spec: optional, can probably be any type, but TODO how to map JSON "any values" to Rust?
-    #[serde(default, rename = "default")]
-    value_default: String,  // spec: optional, datatype any TODO how to map JSON any values in Rust?
-}
-
-impl Default for ComponentPort {
-    fn default() -> Self {
-        ComponentPort {
-            name: String::from("out"),
-            allowed_type: String::from("string"),
-            schema: None,
-            required: true,
-            is_arrayport: false,
-            description: String::from("a default output port"),
-            values_allowed: vec!(), //TODO clarify spec: does empty array mean "no values allowed" or "all values allowed"?
-            value_default: String::from(""),
-        }
-    }
-}
-
-impl ComponentPort {
-    fn default_in() -> Self {
-        ComponentPort {
-            name: String::from("in"),
-            allowed_type: String::from("string"),
-            schema: None,
-            required: true,
-            is_arrayport: false,
-            description: String::from("a default input port"),
-            values_allowed: vec!(), //TODO clarify spec: does empty array mean "no values allowed" or "all values allowed"?
-            value_default: String::from(""),
-        }
-    }
-
-    fn default_out() -> Self {
-        return ComponentPort::default()
     }
 }
 
@@ -5893,16 +5814,17 @@ impl ComponentLibrary {
         // TODO add dynamically-loaded components as well
         match name.as_str() {
             "Repeat" => {
+                let graph_inout: GraphInportOutportHandle = Arc::new(Mutex::new(GraphInportOutportHolder{  //TODO implement - parameters are fake
+                    inports: None,
+                    outports: None,
+                    websockets: HashMap::new(),
+                }));
                 return Ok(Box::new(RepeatComponent::new(  //TODO implement - parameters are fake
                     inports,
                     outports,
                     signal_source,
                     signal_sink,
-                    Arc::new(Mutex::new(GraphInportOutportHolder{  //TODO implement - parameters are fake
-                        inports: None,
-                        outports: None,
-                        websockets: HashMap::new(),
-                    })),
+                    graph_inout,
                 )));
             },
             _ => {
@@ -5915,60 +5837,3 @@ impl ComponentLibrary {
 // ----------
 // components
 // ----------
-
-type ProcessInports = MultiMap<String, ProcessEdgeSource>;
-type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
-type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
-type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
-type ProcessEdgeSinkConnection = rtrb::Producer<MessageBuf>;
-#[derive(Debug)]
-struct ProcessEdgeSink {
-    sink: ProcessEdgeSinkConnection,
-    wakeup: Option<WakeupNotify>,
-    proc_name: Option<String>,
-}
-type WakeupNotify = Thread;
-type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
-type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
-/*
-NOTE: Vec<u8> is growable; Box<[u8]> is decidedly not growable, which just brings limitations for forwarding IPs.
-Vec is just 1 machine word larger than Box. There is more convenience API and From implementations for Vec.
-In the wild, there also seems less use of Box<[u8]>.
-
-NOTE: Changing to [u8] here and then having &[u8] in ProcessEdges creates an avalanche of lifetime problems where something does not live long enough,
-maybe there are some possibilities to state "this lifetime is equal to that one" but problem is that we are actually handing over
-data from thread A to thread B, so we are not allowing thread B to have a temporary look at the data, but it is actual message passing.
-And there is no "master" who owns the data - then we could give threads A and B pointers and borrows into that data, but that is not the case.
-*/
-type MessageBuf = Vec<u8>;
-const PROCESSEDGE_BUFSIZE: usize = 7*7*7*7;
-const PROCESSEDGE_SIGNAL_BUFSIZE: usize = 2;
-const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
-
-trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> Self where Self: Sized;
-    fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
-    fn get_metadata() -> ComponentComponentPayload where Self:Sized;
-
-    /*// to support reconnecting of inports and outports
-    fn reconfigure_connection(
-        &mut self,
-        source_port: &str,
-        target_component: &mut dyn Component,   //TODO optimize - is dyn fast?
-        target_port: &str,
-    ) -> std::result::Result<(), std::io::Error> {
-        // remove the current connection from the source process
-        self.get_outports_mut().retain(|port, _| port != source_port);
-
-        // remove the current connection from the target process
-        target_component.get_inports_mut().retain(|port, _| port != target_port);
-
-        // add the new connection
-        self.get_outports_mut().insert(source_port.to_string(), target_port.to_string());
-        target_component.get_inports_mut().insert(target_port.to_string(), source_port.to_string());
-
-        Ok(())
-    }
-    fn get_inports_mut(&mut self) -> &mut ProcessInports;
-    fn get_outports_mut(&mut self) -> &mut ProcessOutports;*/
-}

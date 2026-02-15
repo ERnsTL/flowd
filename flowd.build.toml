@@ -1,9 +1,9 @@
 [components]
 
 # fields:
-# - name
-# - crate
-# - struct
+# - name:  name of the component as used in the graph definition
+# - crate:  for crate-based components just the crate name (files should be placed in components/...), for module-based components "components::modulename" (files placed in src/components/modulename.rs)
+# - struct:  name of the struct implementing the component (should be in the specified crate or module)
 # - log_ignore (optional, list of crate names to ignore logs from when this component is instantiated)
 
 [[components.entry]]
