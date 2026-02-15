@@ -1,5 +1,11 @@
 [components]
 
+# fields:
+# - name
+# - crate
+# - struct
+# - log_ignore (optional, list of crate names to ignore logs from when this component is instantiated)
+
 [[components.entry]]
 name = "Repeat"
 crate = "components::repeat"
