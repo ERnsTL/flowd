@@ -79,7 +79,8 @@ fn main() {
 
     // use block
     for entry in &config.components.entry {
-        generated.push_str(&format!("use {}::{};\n", entry.crate_name, entry.struct_name));
+        //NOTE: cargo crate names use kebab case, but rustc uses snake case
+        generated.push_str(&format!("use {}::{};\n", to_snake_case(&entry.crate_name), entry.struct_name));
     }
     generated.push_str("\n");
 
@@ -177,4 +178,8 @@ fn validate_crate_name(manifest_dir: &Path, dependencies: &HashSet<String>, crat
 
 fn escape_rust_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\"', "\\\"")
+}
+
+fn to_snake_case(value: &String) -> String {
+    return value.replace("-", "_");
 }
