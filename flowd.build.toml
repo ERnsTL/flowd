@@ -23,7 +23,7 @@ struct = "OutputComponent"
 
 [[components.entry]]
 name = "LibComponent"
-crate = "components::libcomponent"
+crate = "flowd-libcomponent"
 struct = "LibComponent"
 
 [[components.entry]]

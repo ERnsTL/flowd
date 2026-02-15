@@ -1,6 +1,3 @@
-pub mod output;
-
-pub mod libcomponent;
 pub mod unixsocket;
 pub mod file;
 pub mod trim;
