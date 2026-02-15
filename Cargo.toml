@@ -37,7 +37,7 @@ multimap = "0.10.0"
 flowd_component_api = { path = "component_api" }
 
 # components
-repeat_component = { path = "components/repeat_component" }
+flowd-repeat = { path = "components/repeat" }
 
 # for CountComponent
 atoi = "2.0"
