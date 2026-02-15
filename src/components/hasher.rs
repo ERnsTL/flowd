@@ -59,7 +59,7 @@ impl Component for HasherComponent {
                 if let Ok(ip) = inn.pop() {
                     debug!("hashing packet...");
                     hasher.write(&ip);
-                    hasher.finish();
+                    let _ = hasher.finish();
                     let outip = format!("{:016x}", hasher.finish()).into_bytes();
                     out.push(outip).expect("could not push into OUT");
                     out_wakeup.unpark();
