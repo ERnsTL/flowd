@@ -1834,58 +1834,15 @@ impl RuntimeRuntimePayload {
                 info!("starting");
                 //TODO make it generic instead of if
                 //let component: Component where Component: Sized;
-                match component_name.as_str() {
-                    // core components
-                    "Repeat" => { RepeatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Drop" => { DropComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Output" => { OutputComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "LibComponent" => { LibComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "UnixSocketServer" => { UnixSocketServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "FileReader" => { FileReaderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Trim" => { TrimComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "SplitLines" => { SplitLinesComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Count" => { CountComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Cron" => { CronComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Cmd" => { CmdComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Hasher" => { HasherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Equals" => { EqualsComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "HTTPClient" => { HTTPClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "HTTPServer" => { HTTPServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "Muxer" => { MuxerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "MQTTPublisher" => { MQTTPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "MQTTSubscriber" => { MQTTSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "RedisPublisher" => { RedisPublisherComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "RedisSubscriber" => { RedisSubscriberComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "IMAPAppend" => { IMAPAppendComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "IMAPFetchIdle" => { IMAPFetchIdleComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "OpenAIChat" => { OpenAIChatComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TeraTemplate" => { TeraTemplateComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "FileTailer" => { FileTailerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "RegexpExtract" => { RegexpExtractComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "FileWriter" => { FileWriterComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TextReplace" => { TextReplaceComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "ZeroconfResponder" => { ZeroconfResponderComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "XzCompress" => { XzCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "XzDecompress" => { XzDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "BrotliCompress" => { BrotliCompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "BrotliDecompress" => { BrotliDecompressComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "UnixSocketClient" => { UnixSocketClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "HTMLStrip" => { HTMLStripComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "WSClient" => { WSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TCPClient" => { TCPClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TLSClient" => { TLSClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TCPServer" => { TCPServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TLSServer" => { TLSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "WSServer" => { WSServerComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "ZeroconfBrowser" => { ZeroconfBrowserComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "JSONQuery" => { JSONQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "HTMLQuery" => { HTMLQueryComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "SSHClient" => { SSHClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "TelegramBot" => { TelegramBotComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    "MatrixClient" => { MatrixClientComponent::new(inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref).run(); },
-                    _ => {
-                        error!("unknown component in network start! exiting thread.");
-                    }
+                if !instantiate_and_run_component(
+                    component_name.as_str(),
+                    inports,
+                    outports,
+                    signalsource,
+                    watchdog_signalsink_clone,
+                    graph_inout_ref,
+                ) {
+                    error!("unknown component in network start! exiting thread.");
                 }
             }).expect("thread start failed");
 
