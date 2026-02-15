@@ -100,24 +100,19 @@ fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
 
     //NOTE: important to show the thread name = the FBP process name
+    let mut logger_config = simplelog::ConfigBuilder::default();
+    logger_config
+        .set_time_level(simplelog::LevelFilter::Off)
+        .set_thread_level(simplelog::LevelFilter::Info)
+        .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
+        .set_thread_mode(simplelog::ThreadLogMode::Names)
+        .set_thread_padding(simplelog::ThreadPadding::Right(21))    // maximum thread name length on Linux is 15 by the way
+        .set_level_padding(simplelog::LevelPadding::Right);
+    register_component_log_filters(&mut logger_config);
+
     simplelog::TermLogger::init(
         simplelog::LevelFilter::Trace,   // can locally increase this for dev, TODO make configurable via args - but better configure this in Cargo.toml
-        simplelog::ConfigBuilder::default()
-            .set_time_level(simplelog::LevelFilter::Off)
-            .set_thread_level(simplelog::LevelFilter::Info)
-            .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
-            .set_thread_mode(simplelog::ThreadLogMode::Names)
-            .set_thread_padding(simplelog::ThreadPadding::Right(21))    // maximum thread name length on Linux is 15 by the way
-            .set_level_padding(simplelog::LevelPadding::Right)
-            .add_filter_ignore_str("rumqttc")   //TODO optimize - unfortunately the rumqttc crate sends debug! about PingReq every few seconds in https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L416 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/v5/state.rs#L589 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L357
-            .add_filter_ignore_str("rustls")   //TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
-            .add_filter_ignore_str("mdns_sd")   //TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
-            .add_filter_ignore_str("ssh")   //TODO optimize - sends many info messages about SSH connection establishment etc. - how to disable that if not needed?
-            .add_filter_ignore_str("reqwest")   // TODO optimize - some messages about opening connections etc. in TelegramBotComponent
-            .add_filter_ignore_str("hyper") //TODO optimize - debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
-            .add_filter_ignore_str("teloxide")  // TODO optimize - sends some messages about the Telegram API in TelegramBotComponent
-            .add_filter_ignore_str("matrix_sdk")    //TODO optimize - this sends alot of messages about Matrix protocol messages, can this be shut off "at the source"?
-            .build(),
+        logger_config.build(),
         simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
         simplelog::ColorChoice::Auto    // depending on whether interactive or not
     ).expect("logging init failed");
