@@ -81,6 +81,30 @@ fn main() {
     generated.push_str("    ])))\n");
     generated.push_str("}\n\n");
 
+    // component factory function
+    generated.push_str("pub(crate) fn instantiate_and_run_component(\n");
+    generated.push_str("    name: &str,\n");
+    generated.push_str("    inports: ProcessInports,\n");
+    generated.push_str("    outports: ProcessOutports,\n");
+    generated.push_str("    signalsource: ProcessSignalSource,\n");
+    generated.push_str("    watchdog_signalsink: ProcessSignalSink,\n");
+    generated.push_str("    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,\n");
+    generated.push_str(") -> bool {\n");
+    generated.push_str("    match name {\n");
+    for entry in &config.components.entry {
+        generated.push_str(&format!(
+            "        \"{}\" => {{ {}::new(inports, outports, signalsource, watchdog_signalsink, graph_inout).run(); true }},\n",
+            escape_rust_string(&entry.name),
+            entry.struct_name
+        ));
+    }
+    generated.push_str("        _ => {\n");
+    generated.push_str("            let _ = (inports, outports, signalsource, watchdog_signalsink, graph_inout);\n");
+    generated.push_str("            false\n");
+    generated.push_str("        }\n");
+    generated.push_str("    }\n");
+    generated.push_str("}\n");
+
     // write generated code to file
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = Path::new(&out_dir).join("build_generated.rs");
