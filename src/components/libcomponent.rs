@@ -48,7 +48,7 @@ impl Component for LibComponent { //<'_> {
             //TODO give the process function some shared state that it can mutate
             //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             //TODO find way to prepare the function already here at this point
-            let _func: Symbol<unsafe extern fn(OsString) -> u32> = lib.get(b"process").expect("failed to get symbol 'process'");
+            let _func: Symbol<unsafe extern "C" fn(OsString) -> u32> = lib.get(b"process").expect("failed to get symbol 'process'");
             //self.fn_process = func;
 
             //TODO get metadata from a global variable in the shared library
@@ -73,7 +73,7 @@ impl Component for LibComponent { //<'_> {
         let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         unsafe {
-            let fn_process: libloading::Symbol<unsafe extern fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
+            let fn_process: libloading::Symbol<unsafe extern "C" fn(&std::ffi::CStr) -> u32> = self.lib.get(b"process").expect("failed to re-get symbol 'process'");
             loop {
                 trace!("begin of iteration");
                 // check signals
