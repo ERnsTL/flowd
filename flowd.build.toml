@@ -1,0 +1,251 @@
+[components]
+
+[[components.entry]]
+name = "Repeat"
+crate = "components::repeat"
+struct = "RepeatComponent"
+
+[[components.entry]]
+name = "Drop"
+crate = "components::drop"
+struct = "DropComponent"
+
+[[components.entry]]
+name = "Output"
+crate = "components::output"
+struct = "OutputComponent"
+
+[[components.entry]]
+name = "LibComponent"
+crate = "components::libcomponent"
+struct = "LibComponent"
+
+[[components.entry]]
+name = "UnixSocketServer"
+crate = "components::unixsocket"
+struct = "UnixSocketServerComponent"
+
+[[components.entry]]
+name = "FileReader"
+crate = "components::file"
+struct = "FileReaderComponent"
+
+[[components.entry]]
+name = "Trim"
+crate = "components::trim"
+struct = "TrimComponent"
+
+[[components.entry]]
+name = "SplitLines"
+crate = "components::splitlines"
+struct = "SplitLinesComponent"
+
+[[components.entry]]
+name = "Count"
+crate = "components::count"
+struct = "CountComponent"
+
+[[components.entry]]
+name = "Cron"
+crate = "components::cron"
+struct = "CronComponent"
+
+[[components.entry]]
+name = "Cmd"
+crate = "components::cmd"
+struct = "CmdComponent"
+
+[[components.entry]]
+name = "Hasher"
+crate = "components::hasher"
+struct = "HasherComponent"
+
+[[components.entry]]
+name = "Equals"
+crate = "components::equals"
+struct = "EqualsComponent"
+
+[[components.entry]]
+name = "HTTPClient"
+crate = "components::http"
+struct = "HTTPClientComponent"
+log_ignore = ["hyper"]
+
+[[components.entry]]
+name = "HTTPServer"
+crate = "components::http"
+struct = "HTTPServerComponent"
+log_ignore = ["hyper"]
+
+[[components.entry]]
+name = "Muxer"
+crate = "components::muxer"
+struct = "MuxerComponent"
+
+[[components.entry]]
+name = "MQTTPublisher"
+crate = "components::mqtt"
+struct = "MQTTPublisherComponent"
+log_ignore = ["rumqttc"]    # //TODO optimize - unfortunately the rumqttc crate sends debug! about PingReq every few seconds in https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L416 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/v5/state.rs#L589 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L357
+
+[[components.entry]]
+name = "MQTTSubscriber"
+crate = "components::mqtt"
+struct = "MQTTSubscriberComponent"
+log_ignore = ["rumqttc"]
+
+[[components.entry]]
+name = "RedisPublisher"
+crate = "components::redis"
+struct = "RedisPublisherComponent"
+
+[[components.entry]]
+name = "RedisSubscriber"
+crate = "components::redis"
+struct = "RedisSubscriberComponent"
+
+[[components.entry]]
+name = "IMAPAppend"
+crate = "components::imap"
+struct = "IMAPAppendComponent"
+
+[[components.entry]]
+name = "IMAPFetchIdle"
+crate = "components::imap"
+struct = "IMAPFetchIdleComponent"
+
+[[components.entry]]
+name = "OpenAIChat"
+crate = "components::openai"
+struct = "OpenAIChatComponent"
+log_ignore = ["reqwest", "hyper"]
+
+[[components.entry]]
+name = "TeraTemplate"
+crate = "components::template"
+struct = "TeraTemplateComponent"
+
+[[components.entry]]
+name = "FileTailer"
+crate = "components::file"
+struct = "FileTailerComponent"
+
+[[components.entry]]
+name = "RegexpExtract"
+crate = "components::regexp"
+struct = "RegexpExtractComponent"
+
+[[components.entry]]
+name = "FileWriter"
+crate = "components::file"
+struct = "FileWriterComponent"
+
+[[components.entry]]
+name = "TextReplace"
+crate = "components::text"
+struct = "TextReplaceComponent"
+
+[[components.entry]]
+name = "ZeroconfResponder"
+crate = "components::zeroconf"
+struct = "ZeroconfResponderComponent"
+log_ignore = ["mdns_sd"]
+
+[[components.entry]]
+name = "XzCompress"
+crate = "components::xz"
+struct = "XzCompressComponent"
+
+[[components.entry]]
+name = "XzDecompress"
+crate = "components::xz"
+struct = "XzDecompressComponent"
+
+[[components.entry]]
+name = "BrotliCompress"
+crate = "components::brotli"
+struct = "BrotliCompressComponent"
+
+[[components.entry]]
+name = "BrotliDecompress"
+crate = "components::brotli"
+struct = "BrotliDecompressComponent"
+
+[[components.entry]]
+name = "UnixSocketClient"
+crate = "components::unixsocket"
+struct = "UnixSocketClientComponent"
+
+[[components.entry]]
+name = "HTMLStrip"
+crate = "components::html"
+struct = "HTMLStripComponent"
+
+[[components.entry]]
+name = "WSClient"
+crate = "components::ws"
+struct = "WSClientComponent"
+
+[[components.entry]]
+name = "TCPClient"
+crate = "components::tcp"
+struct = "TCPClientComponent"
+
+[[components.entry]]
+name = "TLSClient"
+crate = "components::tls"
+struct = "TLSClientComponent"
+log_ignore = ["rustls"] #TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
+
+[[components.entry]]
+name = "TCPServer"
+crate = "components::tcp"
+struct = "TCPServerComponent"
+
+[[components.entry]]
+name = "TLSServer"
+crate = "components::tls"
+struct = "TLSServerComponent"
+log_ignore = ["rustls"]
+
+[[components.entry]]
+name = "WSServer"
+crate = "components::ws"
+struct = "WSServerComponent"
+
+[[components.entry]]
+name = "ZeroconfBrowser"
+crate = "components::zeroconf"
+struct = "ZeroconfBrowserComponent"
+log_ignore = ["mdns_sd"]    #TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
+
+[[components.entry]]
+name = "JSONQuery"
+crate = "components::json"
+struct = "JSONQueryComponent"
+
+[[components.entry]]
+name = "HTMLQuery"
+crate = "components::html"
+struct = "HTMLQueryComponent"
+
+[[components.entry]]
+name = "SSHClient"
+crate = "components::ssh"
+struct = "SSHClientComponent"
+log_ignore = ["ssh"]    #TODO optimize - sends many info messages about SSH connection establishment etc. - how to disable that if not needed?
+
+[[components.entry]]
+name = "TelegramBot"
+crate = "components::telegram"
+struct = "TelegramBotComponent"
+#TODO optimize - reqwest logs some messages about opening connections etc. in TelegramBotComponent
+#TODO optimize - debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
+#TODO optimize - sends some messages about the Telegram API in TelegramBotComponent
+log_ignore = ["reqwest", "hyper", "teloxide"]
+
+[[components.entry]]
+name = "MatrixClient"
+crate = "components::matrix"
+struct = "MatrixClientComponent"
+log_ignore = ["matrix_sdk"] #TODO optimize - this sends alot of messages about Matrix protocol messages, can this be shut off "at the source"?
