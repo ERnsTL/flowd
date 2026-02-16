@@ -12,6 +12,7 @@ pub type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
 pub type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 pub type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
 pub type ProcessEdgeSinkConnection = rtrb::Producer<MessageBuf>;
+pub use rtrb::PushError;    // re-eport for abstraction
 
 #[derive(Debug)]
 pub struct ProcessEdgeSink {
