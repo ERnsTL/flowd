@@ -51,9 +51,7 @@ flowd-splitlines = { path = "components/splitlines" }
 flowd-count = { path = "components/count" }
 flowd-cron = { path = "components/cron" }
 flowd-cmd = { path = "components/cmd" }
-
-# for HasherComponent
-twox-hash = "1.6.3"
+flowd-hasher = { path = "components/hasher" }
 
 # for HTTPClientComponent
 reqwest = { version = "0.11.24", features = [ "blocking" ] }

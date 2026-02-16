@@ -78,7 +78,7 @@ struct = "CmdComponent"
 
 [[components.entry]]
 name = "Hasher"
-crate = "components::hasher"
+crate = "flowd-hasher"
 struct = "HasherComponent"
 
 [[components.entry]]
