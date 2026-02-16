@@ -58,10 +58,7 @@ flowd-muxer = { path = "components/muxer" }
 flowd-mqtt = { path = "components/mqtt" }
 flowd-redis = { path = "components/redis" }
 flowd-imap = { path = "components/imap" }
-
-# for OpenAIChatComponent
-openai = "1.1.1"
-tokio = "1.36.0"
+flowd-openai = { path = "components/openai" }
 
 # for TeraTemplateComponent
 tera = "1.0"

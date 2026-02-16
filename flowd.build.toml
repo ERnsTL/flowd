@@ -137,7 +137,7 @@ struct = "IMAPFetchIdleComponent"
 
 [[components.entry]]
 name = "OpenAIChat"
-crate = "components::openai"
+crate = "flowd-openai"
 struct = "OpenAIChatComponent"
 log_ignore = ["reqwest", "hyper"]
 
