@@ -73,9 +73,7 @@ flowd-json = { path = "components/json" }
 flowd-ssh = { path = "components/ssh" }
 flowd-telegram = { path = "components/telegram" }
 flowd-matrix = { path = "components/matrix" }
-
-# for Sexp
-assoc = "0.1.3"
+flowd-sexp = { path = "components/sexp" }
 
 # for build.rs
 [build-dependencies]

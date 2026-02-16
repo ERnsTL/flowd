@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, info, warn, trace};
 
 // component-specific imports
 use assoc::AssocExt;
@@ -58,7 +58,7 @@ enum XMLBody {
     None,
 }
 
-pub struct TrimComponent {
+pub struct SexpComponent {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
@@ -66,9 +66,9 @@ pub struct TrimComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-impl Component for TrimComponent {
+impl Component for SexpComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
-        TrimComponent {
+        SexpComponent {
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
@@ -135,9 +135,10 @@ impl Component for TrimComponent {
         info!("exiting");
     }
 
+    //TODO
     fn get_metadata() -> ComponentComponentPayload where Self: Sized {
         ComponentComponentPayload {
-            name: String::from("Trim"),
+            name: String::from("Sexp"),
             description: String::from("Reads IPs as UTF-8 strings and trims whitespace at beginning and end, forwarding the trimmed string."),
             icon: String::from("cut"),
             subgraph: false,
