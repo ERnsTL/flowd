@@ -58,7 +58,7 @@ struct = "TrimComponent"
 
 [[components.entry]]
 name = "SplitLines"
-crate = "components::splitlines"
+crate = "flowd-splitlines"
 struct = "SplitLinesComponent"
 
 [[components.entry]]

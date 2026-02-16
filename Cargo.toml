@@ -44,6 +44,7 @@ flowd-libcomponent = { path = "components/libcomponent" }
 flowd-unixsocket = { path = "components/unixsocket" }
 flowd-file = { path = "components/file" }
 flowd-trim = { path = "components/trim" }
+flowd-splitlines = { path = "components/splitlines" }
 
 # for CountComponent
 atoi = "2.0"

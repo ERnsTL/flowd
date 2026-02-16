@@ -1,4 +1,5 @@
-use crate::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
+use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource, PushError};
+use log::{debug, info, warn, trace};
 
 // component-specific
 //use std::io::BufRead;
@@ -65,7 +66,7 @@ impl Component for SplitLinesComponent {
                         // write first line
                         match out.push(line) {
                             Ok(_) => {},
-                            Err(rtrb::PushError::Full(line)) => {
+                            Err(PushError::Full(line)) => {
                                 // full, so wake up output-side component
                                 out_wakeup.unpark();
                                 while out.is_full() {
