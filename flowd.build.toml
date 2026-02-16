@@ -237,7 +237,7 @@ struct = "JSONQueryComponent"
 
 [[components.entry]]
 name = "SSHClient"
-crate = "components::ssh"
+crate = "flowd-ssh"
 struct = "SSHClientComponent"
 log_ignore = ["ssh"]    #TODO optimize - sends many info messages about SSH connection establishment etc. - how to disable that if not needed?
 

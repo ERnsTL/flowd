@@ -70,12 +70,7 @@ flowd-ws = { path = "components/ws" }
 flowd-tcp = { path = "components/tcp" }
 flowd-tls = { path = "components/tls" }
 flowd-json = { path = "components/json" }
-
-# for SSHClientComponent
-shell-words = "1.1.0"
-lexopt = "0.3.0"
-
-ssh-rs = "0.5.0"
+flowd-ssh = { path = "components/ssh" }
 
 # for TelegramBotComponent
 # list of features:  https://github.com/teloxide/teloxide/blob/master/crates/teloxide/Cargo.toml

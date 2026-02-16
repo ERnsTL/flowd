@@ -1,0 +1,17 @@
+[package]
+name = "flowd-ssh"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/ssh.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for SSHClientComponent
+shell-words = "1.1.0"
+lexopt = "0.3.0"
+
+ssh-rs = "0.5.0"
