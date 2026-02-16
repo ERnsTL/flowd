@@ -83,7 +83,7 @@ struct = "HasherComponent"
 
 [[components.entry]]
 name = "Equals"
-crate = "components::equals"
+crate = "flowd-equals"
 struct = "EqualsComponent"
 
 [[components.entry]]
