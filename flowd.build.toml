@@ -190,8 +190,13 @@ struct = "BrotliDecompressComponent"
 
 [[components.entry]]
 name = "HTMLStrip"
-crate = "components::html"
+crate = "flowd-html"
 struct = "HTMLStripComponent"
+
+[[components.entry]]
+name = "HTMLQuery"
+crate = "flowd-html"
+struct = "HTMLQueryComponent"
 
 [[components.entry]]
 name = "WSClient"
@@ -229,11 +234,6 @@ struct = "WSServerComponent"
 name = "JSONQuery"
 crate = "components::json"
 struct = "JSONQueryComponent"
-
-[[components.entry]]
-name = "HTMLQuery"
-crate = "components::html"
-struct = "HTMLQueryComponent"
 
 [[components.entry]]
 name = "SSHClient"

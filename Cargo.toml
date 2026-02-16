@@ -65,6 +65,7 @@ flowd-text = { path = "components/text" }
 flowd-zeroconf = { path = "components/zeroconf" }
 flowd-xz = { path = "components/xz" }
 flowd-brotli = { path = "components/brotli" }
+flowd-html = { path = "components/html" }
 
 # for TLSClientComponent
 rustls = "0.23.4"
@@ -78,9 +79,6 @@ jaq-interpret = "1.2.1"
 jaq-parse = "1.0.2"
 jaq-core = "1.2.1"
 jaq-std = "1.2.1"
-
-# for HTMLQueryComponent
-skyscraper = "0.6.3"
 
 # for SSHClientComponent
 shell-words = "1.1.0"
