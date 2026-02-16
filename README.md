@@ -532,6 +532,18 @@ TODO straight implementation, almost waterfall-like, fewer refactorings.
 
 TODO Linear maintenance cost in relation to program size.
 
+## Using Components
+
+1. Find the component on a Git service like Github, GitLab, CodeBerg etc. Repositories usually have "flowd-" in their name. Each repository constitutes a Cargo crate; it can contain one or more components.
+2. Add the crate repository to your Cargo.toml like so, to make it known to Cargo:
+  > flowd-bla = {
+  >   git = "https://github.com/org/bla.git",
+  >   rev = "a1b2c3d4e5f6",
+  >   branch = "0.4"
+  > }
+3. Add all components contained in the crate repository to your flowd.build.toml, to have it built into flowd. Explanation in the included flowd.build.toml file. The component repository probably has a ready block for copy-paste in its README.
+4. Build flowd as usual using ```cargo build --release```.
+
 ## Writing Components
 
 TODO rewrite for flowd-rs.
@@ -542,7 +554,8 @@ If wrapped, you can decide for the program to be called for each incoming frame 
 
 Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open the named pipes given and will then be connected with the neighbor components. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration. Port closing detection is done using regular EOF on the named pipe; this is usually the signal that all data has arrived from the preceding component and that it shut down; it can also be re-opened if that is the use-case. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact; packet tracing is also implemented using marker values in the header. Output frames, if any, are then to be sent to the output named pipes. That way, the frames from your component are sent directly to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
 
-Version schema of components:  component version (e.g. 0.1.0) + flowd target version (e.g. 0.4 for 0.4.* or 0.4.1 for specific one) = 0.1.0+0.4
+* Version schema of components:  component version (e.g. 0.1.0) + flowd target version (e.g. 0.4 for 0.4.* or 0.4.1 for specific one) = 0.1.0+0.4
+* Create a branch for each flowd version, named "0.4" for example so that users can get the latest component version for their flowd version. This way, improvements can be ported back for an older version of flowd, and porting to new version of flowd can be done independently without disturbing component version for older versions of flowd.
 
 ## Development aka Hacking on ```flowd```
 
