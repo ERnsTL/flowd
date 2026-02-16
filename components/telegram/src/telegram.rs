@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, trace, info, warn};
 
 // component-specific
+use std::sync::{Arc, Mutex};
 use teloxide::prelude::*;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::{thread, thread::Thread};

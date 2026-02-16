@@ -1,0 +1,18 @@
+[package]
+name = "flowd-telegram"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/telegram.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for TelegramBotComponent
+# list of features:  https://github.com/teloxide/teloxide/blob/master/crates/teloxide/Cargo.toml
+# specifically, no Ctrl+C handler
+teloxide = { version = "0.12.2", default-features = false, features = ["native-tls"] }  # or rustls
+
+tokio = "1.36.0"    #TODO optimize - old version, and use common tokio thread pool with components that also use tokio

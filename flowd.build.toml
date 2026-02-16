@@ -243,11 +243,11 @@ log_ignore = ["ssh"]    #TODO optimize - sends many info messages about SSH conn
 
 [[components.entry]]
 name = "TelegramBot"
-crate = "components::telegram"
+crate = "flowd-telegram"
 struct = "TelegramBotComponent"
 #TODO optimize - reqwest logs some messages about opening connections etc. in TelegramBotComponent
-#TODO optimize - debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
-#TODO optimize - sends some messages about the Telegram API in TelegramBotComponent
+#TODO optimize - hpyer sends debug messages about reading and writing HTTP headers etc. in TelegramBotComponent
+#TODO optimize - teloxide sends some messages about the Telegram API in TelegramBotComponent
 log_ignore = ["reqwest", "hyper", "teloxide"]
 
 [[components.entry]]
