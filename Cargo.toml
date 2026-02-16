@@ -50,10 +50,7 @@ flowd-trim = { path = "components/trim" }
 flowd-splitlines = { path = "components/splitlines" }
 flowd-count = { path = "components/count" }
 flowd-cron = { path = "components/cron" }
-
-# for CmdComponent
-shell-words = "1.1.0"
-lexopt = "0.3.0"
+flowd-cmd = { path = "components/cmd" }
 
 # for HasherComponent
 twox-hash = "1.6.3"
@@ -120,6 +117,9 @@ jaq-std = "1.2.1"
 skyscraper = "0.6.3"
 
 # for SSHClientComponent
+shell-words = "1.1.0"
+lexopt = "0.3.0"
+
 ssh-rs = "0.5.0"
 
 # for TelegramBotComponent

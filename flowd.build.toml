@@ -73,7 +73,7 @@ struct = "CronComponent"
 
 [[components.entry]]
 name = "Cmd"
-crate = "components::cmd"
+crate = "flowd-cmd"
 struct = "CmdComponent"
 
 [[components.entry]]

@@ -1,0 +1,15 @@
+[package]
+name = "flowd-cmd"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/cmd.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for CmdComponent
+shell-words = "1.1.0"
+lexopt = "0.3.0"

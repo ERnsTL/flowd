@@ -1,4 +1,3 @@
-pub mod cmd;
 pub mod hasher;
 pub mod equals;
 pub mod http;
