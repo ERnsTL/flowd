@@ -1,0 +1,18 @@
+[package]
+name = "flowd-mqtt"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/mqtt.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for MQTTPublisherCompmonent and MQTTSubscriberComponent
+rumqttc = { version = "0.23.0", features = ["url"] }
+# for canceling event listener thread
+#libc = "0.2.153"
+# for getting MQTT topic out of URL
+url = "2"
