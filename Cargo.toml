@@ -53,12 +53,7 @@ flowd-cron = { path = "components/cron" }
 flowd-cmd = { path = "components/cmd" }
 flowd-hasher = { path = "components/hasher" }
 flowd-equals = { path = "components/equals" }
-
-# for HTTPClientComponent
-reqwest = { version = "0.11.24", features = [ "blocking" ] }
-
-# for HTTPServerComponent
-astra = "0.3.0"
+flowd-http = { path = "components/http" }
 
 # for MQTTPublisherCompmonent and MQTTSubscriberComponent
 rumqttc = { version = "0.23.0", features = ["url"] }

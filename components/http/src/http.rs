@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, trace, info, warn};
 
 // component-specific
+use std::sync::{Arc, Mutex};
 use std::borrow::BorrowMut;
 use std::thread::{self};
 use astra::{Body, Request, Response, Server};
@@ -261,7 +262,7 @@ impl Component for HTTPServerComponent {
                     debug!("got a packet, writing into HTTP response...");
                     let ip = resp.lock().expect("poisoned lock on RESP outport").pop().expect("no response data available, but said !is_empty() before");
                     Response::new(Body::new(ip))
-                    
+
                     //Response::new(Body::from("Hello, World!"))
                 })
                 .expect("failed to start server");

@@ -1,4 +1,3 @@
-pub mod http;
 pub mod muxer;
 pub mod mqtt;
 pub mod redis;

@@ -88,13 +88,13 @@ struct = "EqualsComponent"
 
 [[components.entry]]
 name = "HTTPClient"
-crate = "components::http"
+crate = "flowd-http"
 struct = "HTTPClientComponent"
 log_ignore = ["hyper"]
 
 [[components.entry]]
 name = "HTTPServer"
-crate = "components::http"
+crate = "flowd-http"
 struct = "HTTPServerComponent"
 log_ignore = ["hyper"]
 
