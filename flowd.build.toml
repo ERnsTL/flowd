@@ -100,18 +100,18 @@ log_ignore = ["hyper"]
 
 [[components.entry]]
 name = "Muxer"
-crate = "components::muxer"
+crate = "flowd-muxer"
 struct = "MuxerComponent"
 
 [[components.entry]]
 name = "MQTTPublisher"
-crate = "components::mqtt"
+crate = "flowd-mqtt"
 struct = "MQTTPublisherComponent"
 log_ignore = ["rumqttc"]    # //TODO optimize - unfortunately the rumqttc crate sends debug! about PingReq every few seconds in https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L416 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/v5/state.rs#L589 and https://github.com/bytebeamio/rumqtt/blob/0266b85bd5986f556b3eaedc806c964e906232b8/rumqttc/src/state.rs#L357
 
 [[components.entry]]
 name = "MQTTSubscriber"
-crate = "components::mqtt"
+crate = "flowd-mqtt"
 struct = "MQTTSubscriberComponent"
 log_ignore = ["rumqttc"]
 

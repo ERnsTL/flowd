@@ -54,13 +54,8 @@ flowd-cmd = { path = "components/cmd" }
 flowd-hasher = { path = "components/hasher" }
 flowd-equals = { path = "components/equals" }
 flowd-http = { path = "components/http" }
-
-# for MQTTPublisherCompmonent and MQTTSubscriberComponent
-rumqttc = { version = "0.23.0", features = ["url"] }
-# for canceling event listener thread
-#libc = "0.2.153"
-# for getting MQTT topic out of URL
-url = "2"
+flowd-muxer = { path = "components/muxer" }
+flowd-mqtt = { path = "components/mqtt" }
 
 # for RedisPublisherComponent and RedisSubscriberComponent
 # TODO optimize - try ahash feature for 7-10% performance improvement
