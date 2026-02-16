@@ -13,3 +13,4 @@ log = "0.4"
 # for RedisPublisherComponent and RedisSubscriberComponent
 # TODO optimize - try ahash feature for 7-10% performance improvement
 redis = { version = "*", default-features = false }
+url = "2"
