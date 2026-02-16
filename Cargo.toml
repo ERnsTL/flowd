@@ -64,9 +64,7 @@ flowd-regexp = { path = "components/regexp" }
 flowd-text = { path = "components/text" }
 flowd-zeroconf = { path = "components/zeroconf" }
 flowd-xz = { path = "components/xz" }
-
-# for BrotliCompressComponent, BrotliDecompressComponent
-brotli = "3.5"
+flowd-brotli = { path = "components/brotli" }
 
 # for TLSClientComponent
 rustls = "0.23.4"

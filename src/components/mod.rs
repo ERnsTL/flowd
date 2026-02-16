@@ -1,4 +1,3 @@
-pub mod brotli;
 pub mod html;
 pub mod ws;
 pub mod tcp;

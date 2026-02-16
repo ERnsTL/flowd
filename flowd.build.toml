@@ -180,12 +180,12 @@ struct = "XzDecompressComponent"
 
 [[components.entry]]
 name = "BrotliCompress"
-crate = "components::brotli"
+crate = "flowd-brotli"
 struct = "BrotliCompressComponent"
 
 [[components.entry]]
 name = "BrotliDecompress"
-crate = "components::brotli"
+crate = "flowd-brotli"
 struct = "BrotliDecompressComponent"
 
 [[components.entry]]
