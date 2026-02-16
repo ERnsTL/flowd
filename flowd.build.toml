@@ -68,7 +68,7 @@ struct = "CountComponent"
 
 [[components.entry]]
 name = "Cron"
-crate = "components::cron"
+crate = "flowd-cron"
 struct = "CronComponent"
 
 [[components.entry]]

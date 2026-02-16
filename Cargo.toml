@@ -49,10 +49,7 @@ flowd-file = { path = "components/file" }
 flowd-trim = { path = "components/trim" }
 flowd-splitlines = { path = "components/splitlines" }
 flowd-count = { path = "components/count" }
-
-# for CronComponent
-# also needs chrono
-cron = "0.12.0"
+flowd-cron = { path = "components/cron" }
 
 # for CmdComponent
 shell-words = "1.1.0"
