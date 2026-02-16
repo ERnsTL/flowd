@@ -1,0 +1,21 @@
+[package]
+name = "flowd-tls"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/tls.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for TLSClientComponent, TLSServerComponent
+url = "2"
+
+# for TLSClientComponent
+rustls = "0.23.4"
+webpki-roots = "0.26"
+
+# for TLSServerComponent
+rustls-pemfile = "2"

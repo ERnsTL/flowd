@@ -220,13 +220,13 @@ struct = "TCPServerComponent"
 
 [[components.entry]]
 name = "TLSClient"
-crate = "components::tls"
+crate = "flowd-tls"
 struct = "TLSClientComponent"
 log_ignore = ["rustls"] #TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
 
 [[components.entry]]
 name = "TLSServer"
-crate = "components::tls"
+crate = "flowd-tls"
 struct = "TLSServerComponent"
 log_ignore = ["rustls"]
 
