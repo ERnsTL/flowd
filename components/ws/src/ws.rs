@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
+use std::sync::{Arc, Mutex};
 //use tungstenite::client::connect;
 use tungstenite::protocol::Message;
 use tungstenite::util::NonBlockingError;

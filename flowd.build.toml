@@ -200,8 +200,13 @@ struct = "HTMLQueryComponent"
 
 [[components.entry]]
 name = "WSClient"
-crate = "components::ws"
+crate = "flowd-ws"
 struct = "WSClientComponent"
+
+[[components.entry]]
+name = "WSServer"
+crate = "flowd-ws"
+struct = "WSServerComponent"
 
 [[components.entry]]
 name = "TCPClient"
@@ -224,11 +229,6 @@ name = "TLSServer"
 crate = "components::tls"
 struct = "TLSServerComponent"
 log_ignore = ["rustls"]
-
-[[components.entry]]
-name = "WSServer"
-crate = "components::ws"
-struct = "WSServerComponent"
 
 [[components.entry]]
 name = "JSONQuery"

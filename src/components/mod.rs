@@ -1,4 +1,3 @@
-pub mod ws;
 pub mod tcp;
 pub mod tls;
 pub mod json;

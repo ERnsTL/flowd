@@ -66,6 +66,7 @@ flowd-zeroconf = { path = "components/zeroconf" }
 flowd-xz = { path = "components/xz" }
 flowd-brotli = { path = "components/brotli" }
 flowd-html = { path = "components/html" }
+flowd-ws = { path = "components/ws" }
 
 # for TLSClientComponent
 rustls = "0.23.4"
