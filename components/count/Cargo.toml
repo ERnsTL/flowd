@@ -1,0 +1,19 @@
+[package]
+name = "flowd-count"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/count.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for CountComponent
+url = "2"
+
+atoi = "2.0"
+#atoi_simd = "0.15"
+
+chrono = "0.4.26"

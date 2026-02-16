@@ -1,4 +1,3 @@
-pub mod count;
 pub mod cron;
 pub mod cmd;
 pub mod hasher;

@@ -63,7 +63,7 @@ struct = "SplitLinesComponent"
 
 [[components.entry]]
 name = "Count"
-crate = "components::count"
+crate = "flowd-count"
 struct = "CountComponent"
 
 [[components.entry]]
