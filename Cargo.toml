@@ -56,10 +56,7 @@ flowd-equals = { path = "components/equals" }
 flowd-http = { path = "components/http" }
 flowd-muxer = { path = "components/muxer" }
 flowd-mqtt = { path = "components/mqtt" }
-
-# for RedisPublisherComponent and RedisSubscriberComponent
-# TODO optimize - try ahash feature for 7-10% performance improvement
-redis = { version = "*", default-features = false }
+flowd-redis = { path = "components/redis" }
 
 # for IMAPFetchIdleComponent and IMAPAppendComponent
 # TODO optimize - try rustls. better performance working with Rust types than converting to and from C types?

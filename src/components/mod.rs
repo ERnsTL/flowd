@@ -1,4 +1,3 @@
-pub mod redis;
 pub mod imap;
 pub mod openai;
 pub mod template;

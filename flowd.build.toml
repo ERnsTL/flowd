@@ -117,12 +117,12 @@ log_ignore = ["rumqttc"]
 
 [[components.entry]]
 name = "RedisPublisher"
-crate = "components::redis"
+crate = "flowd-redis"
 struct = "RedisPublisherComponent"
 
 [[components.entry]]
 name = "RedisSubscriber"
-crate = "components::redis"
+crate = "flowd-redis"
 struct = "RedisSubscriberComponent"
 
 [[components.entry]]
