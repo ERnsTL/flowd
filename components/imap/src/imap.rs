@@ -1,4 +1,4 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
@@ -383,7 +383,7 @@ fn close(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     imap_session.logout().expect("logout failed");
 }
 
-fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut rtrb::Producer<Vec<u8>>, out_wakeup: &Thread) -> Result<(), ()> {
+fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut ProcessEdgeSinkConnection, out_wakeup: &Thread) -> Result<(), ()> {
     // find unseen messages in the given mailbox
     let uids_set = imap_session.uid_search("UNSEEN").expect("search failed");
 
