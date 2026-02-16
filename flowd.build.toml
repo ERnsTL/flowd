@@ -148,7 +148,7 @@ struct = "TeraTemplateComponent"
 
 [[components.entry]]
 name = "RegexpExtract"
-crate = "components::regexp"
+crate = "flowd-regexp"
 struct = "RegexpExtractComponent"
 
 [[components.entry]]

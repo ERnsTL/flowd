@@ -60,6 +60,7 @@ flowd-redis = { path = "components/redis" }
 flowd-imap = { path = "components/imap" }
 flowd-openai = { path = "components/openai" }
 flowd-template = { path = "components/template" }
+flowd-regexp = { path = "components/regexp" }
 
 # for ZeroconfResponderComponent and ZeroconfQueryComponent
 #simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
@@ -67,9 +68,6 @@ flowd-template = { path = "components/template" }
 # need to use the same version as simple-mdns depends on
 #simple-dns = "0.6.2"
 mdns-sd = "0.10.4"
-
-# for RegexpExtractComponent
-regex = "1.10"
 
 # for XzCompressComponent, XzDecompressComponent
 xz = "0.1"
