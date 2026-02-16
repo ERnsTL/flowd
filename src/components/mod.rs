@@ -1,4 +1,3 @@
-pub mod trim;
 pub mod splitlines;
 pub mod count;
 pub mod cron;

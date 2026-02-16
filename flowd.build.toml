@@ -53,7 +53,7 @@ struct = "FileTailerComponent"
 
 [[components.entry]]
 name = "Trim"
-crate = "components::trim"
+crate = "flowd-trim"
 struct = "TrimComponent"
 
 [[components.entry]]
