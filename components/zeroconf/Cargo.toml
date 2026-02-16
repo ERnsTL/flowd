@@ -16,3 +16,4 @@ log = "0.4"
 # need to use the same version as simple-mdns depends on
 #simple-dns = "0.6.2"
 mdns-sd = "0.10.4"
+url = "2"
