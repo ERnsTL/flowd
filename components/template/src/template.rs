@@ -1,12 +1,11 @@
-use crate::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, trace, info};
 
 // component-specific
 use std::thread;
 use tera::Tera;
 
-/*
-TODO if too much time on hand - evaluate TT2 as alternative to Tera -> https://www.template-toolkit.org/#
-*/
+//TODO evaluate TT2 as alternative to Tera -> https://www.template-toolkit.org/#
 
 pub struct TeraTemplateComponent {
     conf: ProcessEdgeSource,

@@ -59,9 +59,7 @@ flowd-mqtt = { path = "components/mqtt" }
 flowd-redis = { path = "components/redis" }
 flowd-imap = { path = "components/imap" }
 flowd-openai = { path = "components/openai" }
-
-# for TeraTemplateComponent
-tera = "1.0"
+flowd-template = { path = "components/template" }
 
 # for ZeroconfResponderComponent and ZeroconfQueryComponent
 #simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
