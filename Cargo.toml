@@ -69,12 +69,7 @@ flowd-html = { path = "components/html" }
 flowd-ws = { path = "components/ws" }
 flowd-tcp = { path = "components/tcp" }
 flowd-tls = { path = "components/tls" }
-
-# for JSONQueryComponent
-jaq-interpret = "1.2.1"
-jaq-parse = "1.0.2"
-jaq-core = "1.2.1"
-jaq-std = "1.2.1"
+flowd-json = { path = "components/json" }
 
 # for SSHClientComponent
 shell-words = "1.1.0"

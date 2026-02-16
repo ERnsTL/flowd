@@ -1,0 +1,20 @@
+[package]
+name = "flowd-json"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/json.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for JSONQueryComponent
+jaq-interpret = "1.2.1"
+jaq-parse = "1.0.2"
+jaq-core = "1.2.1"
+jaq-std = "1.2.1"
+
+# NOTE: sync version with flowd itself, to avoid multiple versions of serde_json in the dependency graph
+serde_json = "1.0"

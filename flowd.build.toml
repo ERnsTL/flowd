@@ -232,7 +232,7 @@ log_ignore = ["rustls"]
 
 [[components.entry]]
 name = "JSONQuery"
-crate = "components::json"
+crate = "flowd-json"
 struct = "JSONQueryComponent"
 
 [[components.entry]]
