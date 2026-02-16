@@ -62,13 +62,7 @@ flowd-openai = { path = "components/openai" }
 flowd-template = { path = "components/template" }
 flowd-regexp = { path = "components/regexp" }
 flowd-text = { path = "components/text" }
-
-# for ZeroconfResponderComponent and ZeroconfQueryComponent
-#simple-mdns = { version = "0.6.1", default-features = false, features = ["sync"] }
-# NOTE: simple-mdns has dependency on a different version than the latest version on crates.io, for example ResourceRecord has different generic arguments
-# need to use the same version as simple-mdns depends on
-#simple-dns = "0.6.2"
-mdns-sd = "0.10.4"
+flowd-zeroconf = { path = "components/zeroconf" }
 
 # for XzCompressComponent, XzDecompressComponent
 xz = "0.1"

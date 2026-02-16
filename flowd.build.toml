@@ -158,9 +158,15 @@ struct = "TextReplaceComponent"
 
 [[components.entry]]
 name = "ZeroconfResponder"
-crate = "components::zeroconf"
+crate = "flowd-zeroconf"
 struct = "ZeroconfResponderComponent"
 log_ignore = ["mdns_sd"]
+
+[[components.entry]]
+name = "ZeroconfBrowser"
+crate = "flowd-zeroconf"
+struct = "ZeroconfBrowserComponent"
+log_ignore = ["mdns_sd"]    #TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
 
 [[components.entry]]
 name = "XzCompress"
@@ -218,12 +224,6 @@ log_ignore = ["rustls"]
 name = "WSServer"
 crate = "components::ws"
 struct = "WSServerComponent"
-
-[[components.entry]]
-name = "ZeroconfBrowser"
-crate = "components::zeroconf"
-struct = "ZeroconfBrowserComponent"
-log_ignore = ["mdns_sd"]    #TODO optimize - unfortunately the mdns-sd crate sends many debug! about mDNS packets, which are not of much interest. the mdns crate itself does not have a log level setting  //TODO optimize - note these mDNS events debug logs are sent when loglevel is info or higher, so filter is not necessary in release builds - any way to remove it from realese builds?
 
 [[components.entry]]
 name = "JSONQuery"

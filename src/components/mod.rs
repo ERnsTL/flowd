@@ -1,4 +1,3 @@
-pub mod zeroconf;
 pub mod xz;
 pub mod brotli;
 pub mod html;
