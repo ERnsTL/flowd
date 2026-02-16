@@ -57,11 +57,7 @@ flowd-http = { path = "components/http" }
 flowd-muxer = { path = "components/muxer" }
 flowd-mqtt = { path = "components/mqtt" }
 flowd-redis = { path = "components/redis" }
-
-# for IMAPFetchIdleComponent and IMAPAppendComponent
-# TODO optimize - try rustls. better performance working with Rust types than converting to and from C types?
-imap = "2.4.1"
-native-tls = "0.2.11"
+flowd-imap = { path = "components/imap" }
 
 # for OpenAIChatComponent
 openai = "1.1.1"

@@ -1,4 +1,3 @@
-pub mod imap;
 pub mod openai;
 pub mod template;
 pub mod regexp;

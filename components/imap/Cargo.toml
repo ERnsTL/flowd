@@ -1,0 +1,16 @@
+[package]
+name = "flowd-imap"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/imap.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for IMAPFetchIdleComponent and IMAPAppendComponent
+# TODO optimize - try rustls. better performance working with Rust types than converting to and from C types?
+imap = "2.4.1"
+native-tls = "0.2.11"

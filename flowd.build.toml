@@ -127,12 +127,12 @@ struct = "RedisSubscriberComponent"
 
 [[components.entry]]
 name = "IMAPAppend"
-crate = "components::imap"
+crate = "flowd-imap"
 struct = "IMAPAppendComponent"
 
 [[components.entry]]
 name = "IMAPFetchIdle"
-crate = "components::imap"
+crate = "flowd-imap"
 struct = "IMAPFetchIdleComponent"
 
 [[components.entry]]
