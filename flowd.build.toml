@@ -210,19 +210,19 @@ struct = "WSServerComponent"
 
 [[components.entry]]
 name = "TCPClient"
-crate = "components::tcp"
+crate = "flowd-tcp"
 struct = "TCPClientComponent"
+
+[[components.entry]]
+name = "TCPServer"
+crate = "flowd-tcp"
+struct = "TCPServerComponent"
 
 [[components.entry]]
 name = "TLSClient"
 crate = "components::tls"
 struct = "TLSClientComponent"
 log_ignore = ["rustls"] #TODO optimize - unfortunately the rustls sends debug! about session parameters etc. on connection establishment
-
-[[components.entry]]
-name = "TCPServer"
-crate = "components::tcp"
-struct = "TCPServerComponent"
 
 [[components.entry]]
 name = "TLSServer"

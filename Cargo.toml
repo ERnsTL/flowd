@@ -67,13 +67,7 @@ flowd-xz = { path = "components/xz" }
 flowd-brotli = { path = "components/brotli" }
 flowd-html = { path = "components/html" }
 flowd-ws = { path = "components/ws" }
-
-# for TLSClientComponent
-rustls = "0.23.4"
-webpki-roots = "0.26"
-
-# for TLSServerComponent
-rustls-pemfile = "2"
+flowd-tcp = { path = "components/tcp" }
 
 # for JSONQueryComponent
 jaq-interpret = "1.2.1"
