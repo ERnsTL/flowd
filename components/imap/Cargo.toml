@@ -14,3 +14,4 @@ log = "0.4"
 # TODO optimize - try rustls. better performance working with Rust types than converting to and from C types?
 imap = "2.4.1"
 native-tls = "0.2.11"
+url = "2"
