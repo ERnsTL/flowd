@@ -170,12 +170,12 @@ log_ignore = ["mdns_sd"]    #TODO optimize - unfortunately the mdns-sd crate sen
 
 [[components.entry]]
 name = "XzCompress"
-crate = "components::xz"
+crate = "flowd-xz"
 struct = "XzCompressComponent"
 
 [[components.entry]]
 name = "XzDecompress"
-crate = "components::xz"
+crate = "flowd-xz"
 struct = "XzDecompressComponent"
 
 [[components.entry]]

@@ -1,4 +1,3 @@
-pub mod xz;
 pub mod brotli;
 pub mod html;
 pub mod ws;

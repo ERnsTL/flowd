@@ -63,9 +63,7 @@ flowd-template = { path = "components/template" }
 flowd-regexp = { path = "components/regexp" }
 flowd-text = { path = "components/text" }
 flowd-zeroconf = { path = "components/zeroconf" }
-
-# for XzCompressComponent, XzDecompressComponent
-xz = "0.1"
+flowd-xz = { path = "components/xz" }
 
 # for BrotliCompressComponent, BrotliDecompressComponent
 brotli = "3.5"
