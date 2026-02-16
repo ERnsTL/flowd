@@ -1,7 +1,6 @@
 #![feature(duration_constants)]
 #![feature(io_error_more)]
 #![feature(map_try_insert)]
-#![feature(addr_parse_ascii)]   // for TCPClientComponent -> SocketAddr::parse_ascii()  //#####
 
 // basics and threading
 use std::str;
