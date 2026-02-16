@@ -72,10 +72,7 @@ flowd-tls = { path = "components/tls" }
 flowd-json = { path = "components/json" }
 flowd-ssh = { path = "components/ssh" }
 flowd-telegram = { path = "components/telegram" }
-
-# for MatrixClientComponent
-#tokio 1.x
-matrix-sdk = { version = "0.7.1", default-features = false, features = ["e2e-encryption", "native-tls"] }   # or rustls
+flowd-matrix = { path = "components/matrix" }
 
 # for Sexp
 assoc = "0.1.3"

@@ -252,6 +252,6 @@ log_ignore = ["reqwest", "hyper", "teloxide"]
 
 [[components.entry]]
 name = "MatrixClient"
-crate = "components::matrix"
+crate = "flowd-matrix"
 struct = "MatrixClientComponent"
 log_ignore = ["matrix_sdk"] #TODO optimize - this sends alot of messages about Matrix protocol messages, can this be shut off "at the source"?

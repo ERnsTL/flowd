@@ -1,0 +1,17 @@
+[package]
+name = "flowd-matrix"
+version = "0.1.0+0.4"
+edition = "2021"
+
+[lib]
+path = "src/matrix.rs"
+
+[dependencies]
+flowd_component_api = { path = "../../component_api" }
+log = "0.4"
+
+# for MatrixClientComponent
+#tokio 1.x
+matrix-sdk = { version = "0.7.1", default-features = false, features = ["e2e-encryption", "native-tls"] }   # or rustls
+tokio = "1.36.0"    #TODO optimize - old version, and use common tokio thread pool with components that also use tokio
+url = "2"

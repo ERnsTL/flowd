@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
-use crate::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
+use std::sync::{Arc, Mutex};
 use std::{thread, thread::Thread};
 use std::future::IntoFuture;
 use matrix_sdk::config::SyncSettings;
@@ -144,7 +145,7 @@ impl Component for MatrixClientComponent {
                 let mut room_id = room_id.lock().expect("lock poisoned");
                 let user_id = user_id.lock().expect("lock poisoned");
                 let user_id = user_id.as_ref().unwrap();  // TODO optimize - unwrap is safe here, but I dont like the unwrap
-    
+
                 // check if we are ready
                 if room.state() != RoomState::Joined {
                     return;
@@ -159,19 +160,19 @@ impl Component for MatrixClientComponent {
                     debug!("got our own message back - discarding");
                     return;
                 }
-            
+
                 // store room ID for being able to respond in main loop
                 if room_id.is_none() {
                     *room_id = Some(room.room_id().to_owned());   //TODO optimize conversion
                 }
-    
+
                 // send it
                 debug!("sending...");
                 out.lock().expect("lock poisoned").push(text_content.body.as_bytes().to_vec()).expect("could not push into OUT");
                 out_wakeup.unpark();
                 debug!("done");
             });
-    
+
             // since we called sync_once() before we entered our sync loop we must pass that sync token to sync()
             let settings = SyncSettings::default().token(response.next_batch);
 
