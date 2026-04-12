@@ -565,6 +565,7 @@ Otherwise, implement the simple ```flowd``` framing format, which can be seen in
   compatible = "0.4"
   ```
   Build-time compatibility check matches major and minor version between flowd and this value.
+  Module-based components (`crate = "components::..."`) are disabled by default and require explicitly enabling `--features allow-module-components`.
 * Create a branch for each flowd version, for example named "0.4" so that users can get the latest component version for their flowd version. This way, improvements can be ported back for an older version of flowd, and porting to new version of flowd can be done independently without disturbing component version for older versions of flowd.
 
 ## Development aka Hacking on ```flowd```
