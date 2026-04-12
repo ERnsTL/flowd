@@ -115,7 +115,7 @@ fn main() {
     generated.push_str("            false\n");
     generated.push_str("        }\n");
     generated.push_str("    }\n");
-    generated.push_str("}\n");
+    generated.push_str("}\n\n");
 
     // component log filters function
     generated.push_str("pub fn register_component_log_filters(logger: &mut simplelog::ConfigBuilder) {\n");
