@@ -13,6 +13,10 @@ name = "flowd-rs"
 [workspace]
 members = [".", "component_api", "components/*"]
 
+[features]
+default = []
+allow-module-components = []
+
 [dependencies]
 #NOTE: the features remove logging level output more detailed than certain level, at compile-time (!)
 #TODO if component crates do not declare the features, do they still get compiled with those features to save logging level checks?
