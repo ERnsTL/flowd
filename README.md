@@ -162,7 +162,7 @@ Graph support:
 Component management:
 
 * Currently all components are compiled-in.
-* Currently no support for linking to components in external paths or repositories.
+* Components can be linked from external repositories via Cargo `git` dependencies and from local paths via Cargo `path` dependencies.
 * One C-API-based component exists called *LibComponent* that loads a component from a shared object and calls into it (very basic).
 
 Online editing:
@@ -559,13 +559,57 @@ If wrapped, you can decide for the program to be called for each incoming frame 
 
 Otherwise, implement the simple ```flowd``` framing format, which can be seen in the files [libflowd/framing.go](libflowd/framing.go) and [libflowd/framing_test.go](libflowd/framing_test.go). It is basically STOMP v1.2 as specified with the modifications mentioned there. This can be done using a small library for the programming language of your choice. Your component is expected to open the named pipes given and will then be connected with the neighbor components. Frames of type *data* and *control* are common. Especially important are the IIPs, denoted by their *body type* IIP, which are usually used for component configuration. Port closing detection is done using regular EOF on the named pipe; this is usually the signal that all data has arrived from the preceding component and that it shut down; it can also be re-opened if that is the use-case. Components should forward existing headers from the incoming frames/IPs, because downstream connections might lead to a loop back to the sender requiring a header field present for correlation, like for example a TCP connection ID, so keep additional header fields intact; packet tracing is also implemented using marker values in the header. Output frames, if any, are then to be sent to the output named pipes. That way, the frames from your component are sent directly to the component which is connected to the other side of the given output port - to be processed, filtered, sorted, stored, transformed and sent out as results to who knows where... That's it - it's up to you!
 
+### Compile-Time Integration Model
+
+`flowd` integrates components at compile time from:
+
+1. `flowd.build.toml` (component declarations)
+2. `Cargo.toml` (crate dependencies)
+3. `build.rs` (validation + code generation)
+
+During build, `build.rs` generates `$OUT_DIR/build_generated.rs`, and `main.rs` includes it via `include!()`.
+This generated code provides:
+
+* component imports
+* component metadata registration
+* component factory wiring
+* component log filter registration
+
+So when adding/removing components, no manual edits are needed in runtime registration/factory/logging code paths.
+
+Build-time validation fails for:
+
+* malformed `flowd.build.toml`
+* duplicate component names
+* unresolved crates
+* missing component symbols (compile-time)
+* missing or invalid `[package.metadata.flowd].compatible`
+* flowd/component compatibility mismatch (major+minor)
+
+
 * Flowd compatibility of components is declared in each component's Cargo.toml via:
   ```toml
   [package.metadata.flowd]
   compatible = "0.4"
   ```
-  Build-time compatibility check matches major and minor version between flowd and this value.
-  Module-based components (`crate = "components::..."`) are disabled by default and require explicitly enabling `--features allow-module-components`.
+  Build-time compatibility check matches major and minor version between flowd and this value. This field is required for crate-based components.
+  Module-based components (`crate = "components::..."`) are legacy/dev-only: disabled by default and only allowed with `--features allow-module-components`.
+* Minimal crate-based component setup example:
+  ```toml
+  # in flowd Cargo.toml
+  [dependencies]
+  flowd-bla = { path = "components/bla" }
+
+  # in flowd.build.toml
+  [[components.entry]]
+  name = "Bla"
+  crate = "flowd-bla"
+  struct = "BlaComponent"
+
+  # in components/bla/Cargo.toml
+  [package.metadata.flowd]
+  compatible = "0.4"
+  ```
 * Create a branch for each flowd version, for example named "0.4" so that users can get the latest component version for their flowd version. This way, improvements can be ported back for an older version of flowd, and porting to new version of flowd can be done independently without disturbing component version for older versions of flowd.
 
 ## Development aka Hacking on ```flowd```
