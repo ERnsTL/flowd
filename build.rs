@@ -1,5 +1,6 @@
+use semver::Version;
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -24,6 +25,11 @@ struct ComponentEntry {
     log_ignore: Option<Vec<String>>,
 }
 
+#[derive(Clone, Debug)]
+struct DependencySpec {
+    path: Option<String>,
+}
+
 fn main() {
     // set up
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
@@ -41,7 +47,10 @@ fn main() {
         panic!("flowd.build.toml has no component entries");
     }
 
-    let dependency_names = load_dependency_names(Path::new(&manifest_dir));
+    let root_cargo = load_root_cargo_toml(Path::new(&manifest_dir));
+    let flowd_version = load_flowd_version(&root_cargo);
+    let flowd_major_minor = (flowd_version.major, flowd_version.minor);
+    let dependencies = load_dependency_specs(&root_cargo);
 
     let mut seen_names: HashSet<String> = HashSet::new();
     let mut log_filters: Vec<String> = Vec::new();
@@ -61,7 +70,14 @@ fn main() {
         }
 
         // check if it is present
-        validate_crate_name(Path::new(&manifest_dir), &dependency_names, &entry.crate_name);
+        validate_crate_name(Path::new(&manifest_dir), &dependencies, &entry.crate_name);
+        validate_component_version_compatibility(
+            Path::new(&manifest_dir),
+            &dependencies,
+            &entry.crate_name,
+            flowd_major_minor,
+            &flowd_version,
+        );
 
         // push log filter, if set
         if let Some(filters) = &entry.log_ignore {
@@ -134,25 +150,47 @@ fn main() {
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", out_path.display()));
 }
 
-fn load_dependency_names(manifest_dir: &Path) -> HashSet<String> {
+fn load_root_cargo_toml(manifest_dir: &Path) -> toml::Value {
     let cargo_toml_path = manifest_dir.join("Cargo.toml");
     let cargo_toml = fs::read_to_string(&cargo_toml_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", cargo_toml_path.display()));
-    let cargo_value: toml::Value = cargo_toml
+    cargo_toml
         .parse()
-        .unwrap_or_else(|err| panic!("failed to parse Cargo.toml: {err}"));
+        .unwrap_or_else(|err| panic!("failed to parse Cargo.toml: {err}"))
+}
 
-    let mut names = HashSet::new();
-    if let Some(deps) = cargo_value.get("dependencies").and_then(|v| v.as_table()) {
-        for name in deps.keys() {
-            names.insert(name.to_string());
+fn load_flowd_version(root_cargo: &toml::Value) -> Version {
+    let raw = root_cargo
+        .get("package")
+        .and_then(|v| v.get("version"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| panic!("missing [package].version in root Cargo.toml"));
+    Version::parse(raw).unwrap_or_else(|err| {
+        panic!("invalid root Cargo.toml [package].version '{}': {err}", raw)
+    })
+}
+
+fn load_dependency_specs(root_cargo: &toml::Value) -> HashMap<String, DependencySpec> {
+    let mut specs = HashMap::new();
+    if let Some(deps) = root_cargo.get("dependencies").and_then(|v| v.as_table()) {
+        for (name, value) in deps {
+            let path = value
+                .as_table()
+                .and_then(|t| t.get("path"))
+                .and_then(|p| p.as_str())
+                .map(str::to_owned);
+            specs.insert(name.to_owned(), DependencySpec { path });
         }
     }
-    names
+    specs
 }
 
 //TODO change to support components in separate crates (TO-BE) instead of modules (AS-IS), e.g. by checking for a Cargo.toml in the crate path and looking for a lib.rs or src/lib.rs file there, and also supporting nested modules in the components directory, e.g. components/ssh/mod.rs or components/ssh.rs for components::ssh
-fn validate_crate_name(manifest_dir: &Path, dependencies: &HashSet<String>, crate_name: &str) {
+fn validate_crate_name(
+    manifest_dir: &Path,
+    dependencies: &HashMap<String, DependencySpec>,
+    crate_name: &str,
+) {
     if crate_name.starts_with("components::") {
         let module = crate_name.trim_start_matches("components::");
         if module.is_empty() || module.contains("::") {
@@ -171,9 +209,89 @@ fn validate_crate_name(manifest_dir: &Path, dependencies: &HashSet<String>, crat
         panic!("crate name '{}' is not a valid crate path", crate_name);
     }
 
-    if !dependencies.contains(crate_name) {
+    if !dependencies.contains_key(crate_name) {
         panic!("crate '{}' not found in Cargo.toml dependencies", crate_name);
     }
+}
+
+fn validate_component_version_compatibility(
+    manifest_dir: &Path,
+    dependencies: &HashMap<String, DependencySpec>,
+    crate_name: &str,
+    flowd_major_minor: (u64, u64),
+    flowd_version: &Version,
+) {
+    if crate_name.starts_with("components::") {
+        return;
+    }
+
+    let dep = dependencies
+        .get(crate_name)
+        .unwrap_or_else(|| panic!("crate '{}' not found in dependency specs", crate_name));
+    let dep_path = dep.path.as_ref().unwrap_or_else(|| {
+        panic!(
+            "crate '{}' has no local path in Cargo.toml; cannot validate version compatibility",
+            crate_name
+        )
+    });
+
+    let crate_cargo_toml_path = manifest_dir.join(dep_path).join("Cargo.toml");
+    println!("cargo:rerun-if-changed={}", crate_cargo_toml_path.display());
+    let crate_cargo_toml = fs::read_to_string(&crate_cargo_toml_path)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err}", crate_cargo_toml_path.display()));
+    let crate_cargo: toml::Value = crate_cargo_toml.parse().unwrap_or_else(|err| {
+        panic!(
+            "failed to parse component Cargo.toml {}: {err}",
+            crate_cargo_toml_path.display()
+        )
+    });
+    let crate_version_raw = crate_cargo
+        .get("package")
+        .and_then(|v| v.get("version"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "missing [package].version in component Cargo.toml {}",
+                crate_cargo_toml_path.display()
+            )
+        });
+    let flowd_compat_raw = crate_cargo
+        .get("package")
+        .and_then(|v| v.get("metadata"))
+        .and_then(|v| v.get("flowd"))
+        .and_then(|v| v.get("compatible"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_else(|| {
+            panic!(
+                "missing [package.metadata.flowd].compatible in component Cargo.toml {}",
+                crate_cargo_toml_path.display()
+            )
+        });
+    let component_target_major_minor = parse_major_minor(flowd_compat_raw).unwrap_or_else(|| {
+        panic!(
+            "invalid [package.metadata.flowd].compatible '{}' in {} (expected at least major.minor, e.g. 0.4)",
+            flowd_compat_raw,
+            crate_cargo_toml_path.display()
+        )
+    });
+    if component_target_major_minor != flowd_major_minor {
+        panic!(
+            "component '{}' version '{}' declares flowd compatibility {} but runtime is {}.{} ({})",
+            crate_name,
+            crate_version_raw,
+            flowd_compat_raw,
+            flowd_major_minor.0,
+            flowd_major_minor.1,
+            flowd_version
+        );
+    }
+}
+
+fn parse_major_minor(raw: &str) -> Option<(u64, u64)> {
+    let mut parts = raw.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    Some((major, minor))
 }
 
 fn escape_rust_string(value: &str) -> String {
