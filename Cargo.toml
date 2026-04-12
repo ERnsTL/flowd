@@ -1,6 +1,6 @@
 [package]
 name = "flowd-rs"
-version = "0.3.0-git"
+version = "0.4.0-pre"
 authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
 repository = "https://github.com/ERnsTL/flowd"
 license = "LGPL-3.0-or-later"
@@ -77,5 +77,6 @@ flowd-sexp = { path = "components/sexp" }
 
 # for build.rs
 [build-dependencies]
+semver = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
