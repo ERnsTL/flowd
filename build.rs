@@ -192,6 +192,12 @@ fn validate_crate_name(
     crate_name: &str,
 ) {
     if crate_name.starts_with("components::") {
+        if !allow_module_components() {
+            panic!(
+                "module-based component '{}' is not allowed by default; enable with '--features allow-module-components'",
+                crate_name
+            );
+        }
         let module = crate_name.trim_start_matches("components::");
         if module.is_empty() || module.contains("::") {
             panic!("invalid components module path '{}'", crate_name);
@@ -222,6 +228,12 @@ fn validate_component_version_compatibility(
     flowd_version: &Version,
 ) {
     if crate_name.starts_with("components::") {
+        if !allow_module_components() {
+            panic!(
+                "module-based component '{}' is not allowed by default; enable with '--features allow-module-components'",
+                crate_name
+            );
+        }
         return;
     }
 
@@ -292,6 +304,10 @@ fn parse_major_minor(raw: &str) -> Option<(u64, u64)> {
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts.next()?.parse::<u64>().ok()?;
     Some((major, minor))
+}
+
+fn allow_module_components() -> bool {
+    env::var_os("CARGO_FEATURE_ALLOW_MODULE_COMPONENTS").is_some()
 }
 
 fn escape_rust_string(value: &str) -> String {
