@@ -53,6 +53,16 @@ const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
 const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
 
+trait RunnableComponent {
+    fn run(self: Box<Self>);
+}
+
+impl<T: Component> RunnableComponent for T {
+    fn run(self: Box<Self>) {
+        (*self).run()
+    }
+}
+
 fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
     match err {
         HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -5796,7 +5806,8 @@ impl ComponentLibrary {
     }
 
     fn new_component(name: String, inports: ProcessInports, outports: ProcessOutports, signalsource: ProcessSignalSource, watchdog_signalsink: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Result<(), std::io::Error> {
-        if instantiate_and_run_component(name.as_str(), inports, outports, signalsource, watchdog_signalsink, graph_inout) {
+        if let Some(component) = instantiate_component(name.as_str(), inports, outports, signalsource, watchdog_signalsink, graph_inout) {
+            component.run();
             Ok(())
         } else {
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")))
