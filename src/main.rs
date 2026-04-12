@@ -1839,17 +1839,8 @@ impl RuntimeRuntimePayload {
 
                 // component
                 info!("starting");
-                //TODO make it generic instead of if
-                //let component: Component where Component: Sized;
-                if !instantiate_and_run_component(
-                    component_name.as_str(),
-                    inports,
-                    outports,
-                    signalsource,
-                    watchdog_signalsink_clone,
-                    graph_inout_ref,
-                ) {
-                    error!("unknown component in network start! exiting thread.");
+                if let Err(err) = ComponentLibrary::new_component(component_name, inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref) {
+                    error!("failed to start component in runtime.start: {}", err);
                 }
             }).expect("thread start failed");
 
