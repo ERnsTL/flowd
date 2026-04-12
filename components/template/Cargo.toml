@@ -12,3 +12,6 @@ log = "0.4"
 
 # for TeraTemplateComponent
 tera = "1.0"
+
+[package.metadata.flowd]
+compatible = "0.4"

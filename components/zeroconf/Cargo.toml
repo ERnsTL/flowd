@@ -17,3 +17,5 @@ log = "0.4"
 #simple-dns = "0.6.2"
 mdns-sd = "0.10.4"
 url = "2"
+[package.metadata.flowd]
+compatible = "0.4"

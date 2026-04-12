@@ -16,3 +16,6 @@ rumqttc = { version = "0.23.0", features = ["url"] }
 #libc = "0.2.153"
 # for getting MQTT topic out of URL
 url = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"

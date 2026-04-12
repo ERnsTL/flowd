@@ -19,3 +19,6 @@ log = "0.4"
 # ^ uses callback, which necessitates a separate thread and
 # the callback cannot control that thread, so the callback cannot signal "stop tailing", also not the forks
 staart = "0.7"
+
+[package.metadata.flowd]
+compatible = "0.4"

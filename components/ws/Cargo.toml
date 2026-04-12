@@ -13,3 +13,6 @@ log = "0.4"
 # for WSClientComponent and WSServerComponent
 # NOTE: sync with flowd itself, which also depends on tungstenite, to avoid multiple versions of tungstenite being compiled in the workspace
 tungstenite = "0.20"
+
+[package.metadata.flowd]
+compatible = "0.4"

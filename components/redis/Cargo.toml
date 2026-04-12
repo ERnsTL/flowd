@@ -14,3 +14,6 @@ log = "0.4"
 # TODO optimize - try ahash feature for 7-10% performance improvement
 redis = { version = "*", default-features = false }
 url = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"

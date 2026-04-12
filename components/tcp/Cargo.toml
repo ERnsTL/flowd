@@ -12,3 +12,6 @@ log = "0.4"
 
 # for TCPClientComponent, TCPServerComponent
 url = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"

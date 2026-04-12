@@ -18,3 +18,6 @@ jaq-std = "1.2.1"
 
 # NOTE: sync version with flowd itself, to avoid multiple versions of serde_json in the dependency graph
 serde_json = "1.0"
+
+[package.metadata.flowd]
+compatible = "0.4"

@@ -12,3 +12,6 @@ log = "0.4"
 
 # for XzCompressComponent, XzDecompressComponent
 xz = "0.1"
+
+[package.metadata.flowd]
+compatible = "0.4"

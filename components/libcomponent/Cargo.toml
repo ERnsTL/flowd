@@ -12,3 +12,6 @@ log = "0.4"
 
 # for LibComponent
 libloading = "0.7"
+
+[package.metadata.flowd]
+compatible = "0.4"

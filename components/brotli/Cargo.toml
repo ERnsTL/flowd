@@ -12,3 +12,6 @@ log = "0.4"
 
 # for BrotliCompressComponent, BrotliDecompressComponent
 brotli = "3.5"
+
+[package.metadata.flowd]
+compatible = "0.4"

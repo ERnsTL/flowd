@@ -15,3 +15,6 @@ log = "0.4"
 matrix-sdk = { version = "0.7.1", default-features = false, features = ["e2e-encryption", "native-tls"] }   # or rustls
 tokio = "1.36.0"    #TODO optimize - old version, and use common tokio thread pool with components that also use tokio
 url = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"

@@ -17,3 +17,6 @@ atoi = "2.0"
 #atoi_simd = "0.15"
 
 chrono = "0.4.26"
+
+[package.metadata.flowd]
+compatible = "0.4"

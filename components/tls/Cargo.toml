@@ -19,3 +19,6 @@ webpki-roots = "0.26"
 
 # for TLSServerComponent
 rustls-pemfile = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"

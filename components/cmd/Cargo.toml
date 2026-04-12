@@ -13,3 +13,6 @@ log = "0.4"
 # for CmdComponent
 shell-words = "1.1.0"
 lexopt = "0.3.0"
+
+[package.metadata.flowd]
+compatible = "0.4"

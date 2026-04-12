@@ -9,3 +9,6 @@ path = "src/trim.rs"
 [dependencies]
 flowd_component_api = { path = "../../component_api" }
 log = "0.4"
+
+[package.metadata.flowd]
+compatible = "0.4"

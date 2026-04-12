@@ -12,3 +12,6 @@ log = "0.4"
 
 # for RegexpExtractComponent
 regex = "1.10"
+
+[package.metadata.flowd]
+compatible = "0.4"

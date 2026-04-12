@@ -13,3 +13,6 @@ log = "0.4"
 # for UnixSocketClientComponent
 url = "2"
 uds = "0.4.2"
+
+[package.metadata.flowd]
+compatible = "0.4"

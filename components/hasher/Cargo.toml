@@ -12,3 +12,6 @@ log = "0.4"
 
 # for HasherComponent
 twox-hash = "1.6.3"
+
+[package.metadata.flowd]
+compatible = "0.4"

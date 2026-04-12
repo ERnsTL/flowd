@@ -15,3 +15,6 @@ log = "0.4"
 imap = "2.4.1"
 native-tls = "0.2.11"
 url = "2"
+
+[package.metadata.flowd]
+compatible = "0.4"
