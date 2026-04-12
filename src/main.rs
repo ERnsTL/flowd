@@ -5795,35 +5795,11 @@ impl ComponentLibrary {
         return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
     }
 
-    //TODO currently all done in runtime.start()
-    fn new_component(name: String) -> Result<Box<dyn Component>, std::io::Error> {
-        //TODO implement - ports are currently totally unconnected
-        let inports = ProcessInports::new();
-        let outports = ProcessOutports::new();
-        let (signal_sink, signal_source) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
-        // TODO add dynamically-loaded components as well
-        match name.as_str() {
-            "Repeat" => {
-                let graph_inout: GraphInportOutportHandle = Arc::new(Mutex::new(GraphInportOutportHolder{  //TODO implement - parameters are fake
-                    inports: None,
-                    outports: None,
-                    websockets: HashMap::new(),
-                }));
-                return Ok(Box::new(RepeatComponent::new(  //TODO implement - parameters are fake
-                    inports,
-                    outports,
-                    signal_source,
-                    signal_sink,
-                    graph_inout,
-                )));
-            },
-            _ => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
-            }
+    fn new_component(name: String, inports: ProcessInports, outports: ProcessOutports, signalsource: ProcessSignalSource, watchdog_signalsink: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Result<(), std::io::Error> {
+        if instantiate_and_run_component(name.as_str(), inports, outports, signalsource, watchdog_signalsink, graph_inout) {
+            Ok(())
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")))
         }
     }
 }
-
-// ----------
-// components
-// ----------
