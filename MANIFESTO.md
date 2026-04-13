@@ -124,9 +124,10 @@ If not, it likely does not belong in the core system.
 
 Flowd provides a general-purpose execution model for FBP dataflow systems, enabling the construction of:
 
-- low-code automation systems (similar to n8n, NiFi, Flink)
+- low-code automation systems (e.g. n8n, NiFi)
 - visual workflow editors (e.g. via NoFlo tooling)
 - AI pipelines and integration systems (akin to OpenClaw)
+- event-driven and stream processing systems (conceptually similar to Flink)
 
 These are considered higher-level systems built on top of the runtime.
 
