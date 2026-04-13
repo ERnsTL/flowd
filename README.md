@@ -23,13 +23,13 @@ This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Pa
 
 The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which then constitutes an *application* or processing system of some kind.
 
-The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and visual kind of programming with direct feedback of the changes just made, based on the combination and connection of re-usable *black boxes* working together in a *visually drawable and mappable* processing network resp. application.
+The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and visual kind of programming with direct feedback of the changes just made, based on the combination and connection of re-usable *black boxes* (components) working together in a *visually drawable and mappable* processing network resp. application.
 
-Such an FBP processing network is not limited to linear pipes, ETL steps, a directed acyclic graph (DAG) structure, RPC request-response, client-server, publish-subscribe etc. Instead, it is a versatile and generic superset allowing processing networks spanning multiple flowd instances and non-FBP processing systems and thus the creation of general processing systems and even interactive applications.
+Such an FBP processing network is not limited to linear pipes, ETL steps, not even a directed acyclic graph (DAG) structure, RPC request-response, client-server, publish-subscribe, event streams etc. Instead, it is a versatile and generic superset allowing processing networks spanning multiple flowd instances and non-FBP processing systems and thus the creation of general processing systems and even interactive applications.
 
 You can find out more about this paradigm on [J. Paul Morrison's website](http://www.jpaulmorrison.com/fbp/).
 
-More, humans are terrible at writing, maintaining and understanding code, refer [a talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). The solution proposed is not to fundamentally improve the way software is engineered, but to keep using conventional programming and just add another layer on top, namely to use AI to generate ever more piles of non-reusable custom application code. Unmentioned in the talk: For understanding and navigating it, one will need even more AI. The alternative, which FBP offers, is to go the other direction and keep applications on a humanly-understandable level by using these re-usable *black boxes*, which are individually all easily understandable, and connect them to compose software. FBP processing networks are humanly understandable also because they fit the steps, which a design team would use to break down the application's functionality, processing steps and data flows.
+More, humans are terrible at writing, maintaining and understanding code, refer [a talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). The solution proposed is not to fundamentally improve the way software is engineered, but to keep using conventional programming and just add another layer on top, namely to use AI to generate ever more piles of non-reusable custom application code. Unmentioned in the talk: For understanding and navigating it, one will need even more AI. The alternative, which FBP offers, is to go the other direction and keep applications on a humanly-understandable level by using these re-usable *black boxes* (components), which are individually all easily understandable, and connect them into compose software. FBP processing networks are humanly understandable also because they fit the steps, which a design team would use to model and break down the application's functionality, processing steps and data flows.
 
 
 ## Philosophy
@@ -39,17 +39,23 @@ Read the [flowd Manifesto](./MANIFESTO.md) to understand the design principles a
 
 ## Installation and Running
 
-TODO Download
+* [Install Rust and Cargo](https://rust-lang.org/tools/install/) using rustup.
+* Clone the repository using git or the Download button:
+  ```sh
+  git clone https://github.com/ERnsTL/flowd
+  ```
+* Compile ```flowd``` and all example components:
+  ```sh
+  cargo build --release
+  ```
+* Run it with:
+  ```sh
+  cargo run
+  ```
 
-TODO Compile and install ```flowd``` and all example components
+### The Visual Editor
 
-Run it with:
-
-```sh
-cargo run
-```
-
-Next, [open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
+* [Open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
 
 You should see a predefined test network, can re-arrange the components, start/stop the network etc. You will see output on your terminal.
 
@@ -59,13 +65,22 @@ It should look roughly like this:
 
 For how to use the online editor, see the [manual of noflo-ui](https://github.com/noflo/noflo-ui).
 
-Running in a micro-VM using [Unikraft](https://unikraft.org/):
+### Running Anywhere
 
-```sh
-kraft run -M 256M -p 3569:3569
-```
+```flowd``` can be run in most Linux environments including bare metal Linux distributions, virtualized, containerized and optimized Unikernels. Windows and MacOS untested but are generally possible.
 
-Note for MacOS users: Best run the micro-VM via Qemu network backend "vmnet", which was added by the developer of AxleOS.
+Examples included:
+
+* Running in an unikernel micro-VM using [Unikraft](https://unikraft.org/):
+  ```sh
+  kraft run -M 256M -p 3569:3569
+  ```
+  * Note for MacOS users: Best run the micro-VM via Qemu network backend "vmnet", which was added by the developer of AxleOS.
+* Running containerized in Docker:
+  ```sh
+  docker build -t "flowd-testing:Dockerfile" .
+  docker run "flowd-testing"
+  ```
 
 
 ## Examples
@@ -420,6 +435,8 @@ Planned features:
 
 Check the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
 
+TODO update
+
 Basically, implement most functionality using in-memory data structures, then break down the structure into different parts (network backends, component API) and allow the component API to be fulfilled by components from shared objects, scripts etc.
 
 Then add more components, port the Go components or add a wrapper for running them (running components as an external process using STDIN and STDOUT makes sense and will be one of the supported execution models).
@@ -656,6 +673,9 @@ Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesou
 
 ## Goals in General
 
+TODO also see Manifesto
+TODO is the following in sync with the Manifesto?
+
 To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
 
 * Reliability and Robustness: The FBP runtime should be stable and reliable to ensure uninterrupted execution of critical applications. It should be able to handle errors robustly to avoid or at least minimize failures.
@@ -679,6 +699,14 @@ By fulfilling these characteristics, an FBP runtime environment can be made suit
 
 GNU LGPLv3+
 
+TODO change to Apache 2.0
+TODO license rationale
+
+
+### Commercial Offerings
+
+TODO ...
+
 
 ## Contributing
 
@@ -698,5 +726,8 @@ GNU LGPLv3+
 
 ## Community
 
-* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
+General FBP ordered by update:
+
+* Discord:  Search for "Flow-based Programming"
 * [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
+* [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
