@@ -34,7 +34,7 @@ More, humans are terrible at writing, maintaining and understanding code, refer 
 
 ## Philosophy
 
-Read the [Flowd Manifesto](./FLOWD_MANIFESTO.md) to understand the design principles and goals of this project.
+Read the [flowd Manifesto](./MANIFESTO.md) to understand the design principles and goals of this project.
 
 
 ## Installation and Running
