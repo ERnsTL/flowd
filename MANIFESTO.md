@@ -9,98 +9,6 @@ It is not a scripting engine, not a low-code tool, and not an automation platfor
 Flowd is an execution engine.
 
 
-## Core Principles
-
-### 1. Performance First
-
-- In-process communication must avoid unnecessary allocations and copying.
-- Serialization is only allowed at system boundaries.
-- Zero-copy and typed data structures are preferred over generic byte buffers.
-
-### 2. Determinism Over Convenience
-
-- Execution behavior must be predictable and reproducible.
-- Hidden scheduling or implicit side effects are not allowed.
-- Runtime behavior must be explainable.
-
-### 3. Explicit Backpressure
-
-- Backpressure is a first-class concept.
-- All edges must have bounded capacity.
-- Systems must fail or slow down explicitly, never silently.
-
-### 4. Compile-Time Composition
-
-- Components are integrated at compile time.
-- No dynamic plugin loading in the core system.
-- The system must be statically verifiable.
-
-### 5. Clear Separation of Concerns
-
-- Nodes define behavior.
-- The runtime defines execution.
-- The scheduler defines fairness.
-- Transport is external to core execution.
-
-### 6. No Hidden Work
-
-- Every cost must be visible.
-- No implicit buffering, spawning, or retries.
-- No hidden background processing.
-
-### 7. Dataflow, Not Control Flow
-
-- Systems are built as graphs, not scripts.
-- Messages flow, they are not "called".
-- Nodes react to data, not commands.
-
-### 8. Explicit Boundaries
-
-- Subsystems are separated via well-defined boundaries (e.g. proxy nodes).
-- Cross-boundary communication must be explicit and controlled.
-
-### 9. Simplicity Over Abstraction
-
-- Avoid unnecessary abstractions.
-- Prefer simple, explicit mechanisms over flexible but complex systems.
-- Complexity must be justified.
-
-
-## Positioning
-
-Flowd is an execution engine for deterministic, high-performance dataflow systems.
-
-It is not primarily designed as:
-
-- a low-code automation tool
-- a UI-first workflow system
-- a general-purpose scripting environment
-- a distributed system (by default)
-
-Flowd focuses on providing a robust and deterministic foundation rather than end-user tooling.
-
-
-## Capabilities
-
-Flowd provides a general-purpose execution model for FBP dataflow systems, enabling the construction of:
-
-- low-code automation systems (similar to n8n, NiFi, Flink)
-- visual workflow editors (e.g. via NoFlo tooling)
-- AI pipelines and integration systems (akin to OpenClaw)
-
-These are considered higher-level systems built on top of the runtime.
-
-
-## Architectural Boundary
-
-Flowd separates execution from presentation.
-
-- The runtime is responsible for execution, scheduling, and dataflow semantics.
-- User interfaces, automation layers, and visual editors are external systems.
-
-Flowd provides the foundation; it does not define the user experience.
-
-
 ## Flowd Philosophy
 
 Many modern systems implicitly implement dataflow concepts:
@@ -212,6 +120,84 @@ When designing or extending Flowd, the guiding question is:
 If not, it likely does not belong in the core system.
 
 
+## Capabilities
+
+Flowd provides a general-purpose execution model for FBP dataflow systems, enabling the construction of:
+
+- low-code automation systems (similar to n8n, NiFi, Flink)
+- visual workflow editors (e.g. via NoFlo tooling)
+- AI pipelines and integration systems (akin to OpenClaw)
+
+These are considered higher-level systems built on top of the runtime.
+
+
+## Architectural Boundary
+
+Flowd separates execution from presentation.
+
+- The runtime is responsible for execution, scheduling, and dataflow semantics.
+- User interfaces, automation layers, and visual editors are external systems.
+
+Flowd provides the foundation; it does not define the user experience.
+
+
+## Core Principles
+
+### 1. Performance First
+
+- In-process communication must avoid unnecessary allocations and copying.
+- Serialization is only allowed at system boundaries.
+- Zero-copy and typed data structures are preferred over generic byte buffers.
+
+### 2. Determinism Over Convenience
+
+- Execution behavior must be predictable and reproducible.
+- Hidden scheduling or implicit side effects are not allowed.
+- Runtime behavior must be explainable.
+
+### 3. Explicit Backpressure
+
+- Backpressure is a first-class concept.
+- All edges must have bounded capacity.
+- Systems must fail or slow down explicitly, never silently.
+
+### 4. Compile-Time Composition
+
+- Components are integrated at compile time.
+- No dynamic plugin loading in the core system.
+- The system must be statically verifiable.
+
+### 5. Clear Separation of Concerns
+
+- Nodes define behavior.
+- The runtime defines execution.
+- The scheduler defines fairness.
+- Transport is external to core execution.
+
+### 6. No Hidden Work
+
+- Every cost must be visible.
+- No implicit buffering, spawning, or retries.
+- No hidden background processing.
+
+### 7. Dataflow, Not Control Flow
+
+- Systems are built as graphs, not scripts.
+- Messages flow, they are not "called".
+- Nodes react to data, not commands.
+
+### 8. Explicit Boundaries
+
+- Subsystems are separated via well-defined boundaries (e.g. proxy nodes).
+- Cross-boundary communication must be explicit and controlled.
+
+### 9. Simplicity Over Abstraction
+
+- Avoid unnecessary abstractions.
+- Prefer simple, explicit mechanisms over flexible but complex systems.
+- Complexity must be justified.
+
+
 ## Design Philosophy
 
 Flowd prioritizes:
@@ -228,3 +214,17 @@ When making design decisions, always ask:
 > Does this make the system more predictable, more explicit, and more efficient?
 
 If not, it is likely the wrong direction.
+
+
+## Positioning
+
+Flowd is an execution engine for deterministic, high-performance dataflow systems.
+
+It is not primarily designed as:
+
+- a low-code automation tool
+- a UI-first workflow system
+- a general-purpose scripting environment
+- a distributed system (by default)
+
+Flowd focuses on providing a robust and deterministic foundation rather than end-user tooling.
