@@ -31,6 +31,12 @@ You can find out more about this paradigm on [J. Paul Morrison's website](http:/
 
 More, humans are terrible at writing, maintaining and understanding code, refer [a talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). The solution proposed is not to fundamentally improve the way software is engineered, but to keep using conventional programming and just add another layer on top, namely to use AI to generate ever more piles of non-reusable custom application code. Unmentioned in the talk: For understanding and navigating it, one will need even more AI. The alternative, which FBP offers, is to go the other direction and keep applications on a humanly-understandable level by using these re-usable *black boxes*, which are individually all easily understandable, and connect them to compose software. FBP processing networks are humanly understandable also because they fit the steps, which a design team would use to break down the application's functionality, processing steps and data flows.
 
+
+## Philosophy
+
+Read the [Flowd Manifesto](./FLOWD_MANIFESTO.md) to understand the design principles and goals of this project.
+
+
 ## Installation and Running
 
 TODO Download
@@ -60,6 +66,7 @@ kraft run -M 256M -p 3569:3569
 ```
 
 Note for MacOS users: Best run the micro-VM via Qemu network backend "vmnet", which was added by the developer of AxleOS.
+
 
 ## Examples
 
@@ -112,6 +119,7 @@ You can find out more about the ```.fbp``` network description grammar here:
 * [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go which ```flowd``` currently re-uses
 * [FBP DSL syntax](https://github.com/flowbased/flowbased.org/wiki/FBP-DSL)
 
+
 ## Visualization Example
 
 TODO rewrite for flowd-rs
@@ -123,6 +131,7 @@ The following commands will export a network to STDOUT, convert it to a PNG rast
 ```sh
 bin/flowd -graph src/github.com/ERnsTL/flowd/examples/example.fbp | dot -O -Kdot -Tpng && eog noname.gv.png ; rm noname.gv.png
 ```
+
 
 ## Features and Current Status
 
@@ -290,6 +299,7 @@ Everything else:
 
 * Maybe I forgot about something important, please post it as a Github issue.
 
+
 ## Included Components
 
 * Repeat
@@ -405,6 +415,7 @@ Planned features:
 * Integration with other FBP runtimes
 * For more, see the issues list!
 
+
 ## Next Steps
 
 Check the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
@@ -417,9 +428,10 @@ Create first applications using these and add features to support these use-case
 
 Finally, become production-ready with management, roles, ACLs, security, hardening overall, monitoring.
 
+
 ## Architecture
 
-TODO
+TODO see the ADRs = Architecture Decision Records found in doc/.
 
 ### Architecture comparison flowd-rs to flowd-go
 
@@ -506,11 +518,13 @@ For more optimal and tighter integration, there are gateway components and proto
 * with MsgFlo: runs over message queues; [MQTT component planned](https://github.com/ERnsTL/flowd/issues/71)
 * others: Fractalide? ...?
 
+
 ## Performance, Bechmarks
 
 TODO
 
 TODO add criterion perf tracking
+
 
 ## Writing Applications
 
@@ -532,6 +546,7 @@ TODO straight implementation, almost waterfall-like, fewer refactorings.
 
 TODO Linear maintenance cost in relation to program size.
 
+
 ## Using Components
 
 1. Find the component on a Git service like Github, GitLab, CodeBerg etc. Repositories usually have "flowd-" in their name. Each repository constitutes a Cargo crate; it can contain one or more components.
@@ -548,6 +563,7 @@ TODO Linear maintenance cost in relation to program size.
 3. Add all components contained in the crate repository to your flowd.build.toml, to have it built into flowd. Explanation in the included flowd.build.toml file. The component repository probably has a ready block for copy-paste in its README.
 4. Build flowd as usual using ```cargo build --release```.
 5. For your project, you can also commit Cargo.lock to have it build reproducibly.
+
 
 ## Writing Components
 
@@ -612,6 +628,7 @@ Build-time validation fails for:
   ```
 * Create a branch for each flowd version, for example named "0.4" so that users can get the latest component version for their flowd version. This way, improvements can be ported back for an older version of flowd, and porting to new version of flowd can be done independently without disturbing component version for older versions of flowd.
 
+
 ## Development aka Hacking on ```flowd```
 
 TODO rewrite for flowd-rs
@@ -636,6 +653,7 @@ fbp-init --name flowd --port 3000 --command "bin/flowd -olc localhost:3000 src/g
 
 Use the latest ```node.js``` and ```npm``` from [nodesource](https://www.nodesource.com/), otherwise you may get Websocket errors. The npm package *wscat* is useful for connection testing.
 
+
 ## Goals in General
 
 To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
@@ -656,9 +674,11 @@ To make a Flow-Based Programming (FBP) runtime suitable for production operation
 
 By fulfilling these characteristics, an FBP runtime environment can be made suitable for production and reliable applications to support stable, scalable, and reliable workflows.
 
+
 ## License
 
 GNU LGPLv3+
+
 
 ## Contributing
 
@@ -668,11 +688,13 @@ GNU LGPLv3+
 4. quality check
 5. merged!
 
+
 ## Further documentation
 
 * [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
 * TODO
 * Further historic information in the [flowd-go](https://github.com/ERnsTL/flowd-go/README.md#Further%20documentation)
+
 
 ## Community
 
