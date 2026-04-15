@@ -332,7 +332,7 @@ For details, see [commercial options](doc/business/commercial.md).
 
 ## Community
 
-* Discord:  Search for "Flow-based Programming"
+* [Discord invitation](https://discord.gg/YBQj6UsD5H) for the "Flow-based Programming" server
 * [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
 * [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
 
