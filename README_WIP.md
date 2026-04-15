@@ -1,3 +1,50 @@
+## Roadmap items
+
+TODO check what is already implemented and move into issues or ROADMAP.md document.
+
+These are present in flowd-go and will be re-implemented here:
+
+* TODO Sub-networks resp. composite components
+* TODO Can inspect, debug and interact with network components using standard Unix tools
+* TODO Can run a terminal UI component - and then bring it to the web using gotty :-)
+* TODO Delivery of program parameters to components (?)
+* TODO Connections between components in framed or raw way
+* TODO Broadcasting to multiple output ports, serializing only once
+* TODO Parsing of .fbp network specifications
+* TODO Parsing of .drw network specifications made using DrawFBP
+* TODO Closing of ports (implemented) and close detection
+* TODO Gracelful shutdown once all data has been processed and all components shut down
+* TODO Visualization of the given network in GraphViz format
+* TODO Display of required components and file dependencies of the given network for deployment
+
+Planned features:
+
+* Runtime protocol for remote control and online network reconfiguration, enabling real-time visual programming
+* Parsing of JSON-FBP network specifications [[1]](https://noflojs.org/documentation/graphs/#json) from [NoFlo](https://noflojs.org/)
+* Tracing of data packets as they flow through the network
+* Integration with other FBP runtimes
+* For more, see the issues list!
+
+Milestone 0.x on connection, disconnection and reconnection:
+
+* Load balancing components with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
+
+Milestone 0.x on objects:
+
+* brackets using OOB marker
+* filtering on object structures in sexp fashion
+* "XPath"-like filtering on sexp object structures
+* building of header (K/V) and body structure in sexp fashion - then it is on par with Go and JavaFBP implementation
+* Modification of frame headers (via sexp objects using brackets)
+* Routing based on frame contents or header values (sexp objects using brackets)
+* Counter packets matching by header field (on sexp objects)
+
+Milestone 0.x on interactive components:
+
+* Example login prompt and command-line interaction component
+* Example terminal UI component sending messages into the network
+
+
 ## TODO
 
 TODO add example of some kind of bot - think of an idea which can be run out of the box
@@ -231,3 +278,25 @@ The included example components cover:
 * Load balancing with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
 * Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
 * WebSocket server and client with retry on connection establishment
+
+
+
+## Writing Applications
+
+TODO rewrite section for flowd-rs
+
+Three stages usually:
+
+1. read and packetize data structures into IPs
+2. filter and transform
+3. assemble packets and output
+
+TODO difference is that this goes beyond ETL. It also goes beyond the DAGs, which seem fashionable these days.
+
+TODO modeling the application in terms of what data is relevant and what structure it has, where the data comes from, how it should be transformed and which results should be produced (see JPM book).
+
+TODO no conceptual dissonance between design and implementation stages.
+
+TODO straight implementation, almost waterfall-like, fewer refactorings.
+
+TODO Linear maintenance cost in relation to program size.
