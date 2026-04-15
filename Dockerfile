@@ -16,11 +16,8 @@ RUN apt-get update && apt-get upgrade -y
 # APT install (base) packages
 RUN apt-get install -y build-essential cmake libboost-all-dev pkg-config
 
-# compile
-# debug
-RUN set -xe; cargo build
-# release
-#RUN set -xe; cargo build --release
+# compile (release, matches copied output path below)
+RUN set -xe; cargo build --release
 
 # copy result files
 FROM scratch
