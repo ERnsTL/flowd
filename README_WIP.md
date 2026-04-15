@@ -300,3 +300,16 @@ TODO no conceptual dissonance between design and implementation stages.
 TODO straight implementation, almost waterfall-like, fewer refactorings.
 
 TODO Linear maintenance cost in relation to program size.
+
+
+## Performance, Benchmarks
+
+Run benchmark targets for `flowd`:
+
+```sh
+cargo bench
+```
+
+At the moment, no Criterion benchmark targets are defined in this repository yet, so this command may be a no-op.
+
+TODO add performance regression tracking

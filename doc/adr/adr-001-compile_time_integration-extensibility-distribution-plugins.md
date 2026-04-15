@@ -1,4 +1,10 @@
-Compile-Time Integration of FBP Components via `build.rs`, `flowd.build.toml`, and Generated Code
+# ADR-001: Compile-Time Integration of FBP Components via `build.rs`, `flowd.build.toml` and Generated Code
+
+Status: Accepted
+Date: 2026-04-15
+Supersedes: none
+Superseded by: none
+
 
 ## 1. Purpose
 
@@ -18,7 +24,7 @@ The goal is to eliminate dynamic plugin systems and ensure:
 * No manual edits required in multiple source locations when adding/removing components
 
 
-## 2. Problem Statement
+## 2. Context / Problem Statement
 
 Currently, components must be referenced in multiple places:
 
@@ -36,7 +42,7 @@ We require:
 * No manual source edits when components change
 * Support for per-component log ignore configuration
 
-## 3. High-Level Design
+## 3. Decision / High-Level Design
 
 ### 3.1 Design Principles
 
@@ -249,7 +255,7 @@ Use `panic!()` in `build.rs` to abort build.
 * Source patching
 
 
-## 12. Resulting Guarantees
+## 12. Consequences / Resulting Guarantees
 
 After implementation:
 

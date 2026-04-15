@@ -1,491 +1,275 @@
 # flowd: *the data must flow*<sup>[1](https://en.wikiquote.org/wiki/Dune_(film)#Others)</sup>
 
-> There are two implementations of ```flowd```:
->
-> * [flowd-rs](https://github.com/ERnsTL/flowd/) (main variant - this one)
-> * [flowd-go](https://github.com/ERnsTL/flowd-go/)
+`flowd` is a deterministic, high-performance execution engine for Flow-Based Programming (FBP).
 
-Wire up components (programs) written in different programming languages, using the best features and available libraries of each.
+It allows you to build dataflow systems by composing reusable components into explicit graphs.
 
-Make them communicate in a network of components.
+`flowd` focuses on:
 
-Build a *data factory* in which components transform the passed data frames to produce a useful output.
+- explicit data movement
+- deterministic execution
+- backpressure-aware systems
+- high-performance in-process communication
 
-Components naturally make use of all available processor cores.
+`flowd` is not a low-code tool, not a workflow UI, and not a scripting engine.
 
-A component network can span multiple machines, lending itself for use in distributed systems. Routing is available and a load-balancing component exists.
+It is an execution engine.
 
-Use available off-the-shelf components where you can. Grow a collection of specialized components and *reuse* them for the next and next project of yours.
 
-Thus, rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
+## What is Flow-Based Programming?
 
-This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Paul Morrison](http://www.jpaulmorrison.com/fbp/).
+Flow-Based Programming (FBP) models systems as:
 
-The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which then constitutes an *application* or processing system of some kind.
+- nodes (components) performing transformations
+- edges (connections) transporting data
+- messages flowing through the system
 
-The act of programming is thus shifted from entering strings and lines of tailor-made program source code to a more graphical and visual kind of programming with direct feedback of the changes just made, based on the combination and connection of re-usable *black boxes* (components) working together in a *visually drawable and mappable* processing network resp. application.
+Instead of writing control flow, you define how data moves.
 
-Such an FBP processing network is not limited to linear pipes, ETL steps, not even a directed acyclic graph (DAG) structure, RPC request-response, client-server, publish-subscribe, event streams etc. Instead, it is a versatile and generic superset allowing processing networks spanning multiple flowd instances and non-FBP processing systems and thus the creation of general processing systems and even interactive applications.
-
-You can find out more about this paradigm on [J. Paul Morrison's website](http://www.jpaulmorrison.com/fbp/).
-
-More, humans are terrible at writing, maintaining and understanding code, refer [a talk about this](https://www.youtube.com/watch?v=JhCl-GeT4jw). The solution proposed is not to fundamentally improve the way software is engineered, but to keep using conventional programming and just add another layer on top, namely to use AI to generate ever more piles of non-reusable custom application code. Unmentioned in the talk: For understanding and navigating it, one will need even more AI. The alternative, which FBP offers, is to go the other direction and keep applications on a humanly-understandable level by using these re-usable *black boxes* (components), which are individually all easily understandable, and connect them into compose software. FBP processing networks are humanly understandable also because they fit the steps, which a design team would use to model and break down the application's functionality, processing steps and data flows.
+`flowd` treats this model as a first-class execution system.
 
 
 ## Philosophy
 
+`flowd` is built around explicitness, determinism and composability.
+
 Read the [flowd Manifesto](./MANIFESTO.md) to understand the design principles and goals of this project.
 
+An essay on [Why flowd exists](doc/explanations/why_flowd.md).
 
-## Installation and Running
 
-* [Install Rust and Cargo](https://rust-lang.org/tools/install/) using rustup.
-* Clone the repository using git or the Download button:
-  ```sh
-  git clone https://github.com/ERnsTL/flowd
-  ```
-* Compile ```flowd``` and all configured components:
-  ```sh
-  cargo build --release
-  ```
-* Run it with default management bind address (`localhost:3569`):
-  ```sh
-  cargo run --release
-  ```
+
+## Quickstart
+
+[Install Rust and Cargo](https://rust-lang.org/tools/install/):
+```sh
+rustup default nightly
+```
+
+Build:
+```sh
+git clone https://github.com/ERnsTL/flowd
+cd flowd
+cargo build --release
+```
+
+Run:
+```sh
+cargo run --release
+```
+
+By default, the runtime listens on:
+
+```
+ws://localhost:3569
+```
 
 ### The Visual Editor
 
-* [Open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
+Connect to your local `flowd` runtime.
 
-You should see a predefined test network. You can re-arrange the components and start/stop the network etc. You will see output on your terminal.
+[Open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
+
+You should see a predefined test network.
 
 It should look roughly like this:
 
 ![Bildschirmfoto vom 2022-11-19 16-14-57](https://user-images.githubusercontent.com/3127919/202857780-e070ca3f-fffd-41dc-8470-be9e551facc6.png)
 
+You can now:
+
+* create a processing network (graph)
+* connect nodes
+* start/stop the graph
+* observe execution
+
 For how to use the online editor, see the [manual of noflo-ui](https://github.com/noflo/noflo-ui).
 
-### Running Anywhere
+### First Application
 
-```flowd``` can be run in most Linux environments including bare metal Linux distributions, virtualized, containerized and optimized Unikernels. Windows and MacOS untested but are generally possible.
+1. Add components in the UI
+2. Connect them via ports
+3. Configure via IIPs
+4. Start the network
+5. Persist graph (`flowd.graph.json`)
 
-Examples included:
-
-* Running in an unikernel micro-VM using [Unikraft](https://unikraft.org/):
-  ```sh
-  kraft run -M 256M -p 3569:3569
-  ```
-  * Note for MacOS users: Best run the micro-VM via Qemu network backend "vmnet", which was added by the developer of AxleOS.
-* Running containerized in Docker:
-  ```sh
-  docker build -t flowd-rs:local .
-  docker run --rm -p 3569:3569 flowd-rs:local /flowd-rs 0.0.0.0:3569
-  ```
-
-
-## Examples
+Applications are defined as graphs, not code.
 
 `flowd-rs` currently starts from the persisted graph file `flowd.graph.json` in the repository root (if the file is not found, a default test graph is instantiated).
 
-Build and run (default bind address):
-```sh
-cargo build --release
-cargo run --release
-```
+### Runtime Characteristics
 
-Build and run (explicit bind address):
-```sh
-cargo build --release
-cargo run --release -- 0.0.0.0:3569
-```
+`flowd` is designed to run as a self-contained runtime and does not require container orchestration or external services to run.
 
-Then [connect with the visual editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569).
+- single binary deployment
+- no external runtime dependencies required
+- in-process execution model
+- minimal system assumptions
 
+Primary development and testing target:
+
+- Linux (x86_64)
+
+Other platforms may work but are currently not the primary focus.
+
+It can be deployed as a standalone runtime wherever Rust binaries are supported, including bare metal Linux distributions, virtualized, containerized and optimized Unikernels.
+
+See [detailed examples](doc/tutorials/examples.md).
 
 ### The network description format
 
-You can find out more about the ```.fbp``` network description grammar here:
+See [FBP format](doc/reference/fbp_format.md)
 
-* [J. Paul Morrison's FBP book](http://www.jpaulmorrison.com/fbp/notation.shtml)
-* [his .fbp parser source](https://github.com/jpaulm/parsefbp)
 
-Conversion of the classic FBP notation to the JSON format:
+## Core Concepts
 
-* [format explanation by NoFlo](https://noflojs.org/documentation/graphs/#fbp)
+flowd operates on a small set of explicit primitives:
 
-About the JSON-based FBP graph format:
+* **Component (Node)**: processes incoming messages
+* **Edge**: bounded connection between components
+* **Message (IP)**: unit of data
+* **Graph**: system definition
 
-* [the .fbp variant used by NoFlo](https://github.com/flowbased/fbp#readme)
-* [a parser based on the NoFlo definition](https://github.com/oleksandr/fbp) written in Go
-* [FBP DSL syntax](https://github.com/flowbased/flowbased.org/wiki/FBP-DSL)
+There is no hidden behavior:
+
+* no implicit buffering
+* no hidden retries
+* no invisible parallelism
+
+Everything is explicit.
+
+
+## Architecture
+
+`flowd` is a Rust runtime with compile-time component integration.
+
+Components are defined and wired through:
+
+1. `flowd.build.toml`
+2. `Cargo.toml`
+3. `build.rs` code generation (`$OUT_DIR/build_generated.rs`)
+
+At build time:
+
+* components are validated
+* compatibility is checked
+* runtime wiring is generated
+
+At runtime:
+
+* components are connected in-memory
+* packets are transferred in-proc, in-memory via ring buffers with ownership transfer of message buffers
+* control and management happens via WebSocket (FBP protocol)
+
+See `/doc/adr*` files for architectural decisions.
 
 
 ## FBP Runtimes
 
 Runtime variants:
+
 - `flowd-rs` (this repository): https://github.com/ERnsTL/flowd
 - `flowd-go` (historical/alternate implementation): https://github.com/ERnsTL/flowd-go
 
 
-## Features and Current Status
+## Component Model
 
-> This is alpha software: usable and fairly optimized, but not all planned features are present yet. It is not production-ready for continuity-critical operations, and APIs may change without notice.
+Components are integrated at compile time.
 
-FBP network protocol:
+To use components:
 
-* Full serialization and deserialization of all specified messages in both directions.
-* Runtime behaviors are in mock stage, working with in-memory state and actual components.
-* Adding graph nodes, removing nodes, changing nodes and their connections is implemented.
-* Renaming nodes (internal ID) and changing the label on nodes is implemented.
-* Starting and stopping the network is implemented (graph traversal, connection setup, component instantiation, thread start/stop, background watchdog, signaling).
-* Sending and receiving IPs to/from graph inports and outports is implemented. So, it is possible to send data into/out of the network directly using FBP Network Protocol (besides the possibility to create components which input/output on TCP or any other channel).
-* Delivery of IIPs is implemented.
-* IP transfer between components and bounded connections between them is implemented.
-* Much to clarify with developers of the protocol spec.
-* Ability to implement custom buffering and flushing strategies is implemented.
-* Bulk transfers and parallel send/receive are implemented.
-* No bounds on the size of each information packet (limitation: system memory size, ulimits).
-* Multiple connections going into a single component is possible, with the consuming process able to control from which it wants to read (array inports).
-* Array outports addressable by index with ability to see the target process name for debugging.
+1. Add crate dependency (local path recommended)
+2. Register in `flowd.build.toml`
+3. Build
 
-Test suite of the FBP network protocol:
+Example:
 
-* (planned) Fully pass the FBP protocol spec test suite.
-* Currently more focusing on practical usability via noflo-ui.
-* Several things to clarify with the developers of the test suite, especially error reporting is lacking.
+```toml
+[dependencies]
+flowd-bla = { path = "components/bla" }
 
-Graph support:
-
-* Full in-memory representation and serialization and deserialization to/from the FBP JSON Graph format is implemented.
-* All properties of the FBP JSON Graph data format are defined.
-* Subgraphs can be (de-)serialized but behavior is unimplemented.
-* Some things to clarify with developers of the spec.
-
-Component management:
-
-* Currently all components are compiled-in.
-* Components can be linked from external repositories via Cargo `git` dependencies and from local paths via Cargo `path` dependencies.
-* One C-API-based component exists called *LibComponent* that loads a component from a shared object and calls into it (very basic).
-
-Online editing:
-
-* Supported based on the FBP network protocol.
-* Currently used user interface is noflo-ui.
-* Multi-client behavior is partial; full parallel client support is still being hardened.
-* Currently only 1 graph inside the runtime is implemented, though the data structures are there to support multiple.
-* (planned) Support for multiple graphs inside the runtime, managed completely separately.
-* (planned) Support for multiple FBP network protocol clients in parallel.
-* Much to clarify with developers of noflo-ui, status messages and documentation are terse.
-
-Security:
-
-* Currently unimplemented.
-* (planned) Basic token-based security and TLS support would be easy to add.
-* (planned) User and ACL management as well as ACL checking currently unimplemented.
-
-Multi-language feature:
-
-* (planned) Part of the next milestone.
-* Basic loading and unloading of a dlopen()'ed component is there (LibComponent).
-
-Multiple component APIs, component data formats:
-
-* Currently unimplemented.
-* Will likely develop in the direction of having
-  1. core components written in Rust working directly with the in-memory data structures and
-  2. components which accept the internal data structures but present different API and data formats when talking with the loaded external components (shared library, scripts, components communicating over STDIN/STDOUT)
-* (planned) Support for multiple component APIs:
-  * passive component driven by process(), both stateful and stateless (needs a scratch space somehow)
-  * active component that is run inside an own thread (question of 2 intermixed memory allocators?)
-  * active component that can do callbacks and feedback into flowd
-  * components that can/cannot handle re-connection and state changes
-* (planned) Support for multiple network graph backends: Internal Rust, GStreamer-based, MQTT-based etc.
-* (planned) Support for multiple data formats when communicating with the components: JSON, CBOR, ASN.1, netstrings etc.
-
-Online network changes:
-
-* (planned) Currently unimplemented, the network has to be stopped and restarted for changes to take effect.
-
-Component library:
-
-* Management of in-memory compiled-in Rust components is implemented.
-* One of the components, *LibComponent*, can load an external shared object and call a function to process data (very basic).
-
-Debugging, tracing:
-
-* Serialization and deserialization of the according messages is fully implemented.
-* Currently responds with mock responses but does not send any tracing data.
-* Processes can send copies of received and/or sent IPs out to FBP Network Protocol client(s) for debugging.
-* TODO mandatory debugging of all transmitted packets (TODO performance implications? per-process basis or graph-based or whole runtime?)
-* Process name is available on each outport and each connection of an array outport.
-
-Logging:
-
-* Runtime logging facilities to STDOUT with multiple levels, mentioning the thread name is implemented.
-* (planned) logging to logfiles and syslog (-> log rotation)
-* Processes can send STDOUT- and STDERR-like information to the runtime logfile and/or to FBP Network Protocol client(s).
-
-Component repository from local files:
-
-* (planned) Planned, one of the next milestones - currently, components are Cargo crates placed in components/.
-
-Component hub/repository in the internet:
-
-* (planned) Integration/registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))?
-* (planned) much later.
-
-Deployment and reproducible setups:
-
-* Currently using plain Cargo, no ability to include or compile-in any external/additional components.
-* (planned) Goal is to easily load components from a Github repository, build them and use them in a network. Naming and referencing to such external components by git repository.
-
-Signaling, Monitoring:
-
-* A background watchdog thread with ability to signal to and from all processes is implemented.
-* In addition, the main thread can issue one-way signaling to threads, eg. for a stop command.
-* The watchdog thread issues ping health check requests at regular intervals to test aliveness and response time of all processes.
-* Export of monitoring data, API server or visualization is currently not implemented.
-* The watchdog thread recognizes network self-shutdown and calls the runtime to stop and signal all FBP protocol clients about the status change.
-
-Maintenance, Operations:
-
-* Ability to use a network bridge or protocol client like TCP, WebSocket etc. which uses the transport protocol and serialization format of your choice, to connect multiple FBP networks, subgraphs or sub-networks.
-* Bridges between different network parts, and thus...
-* Distribution of the network across multiple machines
-* Dynamic discovery of FBP network instances and network parts in order to provide redundancy and ability to shut down parts of the whole system for maintenance.
-
-Testing:
-
-* (planned) There is support in the FBP Network Protocol and in other runtimes for comparison.
-
-Persistence:
-
-* Loading and saving to/from disk is implemented in basic form (`flowd.graph.json`), with further validation and UX improvements planned.
-* Persisting the network graph data structure 1:1 to disk as `flowd.graph.json` via `network:persist` message.
-* Goal:  Never lose your network definition.
-* (planned) Sending persist message from the GUI designer. (where is the button in noflo-ui to trigger persist message?)
-* (planned) Automatic saving of changed network every x minutes.
-* (planned) Integrity checker of loaded and saved graphs, showing critical (cannot load, cannot start this graph) and non-critical errors (missing connections, unconnected ports, unavailable components).
-* (planned) Keep a previous version of the persisted graph (.bak file)
-* Ability to abort the flowd instance, Ctrl+C does not save and overwrite persistence file.
-* Exclusion of the default persistence file from VCS.
-
-Checkpointing:
-
-* Planned, much later.
-* Goal:  Never lose your data (packets).
-
-Everything else:
-
-* Maybe I forgot about something important, please post it as a Github issue.
-
-
-## Included Components
-
-* Repeat
-* Drop
-* Output
-* LibComponent (work in progress - for loading components from C API libraries)
-* Unix domain socket server
-  * (planned) support for abstract address
-* File reader
-* File tailing resp. following including detection of replaced or truncated file
-* File writer
-* Trim for removing trailing and heading whitespace
-* Split lines
-* Count for packets, size of packets and sum of packet values
-* Cron for time-based events, with extended 7-parameter form and granularity up to seconds
-* Cmd for calling sub-processes or "shelling out", enabling re-use of any existing programs and their output or for transformation of data, sending data out to the sub-process etc. The sub-process commandline with arguments can be configured. TODO add more info about the features of this component
-* Hasher for calculating hash value of packets, supports xxHash64
-* Equals routing based on matching IP content
-* simple HTTP client
-* simple HTTP server, supporting multiple HTTP routes
-* Muxer to merge multiple connections into one output for components not able to handle array inports
-* MQTT publisher
-* MQTT subscriber
-* Redis Pub/Sub publisher
-* Redis Pub/Sub subscriber
-* IMAP e-mail append (sender)
-* IMAP e-mail fetch+idle (receiver)
-* OpenAI Chat component ("ChatGPT component")
-* Tera template component, which includes control flow and logic usable for simple scripts
-* Regexp data extraction component
-* Text replacement
-* Compression and decompression in XZ (LZMA2) format
-* Compression and decompression in Brotli format
-* Unix domain socket client (path-based and abstract socket addresses, support for SEQPACKET)
-* strip HTML tags to get the contained content for further processing
-* WebSocket client
-  * (planned) retry on connection establishment
-  * (planned) reconnection
-* TCP client
-* TLS client
-* TCP server
-* TLS server
-* WebSocket server
-* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour and DNS-SD
-* JSON query component using jaq/jq filter syntax
-* XPath filtering on HTML and simple XML data (note that CSS selectors are a subset of XPath query and can be converted into it)
-* SSH client (without using OpenSSH client or libssh)
-  * (planned) streaming capability of remote program output
-* Telegram component using Bot API supporting text messages
-* Matrix client component
-
-
-## Roadmap
-
-Check out the [milestones on Github](https://github.com/ERnsTL/flowd/milestones) and points mentioned in [README_WIP.md](README_WIP.md).
-
-
-## Architecture
-
-`flowd-rs` is a Rust runtime with compile-time component integration.
-
-Components are registered via:
-
-1. `flowd.build.toml`
-2. `Cargo.toml` dependencies
-3. `build.rs` code generation (`$OUT_DIR/build_generated.rs`)
-
-At runtime, components are instantiated and connected in-memory. Packets are transferred in-proc, in-memory via ring buffers with ownership transfer of message buffers. Management and graph control are exposed via WebSocket (FBP protocol).
-
-See the Architecture Decision Records (ADRs) in [`doc/`](doc/).
-
-
-## Performance, Benchmarks
-
-Run benchmark targets for `flowd`:
-
-```sh
-cargo bench
+[[components.entry]]
+name = "Bla"
+crate = "flowd-bla"
+struct = "BlaComponent"
 ```
 
-At the moment, no Criterion benchmark targets are defined in this repository yet, so this command may be a no-op.
+Compatibility is enforced via:
 
-TODO add performance regression tracking
-
-
-## Using Components
-
-1. Find the component on a Git service like Github, GitLab, CodeBerg etc. Repositories usually have "flowd-" in their name. Each repository constitutes a Cargo crate; it can contain one or more components.
-2. Add the crate repository to your Cargo.toml like so, to make it known to Cargo:
-  > flowd-bla = {
-  >   git = "https://github.com/org/flowd-bla.git",
-  >   rev = "a1b2c3d4e5f6",
-  >   branch = "0.4"
-  > }
-  Alternatively, via submodules which also references a specific commit:
-  > git submodule add https://github.com/org/flowd-bla components/bla
-  and add into Cargo.toml like so:
-  > flowd_bla = { path = "components/bla" }
-3. Add all components contained in the crate repository to your flowd.build.toml, to have it built into flowd. Explanation in the included flowd.build.toml file. The component repository probably has a ready block for copy-paste in its README.
-4. Build flowd as usual using ```cargo build --release```.
-5. For your project, you can also commit Cargo.lock to have it build reproducibly.
+```toml
+[package.metadata.flowd]
+compatible = "0.4"
+```
 
 
 ## Writing Applications
 
-At the current stage, applications in `flowd-rs` are primarily built by composing components into a graph and managing that graph through the FBP WebSocket protocol (typically via noflo-ui / Flowhub).
+Applications are graphs of components.
 
-Recommended workflow:
+Workflow:
 
-1. Start the runtime:
-   ```sh
-   cargo run --release
-   ```
-   (or bind explicitly: `cargo run --release -- 0.0.0.0:3569`)
+1. Start runtime
+2. Use visual editor
+3. Compose graph
+4. Persist graph
+5. Extend with custom components if needed
 
-2. Open the visual editor and connect to:
-   `ws://localhost:3569`
+`flowd` separates:
 
-3. Build your application graph:
-   * add components
-   * connect ports
-   * configure components via IIPs / graph configuration
-   * start and stop the network for execution
+* execution (runtime)
+* application logic (graph)
+* components (code)
 
-4. Persist the graph definition (stored as `flowd.graph.json`).
-
-5. Add custom components when needed:
-   * implement component crates in Rust (`components/*`)
-   * register them via `Cargo.toml` + `flowd.build.toml`
-   * rebuild and use them in the graph
-
-Current scope and limitations:
-
-* Single-graph runtime behavior is the current default.
-* Runtime is alpha; APIs and behavior may still evolve.
-* Some advanced lifecycle features (multi-graph, richer online reconfiguration, full tracing/security model) are still in progress.
+See [Writing Applications](doc/guides/writing_applications.md).
 
 
 ## Writing Components
 
-For `flowd-rs`, implement components as Rust crates under `components/*` using `flowd_component_api`.
+Components are Rust crates using `flowd_component_api`.
 
-Register components through:
-- `Cargo.toml` dependency
-- `flowd.build.toml` component entry
+Key ideas:
+
+* components react to messages
+* can have own threads and async behavior
+* no shared mutable state
+* explicit input/output ports
+
+See [Writing Components](doc/guides/writing_components.md).
+
+
+## Features and Current Status
+
+flowd is currently **alpha**.: usable and fairly optimized, but not all planned features are present yet. It is not production-ready for critical operations and APIs may change without notice.
+
+Implemented:
+
+* in-memory runtime
+* compile-time component integration
+* bounded connections (backpressure)
+* graph persistence
+* WebSocket control (FBP protocol)
+
+Planned:
+
+* security (TLS, auth)
+* tracing & observability
+* multi-graph runtime
+* distributed setups
+* checkpointing
 
 See:
-- `doc/writing-components.md`
-- compile-time integration model section below
+
+* [detailed feature list](doc/reference/features.md)
+* [GitHub issues](https://github.com/ERnsTL/flowd/issues)
+* [README_WIP](README_WIP.md)
+* For a roadmap, see [milestones on Github](https://github.com/ERnsTL/flowd/milestones) and points mentioned in [README_WIP.md](README_WIP.md).
+
+### Included Components
+
+see [Components Reference](doc/reference/components.md)
 
 
-### Compile-Time Integration Model
-
-`flowd` integrates components at compile time from:
-
-1. `flowd.build.toml` (component declarations)
-2. `Cargo.toml` (crate dependencies)
-3. `build.rs` (validation + code generation)
-
-During build, `build.rs` generates `$OUT_DIR/build_generated.rs`, and `main.rs` includes it via `include!()`.
-This generated code provides:
-
-* component imports
-* component metadata registration
-* component factory wiring
-* component log filter registration
-
-So when adding/removing components, no manual edits are needed in runtime registration/factory/logging code paths.
-
-Build-time validation fails for:
-
-* malformed `flowd.build.toml`
-* duplicate component names
-* unresolved crates
-* missing component symbols (compile-time)
-* missing or invalid `[package.metadata.flowd].compatible`
-* flowd/component compatibility mismatch (major+minor)
-
-
-* Flowd compatibility of components is declared in each component's Cargo.toml via:
-  ```toml
-  [package.metadata.flowd]
-  compatible = "0.4"
-  ```
-  Build-time compatibility check matches major and minor version between flowd and this value. This field is required for crate-based components.
-  Module-based components (`crate = "components::..."`) are legacy/dev-only: disabled by default and only allowed with `--features allow-module-components`.
-* Minimal crate-based component setup example:
-  ```toml
-  # in flowd Cargo.toml
-  [dependencies]
-  flowd-bla = { path = "components/bla" }
-
-  # in flowd.build.toml
-  [[components.entry]]
-  name = "Bla"
-  crate = "flowd-bla"
-  struct = "BlaComponent"
-
-  # in components/bla/Cargo.toml
-  [package.metadata.flowd]
-  compatible = "0.4"
-  ```
-* Create a branch for each flowd version, for example named "0.4" so that users can get the latest component version for their flowd version. This way, improvements can be ported back for an older version of flowd, and porting to new version of flowd can be done independently without disturbing component version for older versions of flowd.
-
-
-## Development (Hacking on ```flowd```)
+## Development
 
 Run all tests:
 ```sh
@@ -498,85 +282,57 @@ Run tests only for flowd itself (main crate):
 cargo test -p flowd-rs
 ```
 
-Run benchmarks:
+Run benchmarks (if present):
 
 ```sh
 cargo bench --workspace
 ```
 
-If no benchmark targets are defined yet, this command is currently a no-op for this repository.
 
+## Contributing
 
-## Goals in General
+1. Open or discuss an issue
+2. Propose an ADR, see [the ADR template](doc/adr-000-guidelines.md)
+3. Submit PR
 
-TODO also see Manifesto
-TODO is the following in sync with the Manifesto?
+See:
 
-To make a Flow-Based Programming (FBP) runtime suitable for production operation and reliable applications, it should possess several key characteristics:
-
-* Reliability and Robustness: The FBP runtime should be stable and reliable to ensure uninterrupted execution of critical applications. It should be able to handle errors robustly to avoid or at least minimize failures.
-
-* Scalability: The runtime environment should be capable of handling growing demands and workloads to ensure efficient execution of applications. This may involve scaling vertically (on larger machines) or horizontally (by adding more instances).
-
-* Monitoring and Debugging: There should be mechanisms for monitoring and troubleshooting to analyze performance, identify bottlenecks, and debug issues. This can be achieved through logging, dashboards, tracing, and other tools.
-
-* Security: The runtime environment should provide security mechanisms to ensure data integrity, confidentiality, and availability. This may include authentication, authorization, encryption, and protection against attacks such as injection attacks and denial-of-service attacks.
-
-* Transaction Support: It is important that the FBP runtime supports transactions to ensure data consistency and meet the Atomicity, Consistency, Isolation, and Durability (ACID) properties.
-
-* Integration: The runtime environment should seamlessly integrate with other systems and services to support data flows between different applications, platforms, and external services. This can be done through APIs, protocols such as HTTP, messaging systems, and other mechanisms.
-
-* Documentation and Support: Comprehensive documentation and supportive community can help increase developer productivity and efficiently solve issues. A good FBP runtime should have clear documentation, tutorials, examples, and support channels.
-
-By fulfilling these characteristics, an FBP runtime environment can be made suitable for production and reliable applications to support stable, scalable, and reliable workflows.
+* [CONTRIBUTING.md](CONTRIBUTING.md)
 
 
 ## License
 
-GNU LGPLv3+ (see `LICENSE`).
-
-### Commercial options
-
-Paid services to boost your commercial success are available:
-
-What it is      | What you get
-----------------|-------------------------------------------------------------------------------
-Solution-aaS    | "AI pipeline engine for you" - done for you
-Support & SLA   | If that thing is critical, we want to get someone on the phone now
-Managed Runtime | flowd runs for you - with deployment, monitoring and operations
-Consulting      | How to do it yourself and structure the whole operation around it
-Open Core       | commercial license for customizations and obviously enterprise-grade features
-
-What do these offerings provide is:
-
-* Operations:  it runs smoothly
-* Risk:  if anything happens, you got a SLA
-* Speed:  you move ahead quickly, saving you time
-* Complexity:  we don't have to understand this ourselves
-
-Use [the contact form](https://www.summitsolutions.at/contactus) or book a [strategy meeting](https://www.summitsolutions.at/appointment/1).
+GNU LGPLv3+ (see [LICENSE](LICENSE))
 
 
-## Contributing
+## Commercial Support
 
-1. Open an issue or pick an existing one.
-2. Discuss your idea. Formulate an ADR according to [the ADR Guidelines](doc/adr-000-guidelines.md).
-3. Send pull request.
-4. Quality check.
-5. Merged!
+Professional services around `flowd` are available, including:
+
+* Support & SLA
+* Managed runtime
+* Solution-as-a-Service
+* Consulting
+
+Contact:
+
+[https://www.summitsolutions.at/contactus](https://www.summitsolutions.at/contactus) or book a [strategy meeting](https://www.summitsolutions.at/appointment/1).
+
+For details, see [commercial options](doc/business/commercial.md).
 
 
-## Further documentation
+## Further Documentation
 
-* See the doc/ subdirectory.
-* [Issues with FBP JSON specs and noflo-ui](doc/issues-with-specs-and-noflo-ui.md)
+* `/doc/`
+* [MANIFESTO.md](MANIFESTO.md)
+* ADRs in `doc/adr/`
 * [Historic background (flowd-go)](https://github.com/ERnsTL/flowd-go/README.md#further-documentation)
+* [The FBP paradigm on J. Paul Morrison's website](http://www.jpaulmorrison.com/fbp/)
 
 
 ## Community
 
-General FBP ordered by actuality:
-
 * Discord:  Search for "Flow-based Programming"
 * [Reddit sub-reddit](https://www.reddit.com/r/DataflowProgramming/) for FBP and dataflow programming together
 * [Google group](https://groups.google.com/forum/#!forum/flow-based-programming)
+

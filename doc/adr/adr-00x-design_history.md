@@ -1,5 +1,7 @@
 ## History and Reference of Rationale
 
+Status: Superseded by ADR-xxx
+
 
 ### Change of framing format
 
