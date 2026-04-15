@@ -323,48 +323,6 @@ Everything else:
 * Matrix client component
 
 
-TODO merge following into flowd-rs section on this
-
-Currently present features:
-
-* Parsing of ```.fbp``` network specifications
-* Parsing of ```.drw``` network specifications made using [DrawFBP](http://www.jpaulmorrison.com/fbp/software.html#DrawFBP)
-* Simple and easy to implement framing format
-* Multi-core use resp. parallel processing
-* Closing of ports and close detection
-* Gracelful shutdown once all data has been processed and all components shut down
-* Visualization of the given network in *GraphViz* format
-* Display of required components and file dependencies of the given network for deployment
-* Ability to use a network bridge or protocol client, which uses the transport protocol and serialization format of your choice - kpc, WebSocket,  GRPC, CapnProto, Protobuf, Flatbuffers, JSON, MsgPack, gob, RON, ...
-* Sub-networks resp. composite components
-* Fast, direct transfer of IPs between components using named pipes (FIFOs); only shared memory would be faster
-* Running a processing network with or without ```flowd``` as the orchestrator
-* Can inspect, debug and interact with network components using standard Unix tools
-* Can run a terminal UI component - and then bring it to the web using [gotty](https://github.com/yudai/gotty) :-)
-* Delivery of *initial information packets* (IIPs)
-* Delivery of program parameters to components
-* Connections between components in framed or raw way
-* Basic array ports
-* Broadcasting to multiple output ports, serializing only once
-
-The included example components cover:
-
-* Re-use of any existing programs and their output or for transformation of data
-* Bridges between different network parts, and thus...
-* Distribution of the network across multiple machines
-* Modification of frame headers
-* Extraction of data from frame body
-* Routing based on frame contents or header values
-* Time-based events with cron expressions
-* Counter for packets, packet sizes and packets matching by header field
-* Example login prompt and command-line interaction component
-* Example terminal UI component sending messages into the network
-* Compression and decompression in XZ/LZMA2 and Brotli formats
-* Load balancing with high availability, fail-over, reconnection of output ports and programmatic switching of output ports
-* Zeroconf service publishing and browsing based on mDNS (multicast DNS) resp. Bonjour
-* WebSocket server and client with retry on connection establishment
-
-
 ## Roadmap
 
 Check out the [milestones on Github](https://github.com/ERnsTL/flowd/milestones).
