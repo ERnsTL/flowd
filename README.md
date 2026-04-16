@@ -239,7 +239,7 @@ See [Writing Components](doc/guides/writing_components.md).
 
 ## Features and Current Status
 
-flowd is currently **alpha**.: usable and fairly optimized, but not all planned features are present yet. It is not production-ready for critical operations and APIs may change without notice.
+flowd is currently **alpha**: usable and fairly optimized, but not all planned features are present yet. It is not production-ready for critical operations and APIs may change without notice.
 
 Implemented:
 
@@ -292,7 +292,7 @@ cargo bench --workspace
 ## Contributing
 
 1. Open or discuss an issue
-2. Propose an ADR, see [the ADR template](doc/adr-000-guidelines.md)
+2. Propose an ADR, see [the ADR template](doc/adr/adr-000-guidelines.md)
 3. Submit PR
 
 See:
