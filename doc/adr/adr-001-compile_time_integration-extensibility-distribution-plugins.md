@@ -1,7 +1,7 @@
 # ADR-001: Compile-Time Integration of FBP Components via `build.rs`, `flowd.build.toml` and Generated Code
 
 Status: Accepted
-Date: 2026-04-15
+Date: 2026-02-15
 Supersedes: none
 Superseded by: none
 
@@ -291,7 +291,6 @@ Optional future enhancements may include:
 * Conditional compilation targets
 * Component capability validation
 * Version pinning metadata
-
 
 
 ## Implementation plan
