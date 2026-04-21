@@ -1,9 +1,4 @@
-Sehr schön. damit haben wir 1 bis 14 durch. Bitte liste mir nochmal alle ADRs 1-14 mit Titel auf und jeweils den "wichtigsten Satz" den du mir je ADR mitgegeben hast. Bitte als flache Punktliste im Format:
-* ADR-xxx: Name: Wichtigster Satz.
-
-Sauber – das ist jetzt dein kondensiertes „Betriebssystem in 14 Sätzen“. Genau das ist später Gold wert.
-
----
+## ADR Overview
 
 * ADR-0001: Compile-Time Integration of Components: **What exists is decided at build time, not at runtime.**
 * ADR-0002: Runtime Execution Model (Scheduler & Budgets): **Backpressure is local, fairness is global.**
@@ -20,32 +15,18 @@ Sauber – das ist jetzt dein kondensiertes „Betriebssystem in 14 Sätzen“. 
 * ADR-0013: Security Model: **Security must be explicit, layered, and composable — never assumed.**
 * ADR-0014: Versioning and Compatibility: **Compatibility is the cost of evolution — pay it upfront or pay it later.**
 
-Ergänzungen 2026-04-16:
+Addons 2026-04-16:
 
-* **ADR-015: Failure & Recovery Model**
-  **Wichtigster Satz:** *Failure is normal — recovery must be defined, not improvised.**
-* **ADR-016: Delivery Semantics & Acknowledgement Model**
-  **Wichtigster Satz:** *Delivery guarantees must be explicit — otherwise they are undefined.*
-* **ADR-017: IO & External Systems Interaction Model**
-  **Wichtigster Satz:** *External systems are unreliable — your runtime must absorb that uncertainty.*
-* **ADR-018: Resource & Isolation Model**
-  **Wichtigster Satz:** *Unbounded components will eventually destroy the system.*
-* **ADR-019: Packaging & Deployment Model**
-  **Wichtigster Satz:** *A system that cannot be deployed predictably is not a system.*
-* **ADR-020: Standard Library & Component Ecosystem**
-  **Wichtigster Satz:** *An engine without components is not usable — it is only potential.*
-* **ADR-021: Formal Guarantees & Execution Semantics**
-  **Wichtigster Satz:** *If guarantees are not written down, they do not exist.*
+* ADR-015: Failure & Recovery Model: **Failure is normal — recovery must be defined, not improvised.**
+* ADR-016: Delivery Semantics & Acknowledgement Model: **Delivery guarantees must be explicit — otherwise they are undefined.**
+* ADR-017: IO & External Systems Interaction Model: **External systems are unreliable — your runtime must absorb that uncertainty.**
+* ADR-018: Resource & Isolation Model: **Unbounded components will eventually destroy the system.**
+* ADR-019: Packaging & Deployment Model: **A system that cannot be deployed predictably is not a system.**
+* ADR-020: Standard Library & Component Ecosystem: **An engine without components is not usable — it is only potential.**
+* ADR-021: Formal Guarantees & Execution Semantics: **If guarantees are not written down, they do not exist.**
 
----
-
-Wenn du das so nebeneinander liest, merkst du:
-
-👉 Das ist kein Feature-Set mehr
-👉 Das ist eine **kohärente Philosophie + Systemmodell**
-
-Und genau das ist dein eigentlicher Wettbewerbsvorteil.
-
+This is now not a feature set anymore, this is a coherent philosophy and system model.
+And this is an actual competitive advantage.
 
 ADR-Prompt:
 
