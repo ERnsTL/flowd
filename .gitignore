@@ -16,9 +16,7 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-
-## vscode
-
+# vscode
 .vscode
 .vscode/*
 !.vscode/settings.json
@@ -27,10 +25,10 @@ Cargo.lock
 !.vscode/extensions.json
 !.vscode/*.code-snippets
 
-# Local History for Visual Studio Code
+## Local History for Visual Studio Code
 .history/
 
-# Built Visual Studio Code Extensions
+## Built Visual Studio Code Extensions
 *.vsix
 
 # Shell scripts / helper scripts
