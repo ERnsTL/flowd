@@ -31,6 +31,9 @@ Cargo.lock
 ## Built Visual Studio Code Extensions
 *.vsix
 
+## Coding assistant temp files
+.codex
+
 # Shell scripts / helper scripts
 *.sh
 vendor/
