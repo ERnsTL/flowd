@@ -288,6 +288,8 @@ Run benchmarks (if present):
 cargo bench --workspace
 ```
 
+See [Performance Testing](doc/engineering/performance_testing.md)
+
 
 ## Contributing
 
