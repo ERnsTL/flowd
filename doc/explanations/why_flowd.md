@@ -14,6 +14,8 @@ Use available off-the-shelf components where you can. Grow a collection of speci
 
 Thus, rather than rewriting code anew for each project, you become more and more efficient with regards to *human time* spent on development.
 
+This approach not only improves developer efficiency, but also enables faster delivery, more reliable systems, and reduced complexity for real-world applications.
+
 This is the basic idea of *Flow-based Programming* (FBP), as pioneered by [J. Paul Morrison](http://www.jpaulmorrison.com/fbp/).
 
 The ```flowd``` (for *flow daemon*) is a *runtime environment* for the execution of FBP processing networks, to be defined by a programmer, which then constitutes an *application* or processing system of some kind.
