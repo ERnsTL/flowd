@@ -2,6 +2,9 @@
 
 set -e
 
+echo "Building flowd..."
+cargo build --release
+
 echo "Starting flowd..."
 
 # Start flowd in background
