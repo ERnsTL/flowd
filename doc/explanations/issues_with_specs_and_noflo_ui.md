@@ -2,7 +2,7 @@ This file contains things that are unexpected, undocumented, in need of clarific
 
 * in the manual for noflo-ui,
 * the FBP protocol test suite,
-* the FBP JSON Graph format specification
+* the FBP JSON Graph format specification and
 * the FBP Network Protocol specification.
 
 
@@ -10,6 +10,7 @@ This file contains things that are unexpected, undocumented, in need of clarific
 
 ### Areas of improvement
 
+- Mismatches between [protocol spec text](https://flowbased.github.io/fbp-protocol/), fbp-protocol schemas and fbp-tests testsuite, for example regarding payload.secret
 - Flow/state model is not explicitly specified: define allowed message sequences per protocol as a normative state machine.
 - Ordering rules are underspecified: define which messages must be in-order, which may be interleaved, and which may arrive out-of-order.
 - Request/response correlation is optional in practice: make `requestId`/`responseTo` requirements explicit (required vs optional) and define behavior when missing.
@@ -66,8 +67,10 @@ If you want, I can draft a compact “missing normative spec” checklist you co
 
 ## Implicit Requirements Discovered during refactoring for compatibility with fbp-tests
 
-* in general, the rendered spec does not show well, which fields are optional and the flow of expected/paired messages.
+- in general, the rendered spec does not show well, which fields are optional and the flow of expected/paired messages.
 - `runtime:getruntime.payload.secret` must be accepted as missing/undefined, even though the spec text marks it required.
+  - Spec text says required, but fbp-protocol tests send this as undefined.
+  - secret is required per FBP protocol spec, but optional according to fbp-tests
 - Many request payloads marked with required `secret` in the HTML must be accepted without `secret` in practice.
 - `graph:clear` request must accept missing `library`, `icon`, and `description`.
 - `graph:clear` response must not echo missing optional fields as empty strings; they should be omitted.
