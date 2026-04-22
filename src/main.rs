@@ -52,6 +52,7 @@ pub use flowd_component_api::{
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
 const WATCHDOG_POLL_DUR: core::time::Duration = Duration::from_millis(50);
 const WATCHDOG_MAX_MISSED_PONGS: u8 = 2;
+const CLIENT_BROADCAST_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(200));
 const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
 const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
@@ -240,7 +241,11 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
     */
     let peer_addr = stream.peer_addr().expect("could not get peer socketaddr");
     {
-        graph_inout.lock().expect(r#"could not acquire lock for saving TcpStream for graph outport process"#).websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(stream.try_clone().expect("could not try_clone() TcpStream"), tungstenite::protocol::Role::Server, None));
+        let cloned_stream = stream.try_clone().expect("could not try_clone() TcpStream");
+        if let Err(err) = cloned_stream.set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
+            warn!("set_write_timeout call failed on cloned stream: {:?}", err);
+        }
+        graph_inout.lock().expect(r#"could not acquire lock for saving TcpStream for graph outport process"#).websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(cloned_stream, tungstenite::protocol::Role::Server, None));
     }
 
     let callback = |req: &Request, mut response: Response| {
@@ -2496,6 +2501,9 @@ impl GraphInportOutportHolder {
     fn send_json_to_clients<T: Serialize>(&mut self, packet: &T, packet_name: &str) {
         let msg = serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
         self.websockets.retain(|addr, client| {
+            if let Err(err) = client.get_mut().set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
+                warn!("failed to set websocket client {} write timeout: {}", addr, err);
+            }
             match client.write(Message::text(msg.clone())) {
                 Ok(_) => true,
                 Err(err) => {
