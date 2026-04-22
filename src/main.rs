@@ -2155,9 +2155,9 @@ impl RuntimeRuntimePayload {
             // stop watchdog first so it cannot continue filling process signal channels with pings
             info!("stop: signaling watchdog");
             if let Some(watchdog_channel) = self.watchdog_channel.take() {
-                watchdog_channel
-                    .send(b"stop".to_vec())
-                    .expect("could not send stop signal to watchdog thread");
+                if let Err(err) = watchdog_channel.send(b"stop".to_vec()) {
+                    warn!("stop: watchdog already disconnected while sending stop signal: {}", err);
+                }
             } else {
                 warn!("stop: watchdog channel missing");
             }
