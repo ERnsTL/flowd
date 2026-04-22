@@ -218,6 +218,10 @@ Negative:
 * potential for proprietary forks
 * reliance on community goodwill instead of legal enforcement
 
+### Future Licensing Flexibility
+
+The project may adopt newer versions of the Apache License if appropriate in the future.
+
 
 ## Strategic Position
 
