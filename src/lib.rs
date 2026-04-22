@@ -1321,17 +1321,30 @@ impl RuntimeRuntimePayload {
     }
 
     fn debug_mode(&mut self, graph: &str, mode: bool) -> std::result::Result<(), std::io::Error> {
-        //TODO check if the given graph exists
-        //TODO check if the given graph is the currently selected one
-        //TODO implement
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: check if the given graph exists (for future multi-graph support)
+        // TODO: check if the given graph is the currently selected one
         self.status.debug = Some(mode);
         Ok(())
     }
 
     //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
     fn set_debug_edges(&mut self, graph: &str, edges: &Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
-        //TODO clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
-        //TODO implement
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
+        // TODO: implement actual debug edge handling
         info!("got following debug edges:");
         for edge in edges {
             info!("  edge: src={:?} tgt={:?}", edge.src, edge.tgt);
@@ -1340,9 +1353,16 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn start_trace(&mut self, graph: &str, buffer_size: u32) -> std::result::Result<(), std::io::Error> {
-        //TODO implement
-        //TODO check if graph exists and is current graph
+    fn start_trace(&mut self, graph: &str, _buffer_size: u32) -> std::result::Result<(), std::io::Error> {
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: implement actual tracing with buffer_size parameter (FBP spec: size of tracing buffer to keep in bytes)
+        // TODO: check if graph exists and is current graph (multi-graph)
         if self.tracing {
             // wrong state
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("tracing already started")));
@@ -1352,8 +1372,15 @@ impl RuntimeRuntimePayload {
     }
 
     fn stop_trace(&mut self, graph: &str) -> std::result::Result<(), std::io::Error> {
-        //TODO implement
-        //TODO check if graph exists and is current graph
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: implement actual tracing stop
+        // TODO: check if graph exists and is current graph (multi-graph)
         if !self.tracing {
             // wrong state
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("tracing not started")));
@@ -1365,17 +1392,31 @@ impl RuntimeRuntimePayload {
     //TODO can this function fail, at all? can the error response be removed?
     //TODO clarify spec: when is clear() allowed? in running state or in stopped state?
     fn clear_trace(&mut self, graph: &str) -> std::result::Result<(), std::io::Error> {
-        //TODO implement
-        //TODO check if graph exists and is current graph
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: implement actual trace clearing
+        // TODO: check if graph exists and is current graph (multi-graph)
         Ok(())
     }
 
     //TODO can this function fail, at all? can the error response be removed?
     //TODO clarify spec: when is dump() allowed? in running state or in stopped state?
     fn dump_trace(&mut self, graph: &str) -> std::result::Result<String, std::io::Error> {
-        //TODO implement
-        //TODO check if graph exists and is current graph
-        //TODO implement Flowtrace format?
+        // Validate graph parameter matches current graph (single-graph mode)
+        if graph != self.graph {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
+                    graph, self.graph)));
+        }
+
+        // TODO: implement actual trace dumping
+        // TODO: check if graph exists and is current graph (multi-graph)
+        // TODO: implement Flowtrace format?
         Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 
@@ -5041,9 +5082,11 @@ impl Graph {
     }
 
     fn remove_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed do change the edgeset?
-        //TODO check graph name and state, multi-graph support
+        // FBP Protocol: graph parameter identifies target graph for multi-graph support
+        // Currently pre-validated at server level to match runtime's current graph
+        // TODO: implement multi-graph support - validate graph exists and is current
+        // TODO: in what state is it allowed do change the edgeset?
+        // TODO: check graph name and state, multi-graph support
 
         // find correct index and remove
         for (i, edge) in self.edges.iter().enumerate() {
@@ -5056,9 +5099,11 @@ impl Graph {
     }
 
     fn change_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed do change the edgeset?
-        //TODO check graph name and state, multi-graph support
+        // FBP Protocol: graph parameter identifies target graph for multi-graph support
+        // Currently pre-validated at server level to match runtime's current graph
+        // TODO: implement multi-graph support - validate graph exists and is current
+        // TODO: in what state is it allowed do change the edgeset?
+        // TODO: check graph name and state, multi-graph support
 
         // find correct index and set metadata
         //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
@@ -5105,20 +5150,24 @@ impl Graph {
     }
 
     fn add_group(&mut self, graph: String, name: String, nodes: Vec<String>, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed to change node groups?
-        //TODO check graph name and state, multi-graph support
-        //TODO check nodes if they actually exist; check for duplicates; and node can only be part of a single group
-        //TODO check for OOm by extending first?
+        // FBP Protocol: graph parameter identifies target graph for multi-graph support
+        // Currently pre-validated at server level to match runtime's current graph
+        // TODO: implement multi-graph support - validate graph exists and is current
+        // TODO: in what state is it allowed to change node groups?
+        // TODO: check graph name and state, multi-graph support
+        // TODO: check nodes if they actually exist; check for duplicates; and node can only be part of a single group
+        // TODO: check for OOm by extending first?
         self.groups.push(GraphGroup { name: name, nodes: nodes, metadata: metadata });
-        //TODO optimize: if it cannot fail then no need to return Result
+        // TODO: optimize: if it cannot fail then no need to return Result
         Ok(())
     }
 
     fn remove_group(&mut self, graph: String, name: String) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed do change node groups?
-        //TODO check graph name and state, multi-graph support
+        // FBP Protocol: graph parameter identifies target graph for multi-graph support
+        // Currently pre-validated at server level to match runtime's current graph
+        // TODO: implement multi-graph support - validate graph exists and is current
+        // TODO: in what state is it allowed do change node groups?
+        // TODO: check graph name and state, multi-graph support
 
         // find correct index and remove
         for (i, group) in self.groups.iter().enumerate() {
@@ -5131,9 +5180,11 @@ impl Graph {
     }
 
     fn rename_group(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed do change node groups?
-        //TODO check graph name and state, multi-graph support
+        // FBP Protocol: graph parameter identifies target graph for multi-graph support
+        // Currently pre-validated at server level to match runtime's current graph
+        // TODO: implement multi-graph support - validate graph exists and is current
+        // TODO: in what state is it allowed do change node groups?
+        // TODO: check graph name and state, multi-graph support
 
         // find correct index and rename
         for (i, group) in self.groups.iter().enumerate() {
