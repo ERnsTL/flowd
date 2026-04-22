@@ -15,7 +15,7 @@ use std::io::ErrorKind;
 use std::io::BufReader;
 use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
 */
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uds::UnixSocketAddr;
 use std::io::{ErrorKind, Write, Read};
 use std::thread::{self};
@@ -57,6 +57,8 @@ const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
 const DEFAULT_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
+const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
+const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 impl Component for UnixSocketClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -541,10 +543,41 @@ impl Component for UnixSocketServerComponent {
             std::thread::park();
         }
         shutdown.store(true, Ordering::Relaxed);
-        listen_thread.join().expect("failed to join listener thread");
-        for handle in connection_threads.lock().expect("lock poisoned").drain(..) {
-            if let Err(err) = handle.join() {
-                warn!("failed to join unixsocket connection handler thread: {:?}", err);
+        let listen_join_started = Instant::now();
+        while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if listen_thread.is_finished() {
+            if let Err(err) = listen_thread.join() {
+                warn!("failed to join unixsocket listener thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "unixsocketserver: listener thread did not exit within {:?}, detaching",
+                LISTENER_JOIN_GRACE
+            );
+            drop(listen_thread);
+        }
+
+        let handles = {
+            let mut handles_guard = connection_threads.lock().expect("lock poisoned");
+            handles_guard.drain(..).collect::<Vec<_>>()
+        };
+        for handle in handles {
+            let conn_join_started = Instant::now();
+            while !handle.is_finished() && conn_join_started.elapsed() < CONNECTION_JOIN_GRACE {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if handle.is_finished() {
+                if let Err(err) = handle.join() {
+                    warn!("failed to join unixsocket connection handler thread: {:?}", err);
+                }
+            } else {
+                warn!(
+                    "unixsocketserver: connection handler thread did not exit within {:?}, detaching",
+                    CONNECTION_JOIN_GRACE
+                );
+                drop(handle);
             }
         }
         debug!("cleaning up");

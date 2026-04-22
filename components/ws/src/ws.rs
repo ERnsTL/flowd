@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 //use tungstenite::client::connect;
 use tungstenite::protocol::Message;
 use tungstenite::util::NonBlockingError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::net::{TcpListener, TcpStream};
 use std::thread::{self};
 use std::collections::HashMap;
@@ -25,6 +25,8 @@ pub struct WSClientComponent {
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
+const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
+const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 impl Component for WSClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -399,10 +401,41 @@ impl Component for WSServerComponent {
             std::thread::park();
         }
         shutdown.store(true, Ordering::Relaxed);
-        listen_thread.join().expect("failed to join listener thread");
-        for handle in connection_threads.lock().expect("lock poisoned").drain(..) {
-            if let Err(err) = handle.join() {
-                warn!("failed to join websocket connection handler thread: {:?}", err);
+        let listen_join_started = Instant::now();
+        while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if listen_thread.is_finished() {
+            if let Err(err) = listen_thread.join() {
+                warn!("failed to join websocket listener thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "wsserver: listener thread did not exit within {:?}, detaching",
+                LISTENER_JOIN_GRACE
+            );
+            drop(listen_thread);
+        }
+
+        let handles = {
+            let mut handles_guard = connection_threads.lock().expect("lock poisoned");
+            handles_guard.drain(..).collect::<Vec<_>>()
+        };
+        for handle in handles {
+            let conn_join_started = Instant::now();
+            while !handle.is_finished() && conn_join_started.elapsed() < CONNECTION_JOIN_GRACE {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if handle.is_finished() {
+                if let Err(err) = handle.join() {
+                    warn!("failed to join websocket connection handler thread: {:?}", err);
+                }
+            } else {
+                warn!(
+                    "wsserver: connection handler thread did not exit within {:?}, detaching",
+                    CONNECTION_JOIN_GRACE
+                );
+                drop(handle);
             }
         }
         info!("exiting");
