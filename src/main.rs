@@ -1843,7 +1843,11 @@ impl RuntimeRuntimePayload {
             //let ports_this_wake_notify = ports_this.wake_notify.clone();
             let watchdog_signalsink_clone = watchdog_signalsink.clone();
             let graph_inout_ref = graph_inout_arc.clone();
+            let process_exited = Arc::new(AtomicBool::new(false));
+            let process_exited_in_thread = process_exited.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
+                // marks process as exited even when unwinding from panic
+                let _thread_exit_flag = ThreadExitFlag::new(process_exited_in_thread);
                 debug!("this is process thread, waiting for Thread replacement");
                 thread::park();
                 debug!("replacing Thread objects");
@@ -1873,7 +1877,7 @@ impl RuntimeRuntimePayload {
             thread_wake_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
             //thread_wake_handles.insert(proc_name.clone(), ports_this.wake_notify);
             // store process signal channel and thread handle for watchdog thread
-            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone()));
+            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone(), process_exited));
             // store process signal channel and join handle
             self.processes.insert(proc_name.clone(), Process {
                 signal: signalsink,
