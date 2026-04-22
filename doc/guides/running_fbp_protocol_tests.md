@@ -28,22 +28,14 @@ flowd implements the FBP protocol over WebSocket. The official test suite (`fbp-
 
 3. **Set up FBP test environment:**
    ```bash
-   mkdir -p fbp-tests
-   cd fbp-tests
-   export PATH="$HOME/.volta/bin:$PATH"
-   volta run npm init -y
-   volta run npm install fbp-protocol@0.9.8
-   volta run npx fbp-init
-   # Configure for flowd's default port
-   sed -i 's/"port": 8080/"port": 3569/' fbp-config.json
-   cd ..
+   ./setup_fbp-tests.sh
    ```
 
 ### Run Tests
 
 Execute the test runner script:
 ```bash
-./run-fbp-tests.sh
+./run_fbp-tests.sh
 ```
 
 This script will:
@@ -60,7 +52,7 @@ The FBP protocol tests run automatically in CI on every push and pull request vi
 The CI:
 - Builds flowd
 - Sets up the Node.js test environment
-- Runs the same `./run-fbp-tests.sh` script
+- Runs the same `./run_fbp-tests.sh` script
 - Fails the build if any test fails
 
 ## Test Output
