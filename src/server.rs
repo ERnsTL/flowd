@@ -144,6 +144,23 @@ impl FlowdServer {
             }
             Ok(())
         }
+
+        fn get_graph_by_name(
+            runtime: &Arc<RwLock<RuntimeRuntimePayload>>,
+            fallback_graph: &Arc<RwLock<Graph>>,
+            graph_name: &str,
+        ) -> Result<Arc<RwLock<Graph>>, std::io::Error> {
+            if let Some(graph_arc) = runtime.read().expect("lock poisoned").graphs.get_graph(graph_name) {
+                return Ok(graph_arc);
+            }
+            if fallback_graph.read().expect("lock poisoned").properties.name == graph_name {
+                return Ok(fallback_graph.clone());
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found", graph_name),
+            ))
+        }
         if let Err(err) = stream.set_write_timeout(Some(Duration::SECOND)) {
             log::warn!("set_write_timeout call failed: {:?}", err);
         }
@@ -406,9 +423,15 @@ impl FlowdServer {
                                 continue;
                             }
                             let mut runtime_write = runtime.write().expect("lock poisoned");
+                            let previous_active_graph = runtime_write.graph.clone();
                             match graph.write().expect("lock poisoned").clear(&payload, &*runtime_write) {
                                 Ok(_) => {
                                     runtime_write.graph = payload.name.clone();
+                                    runtime_write.graphs.add_graph(payload.name.clone(), graph.clone());
+                                    if previous_active_graph != payload.name {
+                                        runtime_write.graphs.remove_graph(&previous_active_graph);
+                                    }
+                                    let _ = runtime_write.graphs.set_active_graph(&payload.name);
                                     log::info!("response: sending graph:clear response");
                                     websocket
                                         .send(Message::text(
@@ -437,7 +460,23 @@ impl FlowdServer {
                                     websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                     continue;
                                 }
-                                match graph.write().expect("lock poisoned").add_node_from_payload(graph_name, payload.component, payload.name, payload.metadata) {
+                                let target_graph = match get_graph_by_name(&runtime, &graph, &graph_name) {
+                                    Ok(graph_arc) => graph_arc,
+                                    Err(err) => {
+                                        websocket
+                                            .send(Message::text(
+                                                serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                    .expect("failed to serialize graph:error response"),
+                                            ))
+                                            .expect("failed to write message into websocket");
+                                        continue;
+                                    }
+                                };
+                                let add_node_result = {
+                                    let mut graph_write = target_graph.write().expect("lock poisoned");
+                                    graph_write.add_node_from_payload(graph_name, payload.component, payload.name, payload.metadata)
+                                };
+                                match add_node_result {
                                 Ok(response) => {
                                     log::info!("response: sending graph:addnode response");
                                     websocket
@@ -482,7 +521,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").remove_node(payload.graph.clone(), payload.name.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_node_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_node(payload.graph.clone(), payload.name.clone())
+                            };
+                            match remove_node_result {
                                 Ok(removed_edges) => {
                                     for removed_edge in removed_edges {
                                         websocket
@@ -523,7 +578,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").rename_node(payload.graph.clone(), payload.from.clone(), payload.to.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let rename_node_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.rename_node(payload.graph.clone(), payload.from.clone(), payload.to.clone())
+                            };
+                            match rename_node_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:renamenode response");
                                     websocket
@@ -552,7 +623,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").change_node(payload.graph.clone(), payload.name.clone(), payload.metadata) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let change_node_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.change_node(payload.graph.clone(), payload.name.clone(), payload.metadata)
+                            };
+                            match change_node_result {
                                 Ok(updated_metadata) => {
                                     log::info!("response: sending graph:changenode response");
                                     websocket
@@ -589,8 +676,24 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
                             //TODO optimize clone here
-                            match graph.write().expect("lock poisoned").add_edge(payload.graph.clone(), GraphEdge::from(payload.clone())) {
+                            let add_edge_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.add_edge(payload.graph.clone(), GraphEdge::from(payload.clone()))
+                            };
+                            match add_edge_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addedge response");
                                     websocket
@@ -619,7 +722,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").remove_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone()) {  //TODO optimize any way to avoid these clones?
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_edge_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone())
+                            };
+                            match remove_edge_result {  //TODO optimize any way to avoid these clones?
                                 Ok(_) => {
                                     log::info!("response: sending graph:removeedge response");
                                     websocket
@@ -648,7 +767,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").change_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone(), payload.metadata.clone()) {    //TODO optimize any way to avoid these clones here?
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let change_edge_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.change_edge(payload.graph.clone(), payload.src.clone(), payload.tgt.clone(), payload.metadata.clone())
+                            };
+                            match change_edge_result {    //TODO optimize any way to avoid these clones here?
                                 Ok(_) => {
                                     log::info!("response: sending graph:changeedge response");
                                     websocket
@@ -677,7 +812,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").add_initialip(payload.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let add_initial_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.add_initialip(payload.clone())
+                            };
+                            match add_initial_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addinitial response");
                                     websocket
@@ -706,7 +857,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").remove_initialip(payload.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_initial_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_initialip(payload.clone())
+                            };
+                            match remove_initial_result {
                                 Ok(removed_src) => {
                                     log::info!("response: sending graph:removeinitial response");
                                     websocket
@@ -735,10 +902,24 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO extend to multi-graph functionality, find the correct graph to address
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
                             let response = GraphAddinportResponse::from_request(payload.clone());
-                            match graph.write().expect("lock poisoned").add_inport(payload.public.clone(), GraphPort::from(payload)) {
+                            let add_inport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.add_inport(payload.public.clone(), GraphPort::from(payload))
+                            };
+                            match add_inport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addinport response");
                                     websocket
@@ -767,9 +948,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO multi-graph support
-                            match graph.write().expect("lock poisoned").remove_inport(payload.public) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_inport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_inport(payload.public)
+                            };
+                            match remove_inport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removeinport response");
                                     websocket
@@ -798,10 +993,24 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO multi-graph support
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
                             log::info!("response: sending graph:renameinport response");
-                            match graph.write().expect("lock poisoned").rename_inport(payload.from, payload.to) {
+                            let rename_inport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.rename_inport(payload.from, payload.to)
+                            };
+                            match rename_inport_result {
                                 Ok(_) => {
                                     websocket
                                     .send(Message::text(
@@ -829,10 +1038,24 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO multi-graph support
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
                             let response = GraphAddoutportResponse::from_request(payload.clone());
-                            match graph.write().expect("lock poisoned").add_outport(payload.public.clone(), GraphPort::from(payload)) {
+                            let add_outport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.add_outport(payload.public.clone(), GraphPort::from(payload))
+                            };
+                            match add_outport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addoutport response");
                                     websocket
@@ -861,9 +1084,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO multi-graph support
-                            match graph.write().expect("lock poisoned").remove_outport(payload.public.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_outport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_outport(payload.public.clone())
+                            };
+                            match remove_outport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removeoutport response");
                                     websocket
@@ -892,10 +1129,24 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            //TODO check if graph name matches
-                            //TODO multi-graph support
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
                             log::info!("response: sending graph:renameoutport response");
-                            match graph.write().expect("lock poisoned").rename_outport(payload.from, payload.to) {
+                            let rename_outport_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.rename_outport(payload.from, payload.to)
+                            };
+                            match rename_outport_result {
                                 Ok(_) => {
                                     websocket
                                     .send(Message::text(
@@ -923,7 +1174,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").add_group(payload.graph, payload.name, payload.nodes, payload.metadata) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let add_group_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.add_group(payload.graph, payload.name, payload.nodes, payload.metadata)
+                            };
+                            match add_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addgroup response");
                                     websocket
@@ -952,7 +1219,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").remove_group(payload.graph, payload.name) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let remove_group_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.remove_group(payload.graph, payload.name)
+                            };
+                            match remove_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removegroup response");
                                     websocket
@@ -981,7 +1264,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").rename_group(payload.graph, payload.from, payload.to) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let rename_group_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.rename_group(payload.graph, payload.from, payload.to)
+                            };
+                            match rename_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:renamegroup response");
                                     websocket
@@ -1010,7 +1309,23 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match graph.write().expect("lock poisoned").change_group(payload.graph, payload.name, payload.metadata) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(err) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                .expect("failed to serialize graph:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let change_group_result = {
+                                let mut graph_write = target_graph.write().expect("lock poisoned");
+                                graph_write.change_group(payload.graph, payload.name, payload.metadata)
+                            };
+                            match change_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:changegroup response");
                                     websocket
@@ -1451,6 +1766,16 @@ pub fn run() -> Result<()> {
 
     let graph = crate::load_or_create_graph().expect("failed to load or create graph");
     log::info!("graph loaded or created");
+    {
+        let graph_name = graph.read().expect("lock poisoned").properties.name.clone();
+        let mut runtime_write = runtime.write().expect("lock poisoned");
+        runtime_write.graphs.add_graph(graph_name.clone(), graph.clone());
+        runtime_write
+            .graphs
+            .set_active_graph(&graph_name)
+            .expect("failed to set active graph in multi-graph manager");
+        runtime_write.graph = graph_name;
+    }
 
     // start network
     let bind_addr;

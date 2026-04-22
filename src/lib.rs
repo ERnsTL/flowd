@@ -5111,11 +5111,10 @@ impl Graph {
     }
 
     fn remove_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork) -> Result<(), std::io::Error> {
-        // FBP Protocol: graph parameter identifies target graph for multi-graph support
-        // Currently pre-validated at server level to match runtime's current graph
-        // TODO: implement multi-graph support - validate graph exists and is current
-        // TODO: in what state is it allowed do change the edgeset?
-        // TODO: check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
 
         // find correct index and remove
         for (i, edge) in self.edges.iter().enumerate() {
@@ -5128,17 +5127,14 @@ impl Graph {
     }
 
     fn change_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
-        // FBP Protocol: graph parameter identifies target graph for multi-graph support
-        // Currently pre-validated at server level to match runtime's current graph
-        // TODO: implement multi-graph support - validate graph exists and is current
-        // TODO: in what state is it allowed do change the edgeset?
-        // TODO: check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
 
         // find correct index and set metadata
-        //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
         for (i, edge) in self.edges.iter().enumerate() {
             if edge.source == source && edge.target == target {
-                //TODO optimize, maybe direct assignment without [i] is possible
                 self.edges[i].metadata = metadata;
                 return Ok(());
             }
@@ -5179,24 +5175,21 @@ impl Graph {
     }
 
     fn add_group(&mut self, graph: String, name: String, nodes: Vec<String>, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
-        // FBP Protocol: graph parameter identifies target graph for multi-graph support
-        // Currently pre-validated at server level to match runtime's current graph
-        // TODO: implement multi-graph support - validate graph exists and is current
-        // TODO: in what state is it allowed to change node groups?
-        // TODO: check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
+
         // TODO: check nodes if they actually exist; check for duplicates; and node can only be part of a single group
-        // TODO: check for OOm by extending first?
         self.groups.push(GraphGroup { name: name, nodes: nodes, metadata: metadata });
-        // TODO: optimize: if it cannot fail then no need to return Result
         Ok(())
     }
 
     fn remove_group(&mut self, graph: String, name: String) -> Result<(), std::io::Error> {
-        // FBP Protocol: graph parameter identifies target graph for multi-graph support
-        // Currently pre-validated at server level to match runtime's current graph
-        // TODO: implement multi-graph support - validate graph exists and is current
-        // TODO: in what state is it allowed do change node groups?
-        // TODO: check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
 
         // find correct index and remove
         for (i, group) in self.groups.iter().enumerate() {
@@ -5209,16 +5202,14 @@ impl Graph {
     }
 
     fn rename_group(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
-        // FBP Protocol: graph parameter identifies target graph for multi-graph support
-        // Currently pre-validated at server level to match runtime's current graph
-        // TODO: implement multi-graph support - validate graph exists and is current
-        // TODO: in what state is it allowed do change node groups?
-        // TODO: check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
 
         // find correct index and rename
         for (i, group) in self.groups.iter().enumerate() {
             if group.name == old {
-                //TODO is it possible to do directly:  group.name = new  ?
                 self.groups[i].name = new;
                 return Ok(());
             }
@@ -5227,15 +5218,14 @@ impl Graph {
     }
 
     fn change_group(&mut self, graph: String, name: String, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
-        //TODO implement
-        //TODO in what state is it allowed do change the groups?
-        //TODO check graph name and state, multi-graph support
+        // check graph name
+        if graph != self.properties.name {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+        }
 
         // find correct index and set metadata
-        //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
         for (i, group) in self.groups.iter().enumerate() {
             if group.name == name {
-                //TODO optimize, maybe direct assignment without [i] is possible
                 self.groups[i].metadata = metadata;
                 return Ok(());
             }
