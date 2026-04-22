@@ -5,6 +5,7 @@ use log::{debug, error, info, trace, warn};
 use std::sync::{Arc, Mutex};
 use std::{thread, thread::Thread};
 use std::future::IntoFuture;
+use std::time::Duration;
 use matrix_sdk::config::SyncSettings;
 use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent};
 use matrix_sdk::{Client, Room, RoomState};
@@ -44,6 +45,9 @@ pub struct MatrixClientComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
 }
+
+const MATRIX_CLIENT_INIT_TIMEOUT: Duration = Duration::from_secs(15);
+const MATRIX_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Component for MatrixClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -101,7 +105,10 @@ impl Component for MatrixClientComponent {
         let homeserver_url = format!("https://{}/", homeserver);    //TODO optimize - use URL struct? remove username, password and query paramaters?
         // NOTE: when encryption is enabled, you should use a persistent store to be able to restore the session with a working encryption setup. TODO See the `persist_session` example in the matrix-rust-sdk repo.
         let client_fut = Client::builder().homeserver_url(homeserver_url).build().into_future();
-        let client = rt.block_on(client_fut).expect("failed to create client");
+        let client = rt
+            .block_on(async { tokio::time::timeout(MATRIX_CLIENT_INIT_TIMEOUT, client_fut).await })
+            .expect("matrix client init timed out")
+            .expect("failed to create client");
         // variables for the client
         let client_ref = client.clone();
         let out_ref = Arc::new(Mutex::new(out));    //TODO optimize
@@ -182,6 +189,7 @@ impl Component for MatrixClientComponent {
         debug!("done");
 
         // main loop
+        let mut stop_requested = false;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -190,6 +198,7 @@ impl Component for MatrixClientComponent {
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
                     info!("got stop signal, exiting");
+                    stop_requested = true;
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
@@ -213,8 +222,18 @@ impl Component for MatrixClientComponent {
                     // send it
                     if let Some(room_id_inner) = room_id.lock().expect("lock poisoned").as_ref() {
                         let room = client_ref.get_room(&room_id_inner).expect("failed to get room");
-                        rt.block_on(room.send(content).into_future()).expect("failed to send message");
-                        debug!("done");
+                        let send_result = rt.block_on(async {
+                            tokio::time::timeout(MATRIX_SEND_TIMEOUT, room.send(content).into_future())
+                                .await
+                        });
+                        match send_result {
+                            Ok(Ok(_)) => debug!("done"),
+                            Ok(Err(err)) => warn!("failed to send Matrix message: {}", err),
+                            Err(_) => warn!(
+                                "Matrix send timed out after {:?}, dropping packet",
+                                MATRIX_SEND_TIMEOUT
+                            ),
+                        }
                     } else {
                         warn!("no room ID set - discarding IP");
                     }
@@ -226,13 +245,16 @@ impl Component for MatrixClientComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                rt.shutdown_background();
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
+        }
+        rt.shutdown_background();
+        if stop_requested {
+            out_wakeup.unpark();
         }
         info!("exiting");
     }

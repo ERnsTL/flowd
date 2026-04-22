@@ -1,8 +1,9 @@
 use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::thread;
+use std::time::Duration;
 use openai::{chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole}, Credentials};
 
 pub struct OpenAIChatComponent {
@@ -13,6 +14,9 @@ pub struct OpenAIChatComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
 }
+
+const INITIAL_PROMPT_POLL: Duration = Duration::from_millis(50);
+const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl Component for OpenAIChatComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -88,6 +92,7 @@ impl Component for OpenAIChatComponent {
         }
         // set initial prompt
         let mut messages = vec![];
+        let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
         debug!("waiting for initial prompt IP");
         if initialprompt {
             // read initial prompt from inport
@@ -104,9 +109,26 @@ impl Component for OpenAIChatComponent {
                         tool_calls: None,
                     });
                     break;
-                } else {
-                    thread::yield_now();
                 }
+                if inn.is_abandoned() {
+                    info!("IN port closed while waiting for initial prompt, exiting");
+                    drop(out);
+                    out_wakeup.unpark();
+                    return;
+                }
+                if let Ok(sig) = self.signals_in.try_recv() {
+                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                    if sig == b"stop" {
+                        info!("got stop signal while waiting for initial prompt, exiting");
+                        drop(out);
+                        out_wakeup.unpark();
+                        return;
+                    } else if sig == b"ping" {
+                        trace!("got ping signal, responding");
+                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                    }
+                }
+                thread::sleep(INITIAL_PROMPT_POLL);
             }
         }
 
@@ -159,8 +181,23 @@ impl Component for OpenAIChatComponent {
                     // build request
                     let chat_completion = ChatCompletion::builder(&model, messages.clone()).credentials(credentials.clone()).create();
                     // send request and wait for result
-                    let returned_message_res = tokio::runtime::Runtime::new().unwrap().block_on(chat_completion); //TODO optimize
-                    let returned_message_inner = returned_message_res.expect("failed to get OpenAI response");
+                    let returned_message_res = rt.block_on(async {
+                        tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await
+                    });
+                    let returned_message_inner = match returned_message_res {
+                        Ok(Ok(message)) => message,
+                        Ok(Err(err)) => {
+                            warn!("OpenAI request failed: {}", err);
+                            continue;
+                        }
+                        Err(_) => {
+                            warn!(
+                                "OpenAI request timed out after {:?}, dropping current packet",
+                                OPENAI_REQUEST_TIMEOUT
+                            );
+                            continue;
+                        }
+                    };
                     let returned_message_inner2 = &returned_message_inner.choices[0];
                     let returned_message_inner3 = &returned_message_inner2.message;
                     // add returned message into context

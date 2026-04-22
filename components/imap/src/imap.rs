@@ -5,6 +5,7 @@ use log::{debug, error, info, trace, warn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::thread::Thread;
@@ -17,6 +18,7 @@ const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(12);
 const APPEND_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 const APPEND_QUEUE_POLL: Duration = Duration::from_millis(50);
 const APPEND_QUEUE_CAPACITY: usize = 64;
+const IMAP_CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
 const IMAP_IO_TIMEOUT: Option<Duration> = Some(Duration::from_secs(2));
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
@@ -485,7 +487,13 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
 
     // connect with explicit socket timeouts so append/fetch operations stay stoppable.
     let tls = native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().expect("failed to prepare TLS connection");
-    let tcp = std::net::TcpStream::connect((host, port)).expect("failed to connect to IMAP server");
+    let socket_addr = (host, port)
+        .to_socket_addrs()
+        .expect("failed to resolve IMAP server host")
+        .next()
+        .expect("IMAP server host resolved to no address");
+    let tcp = std::net::TcpStream::connect_timeout(&socket_addr, IMAP_CONNECT_TIMEOUT)
+        .expect("failed to connect to IMAP server");
     tcp.set_read_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP read timeout");
     tcp.set_write_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP write timeout");
     // we pass in the domain twice to check that the server's TLS certificate is valid for the domain we're connecting to.

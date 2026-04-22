@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 //use std::net::SocketAddr;
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
 use rustls::{RootCertStore, ServerConnection};
 use std::thread::{self};
@@ -21,7 +22,7 @@ pub struct TLSClientComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-//const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 65536;   // is allocated once and re-used for each read() call
@@ -110,8 +111,13 @@ impl Component for TLSClientComponent {
         // create connection
         let server_name2 = url.host_str().expect("failed to parse host from URL").to_owned().try_into().unwrap();
         let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name2).unwrap();
-        //let mut sock = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server - timeout");
-        let mut sock = TcpStream::connect(addr).expect("failed to connect to TCP server - timeout");
+        let socket_addr = addr
+            .to_socket_addrs()
+            .expect("failed to resolve TLS server host")
+            .next()
+            .expect("TLS server host resolved to no address");
+        let mut sock =
+            TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server - timeout");
         sock.set_read_timeout(READ_TIMEOUT).expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
         sock.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on TCP client");
         let mut client = rustls::Stream::new(&mut conn, &mut sock);

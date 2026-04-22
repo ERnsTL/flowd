@@ -24,6 +24,7 @@ pub struct WSClientComponent {
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
 const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
@@ -84,7 +85,39 @@ impl Component for WSClientComponent {
         */
 
         // configure
-        let (mut client, _) = tungstenite::client::connect(url_str).expect("failed to connect to WebSocket server");    //TODO hande response
+        let (connect_tx, connect_rx) =
+            std::sync::mpsc::sync_channel::<Result<_, tungstenite::Error>>(1);
+        let url_owned = url_str.to_owned();
+        thread::Builder::new()
+            .name(format!(
+                "{}/WS-connect",
+                thread::current().name().unwrap_or("WSClient")
+            ))
+            .spawn(move || {
+                let _ = connect_tx.send(tungstenite::client::connect(url_owned.as_str()));
+            })
+            .expect("failed to spawn WebSocket connect thread");
+        let (mut client, _) = match connect_rx.recv_timeout(CONNECT_TIMEOUT) {
+            Ok(Ok(ok)) => ok,
+            Ok(Err(err)) => {
+                error!("failed to connect to WebSocket server: {}", err);
+                return;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                error!(
+                    "timed out connecting to WebSocket server after {:?}",
+                    CONNECT_TIMEOUT
+                );
+                return;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                error!("WebSocket connect helper thread disconnected unexpectedly");
+                return;
+            }
+        };
+        if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
+            warn!("failed to set client socket timeouts: {}", err);
+        }
 
         // main loop
         loop {
@@ -122,20 +155,48 @@ impl Component for WSClientComponent {
 
                 for ip in chunk.into_iter() {
                     //TODO add support for Text messages
-                    client.write(Message::Binary(ip)).unwrap(); //TODO handle Result - but it is only () anyway
+                    if let Err(err) = client.write(Message::Binary(ip)) {
+                        error!("failed to write into WebSocket client: {}", err);
+                        break;
+                    }
                 }
 
-                client.flush().expect("failed to flush WebSocket client");
+                if let Err(err) = client.flush() {
+                    error!("failed to flush WebSocket client: {}", err);
+                    break;
+                }
             }
 
             // receive
             //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
             while client.can_read() {
                 debug!("got message from WebSocket, repeating...");
-                let msg = client.read().expect("failed to read from WebSocket");
-                out.push(msg.into_data()).expect("could not push into OUT");
-                out_wakeup.unpark();
-                debug!("done");
+                match client.read() {
+                    Ok(msg) => {
+                        out.push(msg.into_data()).expect("could not push into OUT");
+                        out_wakeup.unpark();
+                        debug!("done");
+                    }
+                    Err(tungstenite::Error::Io(err))
+                        if err.kind() == std::io::ErrorKind::WouldBlock
+                            || err.kind() == std::io::ErrorKind::TimedOut =>
+                    {
+                        break;
+                    }
+                    Err(tungstenite::Error::ConnectionClosed)
+                    | Err(tungstenite::Error::AlreadyClosed) => {
+                        info!("WebSocket connection closed");
+                        drop(out);
+                        out_wakeup.unpark();
+                        return;
+                    }
+                    Err(err) => {
+                        error!("failed to read from WebSocket: {}", err);
+                        drop(out);
+                        out_wakeup.unpark();
+                        return;
+                    }
+                }
             }
 
             // are we done?
@@ -199,6 +260,19 @@ impl Component for WSClientComponent {
             ..Default::default()
         }
     }
+}
+
+fn set_client_stream_timeouts(
+    stream: &mut tungstenite::stream::MaybeTlsStream<TcpStream>,
+) -> std::io::Result<()> {
+    match stream {
+        tungstenite::stream::MaybeTlsStream::Plain(sock) => {
+            sock.set_read_timeout(Some(READ_TIMEOUT))?;
+            sock.set_write_timeout(WRITE_TIMEOUT)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 pub struct WSServerComponent {

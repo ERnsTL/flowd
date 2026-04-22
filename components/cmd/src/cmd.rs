@@ -22,6 +22,7 @@ pub struct CmdComponent {
 
 enum Mode { One, Each }
 const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
+const STDIN_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 fn handoff_join(handle: std::thread::JoinHandle<()>, label: &'static str) {
     std::thread::Builder::new()
@@ -147,16 +148,22 @@ impl Component for CmdComponent {
                                 .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
                                 .expect("could not get standard output");   //TODO optimize looks like duplication from above line
                             // set up writer into child STDIN
-                            let mut writer = child
+                            let writer = child
                                 .stdin
                                 //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
                                 //.expect("could not get standard input")    //TODO optimize looks like duplication from above line
                                 .take()
                                 .expect("could not get standard input");
 
-                            // deliver the trigger IP contents into child STDIN
-                            writer.write(ip.as_slice()).expect("could not write into child STDIN");
-                            drop(writer);   // close STDIN
+                            // deliver the trigger IP contents into child STDIN on a helper thread,
+                            // so stop/ping handling remains responsive even if stdin write blocks.
+                            let stdin_thread = std::thread::spawn(move || {
+                                let mut writer = writer;
+                                writer
+                                    .write_all(ip.as_slice())
+                                    .expect("could not write into child STDIN");
+                                drop(writer); // close STDIN
+                            });
 
                             // read child STDOUT in a dedicated thread so this component can keep handling stop/ping.
                             let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
@@ -225,6 +232,24 @@ impl Component for CmdComponent {
                                     STDOUT_THREAD_JOIN_GRACE
                                 );
                                 handoff_join(stdout_thread, "CmdComponent-stdout");
+                            }
+
+                            let stdin_join_started = std::time::Instant::now();
+                            while !stdin_thread.is_finished()
+                                && stdin_join_started.elapsed() < STDIN_THREAD_JOIN_GRACE
+                            {
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            if stdin_thread.is_finished() {
+                                if let Err(err) = stdin_thread.join() {
+                                    warn!("failed to join child stdin writer thread: {:?}", err);
+                                }
+                            } else {
+                                warn!(
+                                    "child stdin writer thread did not exit within {:?}, handing off to join reaper",
+                                    STDIN_THREAD_JOIN_GRACE
+                                );
+                                handoff_join(stdin_thread, "CmdComponent-stdin");
                             }
 
                             if stop_component {

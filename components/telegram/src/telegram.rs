@@ -7,6 +7,7 @@ use teloxide::prelude::*;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::{thread, thread::Thread};
 use std::future::IntoFuture;
+use std::time::Duration;
 
 /*
 TODO harden - the bot's Telegram username associated with the bot token is a global identifier for the bot, making it possible for anybody to open a chat to the bot and thus send data into your flowd network
@@ -22,6 +23,8 @@ pub struct TelegramBotComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
 }
+
+const TELEGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Component for TelegramBotComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -99,6 +102,7 @@ impl Component for TelegramBotComponent {
         debug!("done");
 
         // main loop
+        let mut stop_requested = false;
         loop {
             trace!("begin of iteration");
             // check signals
@@ -107,6 +111,7 @@ impl Component for TelegramBotComponent {
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
                     info!("got stop signal, exiting");
+                    stop_requested = true;
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
@@ -128,8 +133,22 @@ impl Component for TelegramBotComponent {
                     let chat_id = chat_id.load(Ordering::Relaxed);
                     if chat_id != 0 {
                         //TODO add suport for handling multiple chat IDs ("clients")
-                        let req = bot_ref.send_message(ChatId(chat_id), String::from_utf8(ip).expect("failed to convert IP to UTF-8")).send().into_future();
-                        rt.block_on(req).expect("failed to send message");
+                        let text = String::from_utf8(ip).expect("failed to convert IP to UTF-8");
+                        let send_result = rt.block_on(async {
+                            tokio::time::timeout(
+                                TELEGRAM_SEND_TIMEOUT,
+                                bot_ref.send_message(ChatId(chat_id), text).send().into_future(),
+                            )
+                            .await
+                        });
+                        match send_result {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(err)) => warn!("failed to send Telegram message: {}", err),
+                            Err(_) => warn!(
+                                "Telegram send timed out after {:?}, dropping packet",
+                                TELEGRAM_SEND_TIMEOUT
+                            ),
+                        }
                     } else {
                         warn!("no chat ID set - discarding IP");
                     }
@@ -143,13 +162,16 @@ impl Component for TelegramBotComponent {
             // are we done?
             if inn.is_abandoned() {
                 info!("EOF on inport, shutting down");
-                rt.shutdown_background();
                 out_wakeup.unpark();
                 break;
             }
 
             trace!("-- end of iteration");
             std::thread::park();
+        }
+        rt.shutdown_background();
+        if stop_requested {
+            out_wakeup.unpark();
         }
         info!("exiting");
     }
