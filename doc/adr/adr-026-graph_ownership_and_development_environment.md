@@ -1,6 +1,7 @@
 # ADR-026: Graph Ownership & Development Environment Model
 
 Status: Proposed
+Date: 2026-06-22
 
 ---
 
