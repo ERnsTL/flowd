@@ -54,3 +54,6 @@ build_generated.rs
 
 # automated FBP test environment (generated in CI)
 fbp-tests/
+## tracked helper for FBP protocol tests
+!setup_fbp-tests.sh
+!run_fbp-tests.sh
