@@ -6520,6 +6520,15 @@ pub mod bench_api {
                 },
             )
             .expect("failed to add Delay.OUT -> Node.IN");
+        graph
+            .add_initialip(GraphAddinitialRequestPayload {
+                graph: name.to_string(),
+                metadata: GraphEdgeMetadata::new(None, None, None),
+                src: GraphIIPSpecNetwork { data: "?delay=50us".to_string() },
+                tgt: GraphNodeSpecNetwork { node: "Delay".to_string(), port: "CONF".to_string(), index: None },
+                secret: String::new(),
+            })
+            .expect("failed to add IIP to Delay.CONF");
 
         graph
     }
