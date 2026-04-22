@@ -3,6 +3,7 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 //use tungstenite::client::connect;
 use tungstenite::protocol::Message;
 use tungstenite::util::NonBlockingError;
@@ -23,6 +24,7 @@ pub struct WSClientComponent {
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 
 impl Component for WSClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -224,21 +226,28 @@ impl Component for WSServerComponent {
 
         // set configuration
         let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
+        listener.set_nonblocking(true).expect("failed to set non-blocking on tcp listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         // prepare variables for listen thread
         let sockets: Arc<Mutex<HashMap<u32, WebSocket<TcpStream>>>> = Arc::new(Mutex::new(HashMap::new()));
         let sockets_ref = sockets.clone();
         let out_ref = out.clone();
         let out_wakeup_ref = out_wakeup.clone();
-        //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
-        //TODO fix - the listener thread is not stopped when the component is stopped, it will continue to listen and accept connections and on network restart the listen address will be already in use
-        let _listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+        let shutdown_listen = shutdown.clone();
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads_ref = connection_threads.clone();
+        let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             // listener loop
             let mut socketnum: u32 = 0;
             loop {
+                if shutdown_listen.load(Ordering::Relaxed) {
+                    debug!("listener got shutdown signal, exiting");
+                    break;
+                }
                 debug!("listening for a client");
                 match listener.accept() {
                     Ok((socket, addr)) => {
@@ -258,14 +267,19 @@ impl Component for WSServerComponent {
                         let sockets_ref2 = sockets_ref.clone();
                         let out_ref2 = out_ref.clone();
                         let out_wakeup_ref2 = out_wakeup_ref.clone();
+                        let shutdown_conn = shutdown_listen.clone();
 
                         // handle the connection in a separate thread
-                        thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
+                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
                             let socketnum_inner = socketnum;
 
                             // receive loop and send to component OUT tagged with socketnum
                             debug!("handling client connection");
                             loop {
+                                if shutdown_conn.load(Ordering::Relaxed) {
+                                    debug!("connection handler got shutdown signal, exiting");
+                                    break;
+                                }
                                 // read from client
                                 debug!("reading from client");  //TODO fix - without the debug message, Rust will keep the lock forever even when it should only be kept for the match block and not the whole loop
                                 //TODO optimize - the real problem is that WebSocket is not cloneable
@@ -290,17 +304,22 @@ impl Component for WSServerComponent {
                             }
 
                             // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
                             debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
                         }).expect("could not start connection handler thread");
+                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
                     },
                     Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            thread::sleep(LISTENER_POLL_SLEEP);
+                            continue;
+                        }
                         error!("accept failed: {e:?} - exiting");
                         break;
                     },
                 }
             }
-        });
+        }).expect("could not start listener thread");
 
         // main loop
         debug!("entering main loop");
@@ -334,9 +353,13 @@ impl Component for WSServerComponent {
                     {
                         //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
                         //TODO optimize - lots of locking and indirection here
-                        sockets.lock().expect("lock poisoned").iter_mut().next().unwrap().1.write(Message::binary(ip)).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
-                        //TODO optimize - flush only when necessary. read chunks from FBP network and flush when all IPs in the chunk are sent
-                        sockets.lock().expect("lock poisoned").iter_mut().next().unwrap().1.flush().expect("failed to flush WebSocket to client");
+                        if let Some((_, socket)) = sockets.lock().expect("lock poisoned").iter_mut().next() {
+                            socket.write(Message::binary(ip)).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
+                            //TODO optimize - flush only when necessary. read chunks from FBP network and flush when all IPs in the chunk are sent
+                            socket.flush().expect("failed to flush WebSocket to client");
+                        } else {
+                            debug!("no connected clients, dropping response packet");
+                        }
                     }
                     debug!("done");
                 } else {
@@ -349,6 +372,13 @@ impl Component for WSServerComponent {
 
             trace!("end of iteration");
             std::thread::park();
+        }
+        shutdown.store(true, Ordering::Relaxed);
+        listen_thread.join().expect("failed to join listener thread");
+        for handle in connection_threads.lock().expect("lock poisoned").drain(..) {
+            if let Err(err) = handle.join() {
+                warn!("failed to join websocket connection handler thread: {:?}", err);
+            }
         }
         info!("exiting");
     }
