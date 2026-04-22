@@ -4,6 +4,7 @@ use log::{debug, error, info, trace, warn};
 // component-specific
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, OnceLock};
 //use std::net::SocketAddr;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
@@ -28,6 +29,28 @@ const READ_BUFFER: usize = 65536;   // is allocated once and re-used for each re
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
 const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
+
+fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
+        thread::Builder::new()
+            .name("tls-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn tls join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
+}
 
 impl Component for TLSClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -558,12 +581,10 @@ impl Component for TLSServerComponent {
             }
         } else {
             warn!(
-                "tlsserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
+                "tlsserver: listener thread did not exit within {:?}, handing off to join reaper",
                 LISTENER_JOIN_GRACE
             );
-            if let Err(err) = listen_thread.join() {
-                warn!("tlsserver: listener thread join after grace returned error: {:?}", err);
-            }
+            handoff_join(listen_thread, "tlsserver-listener");
         }
 
         let handles = {
@@ -581,12 +602,10 @@ impl Component for TLSServerComponent {
                 }
             } else {
                 warn!(
-                    "tlsserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
+                    "tlsserver: connection handler thread did not exit within {:?}, handing off to join reaper",
                     CONNECTION_JOIN_GRACE
                 );
-                if let Err(err) = handle.join() {
-                    warn!("tlsserver: connection handler join after grace returned error: {:?}", err);
-                }
+                handoff_join(handle, "tlsserver-connection");
             }
         }
         info!("exiting");

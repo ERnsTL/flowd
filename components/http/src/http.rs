@@ -5,7 +5,7 @@ use log::{debug, trace, info, warn};
 use std::convert::Infallible;
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use std::thread::{self};
 use std::time::{Duration, Instant};
 use hyper::{Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer, StatusCode};
@@ -13,6 +13,28 @@ use hyper::service::{make_service_fn, service_fn};
 use tokio::sync::oneshot;
 
 const SERVER_JOIN_GRACE: Duration = Duration::from_secs(5);
+
+fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
+        thread::Builder::new()
+            .name("http-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn http join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
+}
 
 pub struct HTTPClientComponent {
     req: ProcessEdgeSource,
@@ -388,10 +410,10 @@ impl Component for HTTPServerComponent {
             }
         } else {
             warn!(
-                "HTTPServer: server thread did not exit within {:?}, detaching",
+                "HTTPServer: server thread did not exit within {:?}, handing off to join reaper",
                 SERVER_JOIN_GRACE
             );
-            drop(server_thread);
+            handoff_join(server_thread, "HTTPServer");
         }
         info!("exiting");
     }

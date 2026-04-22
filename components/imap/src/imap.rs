@@ -5,6 +5,7 @@ use log::{debug, error, info, trace, warn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::thread::Thread;
@@ -17,6 +18,29 @@ const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(12);
 const APPEND_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 const APPEND_QUEUE_POLL: Duration = Duration::from_millis(50);
 const APPEND_QUEUE_CAPACITY: usize = 64;
+const IMAP_IO_TIMEOUT: Option<Duration> = Some(Duration::from_secs(2));
+
+fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
+        thread::Builder::new()
+            .name("imap-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn imap join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
+}
 
 pub struct IMAPAppendComponent {
     conf: ProcessEdgeSource,
@@ -214,10 +238,10 @@ impl Component for IMAPAppendComponent {
             }
         } else {
             warn!(
-                "IMAPAppend: append worker thread did not exit within {:?}, detaching",
+                "IMAPAppend: append worker thread did not exit within {:?}, handing off to join reaper",
                 APPEND_THREAD_JOIN_GRACE
             );
-            drop(append_worker);
+            handoff_join(append_worker, "IMAPAppend");
         }
 
         info!("exiting");
@@ -388,10 +412,10 @@ impl Component for IMAPFetchIdleComponent {
             }
         } else {
             warn!(
-                "IMAPFetchIdle: event handler thread did not exit within {:?}, detaching",
+                "IMAPFetchIdle: event handler thread did not exit within {:?}, handing off to join reaper",
                 EVENT_THREAD_JOIN_GRACE
             );
-            drop(event_handler_thread);
+            handoff_join(event_handler_thread, "IMAPFetchIdle");
         }
 
         // inform downstream
@@ -471,12 +495,16 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
     //  also see https://users.rust-lang.org/t/rust-format-max-width/100096
     debug!("user={}  pass={}...  host={}  mailbox={}", user, password.chars().into_iter().take(3).collect::<String>(), host, mailbox);
 
-    // connect
+    // connect with explicit socket timeouts so append/fetch operations stay stoppable.
     let tls = native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().expect("failed to prepare TLS connection");
-
+    let tcp = std::net::TcpStream::connect((host, port)).expect("failed to connect to IMAP server");
+    tcp.set_read_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP read timeout");
+    tcp.set_write_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP write timeout");
     // we pass in the domain twice to check that the server's TLS certificate is valid for the domain we're connecting to.
     //NOTE: if getting authentication errors, check for special characters in URL parts, maybe a .to_ascii() is necessary because of URL-escaping
-    let client = imap::connect((host, port), host, &tls).expect("failed to connect to IMAP server");
+    let tls_stream = native_tls::TlsConnector::connect(&tls, host, tcp).expect("failed to establish TLS to IMAP server");
+    let mut client = imap::Client::new(tls_stream);
+    client.read_greeting().expect("failed to read IMAP server greeting");
 
     // the client we have here is unauthenticated.
     // to do anything useful with the e-mails, we need to log in

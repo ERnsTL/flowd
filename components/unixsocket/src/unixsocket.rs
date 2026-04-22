@@ -4,6 +4,7 @@ use log::{debug, trace, info, warn, error};
 // component-specific
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, OnceLock};
 /*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;
@@ -29,6 +30,28 @@ pub struct UnixSocketClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+}
+
+fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
+        thread::Builder::new()
+            .name("unixsocket-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn unixsocket join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
 }
 
 /*
@@ -560,12 +583,10 @@ impl Component for UnixSocketServerComponent {
             }
         } else {
             warn!(
-                "unixsocketserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
+                "unixsocketserver: listener thread did not exit within {:?}, handing off to join reaper",
                 LISTENER_JOIN_GRACE
             );
-            if let Err(err) = listen_thread.join() {
-                warn!("unixsocketserver: listener thread join after grace returned error: {:?}", err);
-            }
+            handoff_join(listen_thread, "unixsocketserver-listener");
         }
 
         let handles = {
@@ -583,12 +604,10 @@ impl Component for UnixSocketServerComponent {
                 }
             } else {
                 warn!(
-                    "unixsocketserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
+                    "unixsocketserver: connection handler thread did not exit within {:?}, handing off to join reaper",
                     CONNECTION_JOIN_GRACE
                 );
-                if let Err(err) = handle.join() {
-                    warn!("unixsocketserver: connection handler join after grace returned error: {:?}", err);
-                }
+                handoff_join(handle, "unixsocketserver-connection");
             }
         }
         debug!("cleaning up");

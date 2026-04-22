@@ -6,6 +6,7 @@ use std::ffi::{OsStr,OsString};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::sync::mpsc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use lexopt::prelude::*;
 
@@ -22,6 +23,28 @@ pub struct CmdComponent {
 
 enum Mode { One, Each }
 const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
+
+fn handoff_join(handle: std::thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(std::thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(std::thread::JoinHandle<()>, &'static str)>();
+        std::thread::Builder::new()
+            .name("cmd-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn cmd join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
+}
 
 impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -210,10 +233,10 @@ impl Component for CmdComponent {
                                 }
                             } else {
                                 warn!(
-                                    "child stdout reader thread did not exit within {:?}, detaching",
+                                    "child stdout reader thread did not exit within {:?}, handing off to join reaper",
                                     STDOUT_THREAD_JOIN_GRACE
                                 );
-                                drop(stdout_thread);
+                                handoff_join(stdout_thread, "CmdComponent-stdout");
                             }
 
                             if stop_component {

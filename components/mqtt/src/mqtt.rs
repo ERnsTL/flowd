@@ -7,6 +7,7 @@ use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, OnceLock};
 
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
@@ -19,6 +20,28 @@ pub struct MQTTPublisherComponent {
 const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
 const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
 const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
+
+fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
+    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
+        OnceLock::new();
+    let tx = JOIN_REAPER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
+        thread::Builder::new()
+            .name("mqtt-join-reaper".to_owned())
+            .spawn(move || {
+                while let Ok((handle, lbl)) = rx.recv() {
+                    if let Err(err) = handle.join() {
+                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
+                    }
+                }
+            })
+            .expect("failed to spawn mqtt join reaper");
+        tx
+    });
+    if let Err(err) = tx.send((handle, label)) {
+        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
+    }
+}
 
 impl Component for MQTTPublisherComponent {
     fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -225,10 +248,10 @@ impl Component for MQTTPublisherComponent {
             }
         } else {
             warn!(
-                "MQTTPublisher: eventloop listener thread did not exit within {:?}, detaching",
+                "MQTTPublisher: eventloop listener thread did not exit within {:?}, handing off to join reaper",
                 EVENT_THREAD_JOIN_GRACE
             );
-            drop(event_handler_thread);
+            handoff_join(event_handler_thread, "MQTTPublisher");
         }
 
         info!("exiting");
