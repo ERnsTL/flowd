@@ -297,8 +297,18 @@ impl Component for WSServerComponent {
                                 }
                                 // read from client
                                 debug!("reading from client");  //TODO fix - without the debug message, Rust will keep the lock forever even when it should only be kept for the match block and not the whole loop
-                                //TODO optimize - the real problem is that WebSocket is not cloneable
-                                match sockets_ref2.lock().expect("lock poisoned").iter_mut().next().expect("failed to get entry from socket hashmap").1.read() {
+                                // Read from this handler's own connection.
+                                let read_result = {
+                                    let mut sockets_locked = sockets_ref2.lock().expect("lock poisoned");
+                                    match sockets_locked.get_mut(&socketnum_inner) {
+                                        Some(socket) => socket.read(),
+                                        None => {
+                                            debug!("socket {} already removed, exiting connection handler", socketnum_inner);
+                                            break;
+                                        }
+                                    }
+                                };
+                                match read_result {
                                     Ok(message) => {
                                         debug!("got message from client, pushing data to OUT");
                                         out_ref2.lock().expect("lock poisoned").push(message.into_data()).expect("could not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
