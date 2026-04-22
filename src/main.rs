@@ -1590,9 +1590,8 @@ impl RuntimeRuntimePayload {
         let watchdog_graph_inout = graph_inout_arc.clone();
         // prepare runtime reference for watchdong stopping the network
         let watchdog_runtime = runtime;
-        // prepare holder of the signal back-channel for the watchdog thread
-        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread, Arc<AtomicBool>)> = HashMap::new();
-        let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+        // prepare per-process watchdog control + response channels
+        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread, Arc<AtomicBool>, ProcessSignalSource, bool)> = HashMap::new();
 
         // arrayports: check if multiple edges originate from the same source port
         // and verify that port is declared as arrayport.
@@ -1847,7 +1846,7 @@ impl RuntimeRuntimePayload {
             let component_name = node.component.clone();
             let joinhandlesref = thread_wake_handles.clone();
             //let ports_this_wake_notify = ports_this.wake_notify.clone();
-            let watchdog_signalsink_clone = watchdog_signalsink.clone();
+            let (watchdog_signalsink_clone, watchdog_signalsource_clone) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
             let graph_inout_ref = graph_inout_arc.clone();
             let process_exited = Arc::new(AtomicBool::new(false));
             let process_exited_in_thread = process_exited.clone();
@@ -1883,12 +1882,9 @@ impl RuntimeRuntimePayload {
             thread_wake_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
             //thread_wake_handles.insert(proc_name.clone(), ports_this.wake_notify);
             // store process signal channel and thread handle for watchdog thread
-            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone(), process_exited));
+            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone(), process_exited, watchdog_signalsource_clone, true));
             // store process signal channel and join handle
-            self.processes.insert(proc_name.clone(), Process {
-                signal: signalsink,
-                joinhandle: joinhandle,
-            });
+            self.processes.insert(proc_name.clone(), Process { signal: signalsink, joinhandle: joinhandle });
         }
         // work off graphname-IN and graphname-OUT special processes for graph inports and graph outports
         //TODO the signal channel and joinhandle of the graph outport process/thread could also simply be stored in the processes variable with all other FBP processes
@@ -1929,6 +1925,7 @@ impl RuntimeRuntimePayload {
                 //let ports_this_wake_notify = ports_this.wake_notify.clone();
                 let graph_out_exited = Arc::new(AtomicBool::new(false));
                 let graph_out_exited_in_thread = graph_out_exited.clone();
+                let (_watchdog_graph_out_signalsink, watchdog_graph_out_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
                     // marks graph out handler as exited even when unwinding from panic
                     let _thread_exit_flag = ThreadExitFlag::new(graph_out_exited_in_thread);
@@ -2009,7 +2006,7 @@ impl RuntimeRuntimePayload {
                 // store process signal channel and thread handle for watchdog thread
                 watchdog_threadandsignal.insert(
                     format!("{}-OUT", graph.properties.name),
-                    (signalsink.clone(), joinhandle.thread().clone(), graph_out_exited),
+                    (signalsink.clone(), joinhandle.thread().clone(), graph_out_exited, watchdog_graph_out_signalsource, false),
                 );
                 // store process signal channel and join handle so that the other processes writing into this graph outport component can find it
                 self.processes.insert(format!("{}-OUT", graph.properties.name), Process {
@@ -2075,6 +2072,10 @@ impl RuntimeRuntimePayload {
                         ok = false;
                         continue;
                     }
+                    if !proc.4 {
+                        // this process does not support watchdog ping/pong health checks
+                        continue;
+                    }
                     // send query to process
                     match proc.0.try_send(b"ping".to_vec()) {
                         Ok(_) => {},
@@ -2098,7 +2099,7 @@ impl RuntimeRuntimePayload {
                     now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
 
                     // read response
-                    match watchdog_signalsource.recv_timeout(core::time::Duration::from_millis(1000)) {
+                    match proc.3.recv_timeout(core::time::Duration::from_millis(1000)) {
                         Ok(ip) => {
                             if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
                                 trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
