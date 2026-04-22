@@ -2140,6 +2140,19 @@ impl RuntimeRuntimePayload {
                 }
             }
 
+            // stop watchdog first so it cannot continue filling process signal channels with pings
+            info!("stop: signaling watchdog");
+            if let Some(watchdog_channel) = self.watchdog_channel.take() {
+                watchdog_channel
+                    .send(b"stop".to_vec())
+                    .expect("could not send stop signal to watchdog thread");
+            } else {
+                warn!("stop: watchdog channel missing");
+            }
+            if let Some(watchdog_thread) = &self.watchdog_thread {
+                watchdog_thread.thread().unpark();
+            }
+
             // signal all threads
             info!("stop: signaling all processes...");
             for (name, proc) in self.processes.iter() {
