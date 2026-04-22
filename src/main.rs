@@ -2157,14 +2157,24 @@ impl RuntimeRuntimePayload {
             info!("stop: signaling all processes...");
             for (name, proc) in self.processes.iter() {
                 info!("stop: signaling {}", name);
-                proc.signal.send(b"stop".to_vec()).expect("channel send failed");   //TODO change to try_send() for reliability  //TODO optimize conversion of "stop"
-                proc.joinhandle.thread().unpark();  // wake up for reception
+                // wake first, then send stop non-blocking to avoid deadlock on full bounded channels
+                proc.joinhandle.thread().unpark();
+                let mut pending = b"stop".to_vec();
+                loop {
+                    match proc.signal.try_send(pending) {
+                        Ok(()) => {
+                            proc.joinhandle.thread().unpark();
+                            break;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                            pending = returned;
+                            proc.joinhandle.thread().unpark();
+                            thread::yield_now();
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+                    }
+                }
             }
-            // signal watchdog thread
-            info!("stop: signaling watchdog");
-            self.watchdog_channel.take().expect("watchdog channel is None? wtf").send(b"stop".to_vec()).expect("could not send stop signal to watchdog thread");
-            let watchdog_thread = self.watchdog_thread.take().expect("watchdog thread is None? wtf");
-            watchdog_thread.thread().unpark();
             info!("done");
 
             // join all threads
@@ -2176,9 +2186,7 @@ impl RuntimeRuntimePayload {
             }
             info!("done");
             // join watchdog thread
-            //info!("stop: joining watchdog");
-            //TODO cannot wait for join because otherwise noflo-ui shows a timeout
-            //watchdog_thread.join().expect("watchdog thread join failed");
+            self.watchdog_thread.take();
         }
 
         // set status
