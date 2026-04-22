@@ -255,3 +255,13 @@ name = "MatrixClient"
 crate = "flowd-matrix"
 struct = "MatrixClientComponent"
 log_ignore = ["matrix_sdk"] #TODO optimize - this sends alot of messages about Matrix protocol messages, can this be shut off "at the source"?
+
+[[components.entry]]
+name = "Demux3"
+crate = "flowd-muxer"
+struct = "Demux3Component"
+
+[[components.entry]]
+name = "Delay"
+crate = "flowd-delay"
+struct = "DelayComponent"
