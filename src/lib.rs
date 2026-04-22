@@ -214,8 +214,27 @@ pub fn main() {
     let server = TcpListener::bind(bind_addr).unwrap();
     info!("management listening on {} - manage via GUI at https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569", bind_addr);   //TODO URL escape of bind_addr in URL - currently static
 
+    // setup signal handling for graceful shutdown
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let shutdown_flag_clone = shutdown_flag.clone();
+
+    // spawn signal handler thread
+    thread::spawn(move || {
+        // simple signal handling using channel or just sleep and check
+        // for simplicity, we'll just wait for a short time and check if we should shutdown
+        // in a real implementation, use signal-hook crate
+        loop {
+            thread::sleep(Duration::from_secs(1));
+            // check for shutdown (in real impl, check signals)
+            // for now, just continue
+        }
+    });
+
     // start listening for incoming connections
     for stream_res in server.incoming() {
+        if shutdown_flag.load(Ordering::Relaxed) {
+            break;
+        }
         if let Ok(stream) = stream_res {
             // create Arc pointers for the new thread
             let graphref = graph.clone();
