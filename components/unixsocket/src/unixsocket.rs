@@ -55,6 +55,7 @@ enum SocketType {
 
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
+const DEFAULT_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 
 impl Component for UnixSocketClientComponent {
@@ -412,6 +413,7 @@ impl Component for UnixSocketServerComponent {
                         println!("handling client: {addr:?}");
                         socketnum += 1;
                         socket.set_read_timeout(Some(DEFAULT_READ_TIMEOUT)).expect("failed to set read timeout on unix socket");
+                        socket.set_write_timeout(DEFAULT_WRITE_TIMEOUT).expect("failed to set write timeout on unix socket");
                         sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
                         let sockets_ref2 = Arc::clone(&sockets_ref);
                         let out_ref2 = Arc::clone(&out_ref);
@@ -499,8 +501,30 @@ impl Component for UnixSocketServerComponent {
 
                     // send into unix socket to peer
                     //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    if let Some((_, socket)) = sockets.lock().expect("lock poisoned").iter_mut().next() {
-                        socket.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
+                    let mut sockets_locked = sockets.lock().expect("lock poisoned");
+                    if let Some(socket_id) = sockets_locked.keys().next().copied() {
+                        let write_res = sockets_locked
+                            .get_mut(&socket_id)
+                            .expect("socket id vanished unexpectedly while writing")
+                            .write_all(&ip);
+                        match write_res {
+                            Ok(_) => {}
+                            Err(err) => {
+                                match err.kind() {
+                                    ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                        warn!("unixsocketserver: timed out writing response to client {}, dropping packet", socket_id);
+                                    }
+                                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
+                                        warn!("unixsocketserver: dropping disconnected client {} after write error: {}", socket_id, err);
+                                        let _ = sockets_locked.remove(&socket_id);
+                                    }
+                                    _ => {
+                                        warn!("unixsocketserver: write to client {} failed: {}, dropping client", socket_id, err);
+                                        let _ = sockets_locked.remove(&socket_id);
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         debug!("no connected clients, dropping response packet");
                     }
