@@ -7,12 +7,24 @@ use std::time::Duration;
 
 fn parse_delay(s: &str) -> Result<Duration, String> {
     let s = s.trim();
-    if let Ok(num) = s.parse::<u64>() {
+
+    // Handle URL format: ?delay=50us
+    let delay_value = if s.starts_with('?') {
+        if let Some(delay_part) = s.strip_prefix("?delay=") {
+            delay_part
+        } else {
+            return Err("invalid URL format, expected ?delay=<value>".to_string());
+        }
+    } else {
+        s
+    };
+
+    if let Ok(num) = delay_value.parse::<u64>() {
         return Ok(Duration::from_micros(num));
     }
     let mut num_str = String::new();
     let mut unit = String::new();
-    for c in s.chars() {
+    for c in delay_value.chars() {
         if c.is_digit(10) || c == '.' {
             num_str.push(c);
         } else {
