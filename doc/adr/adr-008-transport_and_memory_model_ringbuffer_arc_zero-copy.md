@@ -415,6 +415,37 @@ Rejected
 
 ---
 
+### Alternative 7: Unix IPC Mechanisms (Multiple Processes)
+
+**Evaluated Options:**
+
+* Multiple processes communicating via Unix domain sockets
+* File-based queues (like NiFi)
+* POSIX message queues
+
+**Pros:**
+
+* Process isolation and fault containment
+* Allows separate deployment and scaling of components
+* Familiar Unix programming model
+* Works across different programming languages
+
+**Cons:**
+
+* High overhead from process context switches
+* Kernel transitions for all communication (syscalls)
+* Serialization/deserialization required between processes
+* No zero-copy data transfer
+* Complex process management and lifecycle handling
+* Difficult to implement backpressure across process boundaries
+* Performance degradation under high message rates
+
+**Decision:**
+
+Rejected - violates core performance requirements. Process switches and syscall overhead make this unsuitable for high-performance dataflow. In-process ringbuffer transport combined with native threads or green threads provides orders of magnitude better performance while maintaining isolation through other means (ADR-018).
+
+---
+
 ## Consequences
 
 ---
