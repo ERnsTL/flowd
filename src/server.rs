@@ -14,7 +14,7 @@ use crate::{
     ComponentComponentsreadyMessage, NetworkStatusMessage, NetworkStatusPayload,
     NetworkPersistResponse, NetworkErrorResponse, ComponentSourceMessage,
     GraphErrorResponse, GraphClearResponse, RuntimePacketRequestPayload,
-    RuntimePacketEvent, must_not_block, CLIENT_BROADCAST_WRITE_TIMEOUT,
+    RuntimePacketEvent, CLIENT_BROADCAST_WRITE_TIMEOUT,
     GraphAddnodeResponse, GraphRemovenodeResponse, GraphRenamenodeResponse,
     GraphChangenodeResponse, GraphAddedgeResponse, GraphRemoveedgeResponse,
     GraphChangeedgeResponse, GraphAddinitialResponse, GraphRemoveinitialResponse,
@@ -34,6 +34,13 @@ use crate::{
     NetworkProcesserrorResponse, NetworkOutputResponse, send_runtime_packet,
     send_network_stopped, send_network_output, send_network_error, send_network_data,
 };
+
+fn must_not_block<Role: tungstenite::handshake::HandshakeRole>(err: tungstenite::HandshakeError<Role>) -> tungstenite::Error {
+    match err {
+        tungstenite::HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
+        tungstenite::HandshakeError::Failure(f) => f,
+    }
+}
 
 pub struct FlowdServer {
     bind_addr: String,

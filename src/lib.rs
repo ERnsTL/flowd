@@ -9,10 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, Thread};
 
 // network and WebSocket
-use std::net::{TcpListener, TcpStream};
-use tungstenite::handshake::server::{Request, Response};
-use tungstenite::handshake::HandshakeRole;
-use tungstenite::{accept_hdr, Error, HandshakeError, Message, Result};
+use std::net::TcpStream;
+use tungstenite::Message;
 
 // persistence
 use std::io::prelude::*;
@@ -68,12 +66,7 @@ impl<T: Component> RunnableComponent for T {
     }
 }
 
-fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
-    match err {
-        HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
-        HandshakeError::Failure(f) => f,
-    }
-}
+
 
 fn run_graph(runtime: Arc<RwLock<RuntimeRuntimePayload>>, graph: Arc<RwLock<Graph>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
     let graph_guard = graph.read().expect("lock poisoned");
