@@ -84,6 +84,7 @@ This file contains things that are unexpected, undocumented, in need of clarific
 
 - There is no graph:list
 - There is no real graph:delete, only graph:clear
+- graph:subscribe and graph:unsubscribe [were removed](https://github.com/flowbased/fbp-protocol/commit/8670715975638f58b9ce0e29801c15ed205d4b8a).
 
 If you want, I can draft a compact “missing normative spec” checklist you could use to harden your own runtime contract (ordering rules, correlation requirements, timeout semantics, idempotency, and error causality).
 
