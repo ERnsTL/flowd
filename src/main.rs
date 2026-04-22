@@ -2171,12 +2171,19 @@ impl RuntimeRuntimePayload {
                 } else if watchdog_threadandsignal.is_empty() {
                     // network has effectively shut down
                     info!("process health check: all processes exited, shutting down network");
-                    // signal runtime; if stop fails, keep watchdog alive and report best-effort status
-                    let stop_err = {
-                        let mut runtime_write = watchdog_runtime
-                            .write()
-                            .expect("watchdog failed to acquire lock for runtime");
-                        runtime_write.stop(watchdog_graph_inout.clone(), true).err()
+                    // signal runtime; if stop fails, keep watchdog alive and report best-effort status.
+                    // Use non-blocking lock acquisition to avoid deadlocking with concurrent network:stop,
+                    // which already holds runtime.write() and may wait for watchdog join.
+                    let stop_err = match watchdog_runtime.try_write() {
+                        Ok(mut runtime_write) => runtime_write.stop(watchdog_graph_inout.clone(), true).err(),
+                        Err(std::sync::TryLockError::WouldBlock) => {
+                            info!("watchdog: runtime lock busy during all-exited shutdown; external stop is likely in progress, exiting watchdog loop");
+                            break;
+                        }
+                        Err(std::sync::TryLockError::Poisoned(_)) => {
+                            warn!("watchdog: runtime lock poisoned during all-exited shutdown");
+                            break;
+                        }
                     };
                     if let Some(err) = stop_err {
                         warn!("watchdog: runtime.stop() returned error: {}", err);
