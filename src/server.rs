@@ -1625,7 +1625,7 @@ impl FlowdServer {
                                     log::info!("response: sending network:started response");
                                     websocket
                                         .send(Message::text(
-                                            serde_json::to_string(&NetworkStartedResponse::new(&runtime_status.status))
+                                            serde_json::to_string(&NetworkStartedResponse::new(runtime_status.status.clone()))
                                                 .expect("failed to serialize network:started response"),
                                         ))
                                         .expect("failed to write message into websocket");

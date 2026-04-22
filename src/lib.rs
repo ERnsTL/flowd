@@ -2623,14 +2623,14 @@ struct NetworkStartRequestPayload {
 }
 
 #[derive(Serialize, Debug)]
-struct NetworkStartedResponse<'a> {
+struct NetworkStartedResponse {
     protocol: String,
     command: String,
-    payload: &'a NetworkStartedResponsePayload,
+    payload: NetworkStartedResponsePayload,
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 struct NetworkStartedResponsePayload {
     #[serde(rename = "time")]
     time_started: UtcTime, //TODO clarify spec: defined as just a String. But what time format? meaning of the field anyway?
@@ -2664,14 +2664,12 @@ impl Serialize for UtcTime {
     }
 }
 
-impl Default for NetworkStartedResponse<'_> {
+impl Default for NetworkStartedResponse {
     fn default() -> Self {
         NetworkStartedResponse {
             protocol: String::from("network"),
             command: String::from("started"),
-            //TODO fix; using recursive Default::default() because the following does not work:
-            //payload: &NetworkStartedResponsePayload::default(),
-            ..Default::default()
+            payload: NetworkStartedResponsePayload::default(),
         }
     }
 }
@@ -2688,8 +2686,8 @@ impl Default for NetworkStartedResponsePayload {
     }
 }
 
-impl<'a> NetworkStartedResponse<'a> {
-    fn new(status: &'a NetworkStartedResponsePayload) -> Self {
+impl NetworkStartedResponse {
+    fn new(status: NetworkStartedResponsePayload) -> Self {
         NetworkStartedResponse {
             protocol: String::from("network"),
             command: String::from("started"),
