@@ -2202,16 +2202,28 @@ impl RuntimeRuntimePayload {
             }
             info!("done");
 
-            // join all threads
-            //TODO what if one of them wont join? hangs? -> kill, how much time to give?
-            info!("stop: joining all threads...");
-            for (name, proc) in self.processes.drain() {
-                info!("stop: joining {}", name);
-                proc.joinhandle.join().expect("thread join failed"); //TODO there is .thread() -> for killing
+        // join all threads
+        //TODO what if one of them wont join? hangs? -> kill, how much time to give?
+        info!("stop: joining all threads...");
+        for (name, proc) in self.processes.drain() {
+            info!("stop: joining {}", name);
+            if let Err(err) = proc.joinhandle.join() {
+                warn!("stop: joining {} returned error: {:?}", name, err);
+            } //TODO there is .thread() -> for killing
+        }
+        info!("done");
+
+        // join watchdog thread (unless stop() was called from watchdog itself)
+        if let Some(watchdog_thread) = self.watchdog_thread.take() {
+            if watchdog_all_exited {
+                // called from watchdog thread itself; dropping handle detaches and avoids self-join deadlock
+                info!("stop: watchdog self-stop acknowledged");
+            } else {
+                info!("stop: joining watchdog");
+                if let Err(err) = watchdog_thread.join() {
+                    warn!("stop: joining watchdog returned error: {:?}", err);
+                }
             }
-            info!("done");
-            // join watchdog thread
-            self.watchdog_thread.take();
         }
 
         // set status
