@@ -2508,7 +2508,10 @@ impl RuntimeRuntimePayload {
         // set status
         info!("network is shut down.");
         self.status.graph = self.graph.clone();
-        self.status.started = false;
+        // Preserve "started=true, running=false" for watchdog-driven auto-finish:
+        // fbp-protocol expects this when a short-lived network already completed
+        // by the time network:getstatus is queried right after network:start.
+        self.status.started = watchdog_all_exited;
         self.status.running = false;    // was started, but not running any more
         Ok(&self.status)
     }
