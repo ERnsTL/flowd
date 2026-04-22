@@ -245,7 +245,10 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
         if let Err(err) = cloned_stream.set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
             warn!("set_write_timeout call failed on cloned stream: {:?}", err);
         }
-        graph_inout.lock().expect(r#"could not acquire lock for saving TcpStream for graph outport process"#).websockets.insert(peer_addr, tungstenite::WebSocket::from_raw_socket(cloned_stream, tungstenite::protocol::Role::Server, None));
+        graph_inout.lock().expect(r#"could not acquire lock for saving TcpStream for graph outport process"#).websockets.insert(
+                peer_addr,
+                Arc::new(Mutex::new(tungstenite::WebSocket::from_raw_socket(cloned_stream, tungstenite::protocol::Role::Server, None))),
+            );
     }
 
     let callback = |req: &Request, mut response: Response| {
@@ -1944,7 +1947,7 @@ impl RuntimeRuntimePayload {
                     // inform FBP Network Protocol clients that graphout ports are now connected (runtime:packet event type = connect)
                     //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
                     for port_name in inports.keys() {
-                        graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new_connect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
+                        send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new_connect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
                     }
 
                     // read IPs
@@ -1973,7 +1976,7 @@ impl RuntimeRuntimePayload {
                                     // send out to FBP network protocol client
                                     debug!("sending out to client...");
                                     //TODO optimize lock only once for all packets available in inport buffer
-                                    graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new(RuntimePacketResponsePayload {
+                                    send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new(RuntimePacketResponsePayload {
                                         port: port_name.clone(),    //TODO optimize
                                         event: RuntimePacketEvent::Data,
                                         typ: None,   //TODO implement properly, OTOH it is an optional field
@@ -1997,7 +2000,7 @@ impl RuntimeRuntimePayload {
                     //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
                     info!("notifying clients of graph outports disconnect");
                     for port_name in inports.keys() {
-                        graph_inoutref.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new_disconnect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
+                        send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new_disconnect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
                     }
 
                     info!("exiting");
@@ -2200,7 +2203,7 @@ impl RuntimeRuntimePayload {
                         let runtime_read = watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime");
                         NetworkStoppedResponse::new(&runtime_read.status)
                     };
-                    watchdog_graph_inout.lock().expect("lock poisoned").send_network_stopped(&stopped_packet);
+                    send_network_stopped(&watchdog_graph_inout, &stopped_packet);
                     // exit thread
                     break;
                 }
@@ -2220,8 +2223,10 @@ impl RuntimeRuntimePayload {
         // all set, now "open the doors" = inform FBP Network Protocol clients / remote runtimes that the graph inports are now connected as well (runtime:packet event type = connect)
         // check if graph has inports
         if let Some(inports) = &graph_inout.inports {
-            for port_name in inports.keys().cloned().collect::<Vec<_>>() {  //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
-                graph_inout.send_runtime_packet(&RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
+            let inport_names = inports.keys().cloned().collect::<Vec<_>>(); //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
+            drop(graph_inout);
+            for port_name in inport_names {
+                send_runtime_packet(&graph_inout_arc, &RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
             }
         }
 
@@ -2253,7 +2258,7 @@ impl RuntimeRuntimePayload {
             if !inport_names.is_empty() {
                 info!("notifying clients of graph inports disconnect");
                 for port_name in inport_names {
-                    graph_inout.lock().expect("lock poisoned").send_runtime_packet(&RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+                    send_runtime_packet(&graph_inout, &RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
                 }
             }
 
@@ -2489,7 +2494,7 @@ struct GraphInportOutportHolder {
     outports: Option<Process>,
 
     // connected client websockets ready to send responses to connected clients, for graphout process
-    websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>,
+    websockets: HashMap<std::net::SocketAddr, Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>,
     // benchmark hook to observe runtime packets without websocket transport
     packet_tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>,
 }
@@ -2498,64 +2503,105 @@ struct GraphInportOutportHolder {
 impl GraphInportOutport for GraphInportOutportHolder {}
 
 impl GraphInportOutportHolder {
-    fn send_json_to_clients<T: Serialize>(&mut self, packet: &T, packet_name: &str) {
-        let msg = serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
-        self.websockets.retain(|addr, client| {
-            if let Err(err) = client.get_mut().set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
-                warn!("failed to set websocket client {} write timeout: {}", addr, err);
-            }
-            match client.write(Message::text(msg.clone())) {
-                Ok(_) => true,
-                Err(err) => {
-                    warn!(
-                        "dropping websocket client {} after failed {} send: {}",
-                        addr, packet_name, err
-                    );
-                    false
-                }
-            }
-        });
-    }
-
-    // should not be used by components but only by GraphOutHandler (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
-    fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
-        if let Some(tap) = &self.packet_tap {
-            let _ = tap.try_send(packet.payload.clone());
-        }
-        //TODO add capabilities check for each client!
-        self.send_json_to_clients(packet, "runtime:packet");
-    }
-
     fn set_packet_tap(&mut self, tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>) {
         self.packet_tap = tap;
     }
+}
 
-    //###
-    // should not be used by components but only by watchdog (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
-    fn send_network_stopped(&mut self, packet: &NetworkStoppedResponse) {
-        //TODO add capabilities check for each client!
-        self.send_json_to_clients(packet, "network:stopped");
+fn broadcast_to_clients<T: Serialize>(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &T,
+    packet_name: &str,
+) {
+    let msg = serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
+    let clients = {
+        let graph_inout_locked = graph_inout.lock().expect("lock poisoned");
+        graph_inout_locked
+            .websockets
+            .iter()
+            .map(|(addr, client)| (*addr, Arc::clone(client)))
+            .collect::<Vec<_>>()
+    };
+
+    let mut failed_clients = Vec::new();
+    for (addr, client) in clients {
+        let mut client = match client.lock() {
+            Ok(client) => client,
+            Err(err) => {
+                warn!(
+                    "dropping websocket client {} after {} lock poison: {}",
+                    addr, packet_name, err
+                );
+                failed_clients.push(addr);
+                continue;
+            }
+        };
+        match client.write(Message::text(msg.clone())) {
+            Ok(_) => {}
+            Err(err) => {
+                warn!(
+                    "dropping websocket client {} after failed {} send: {}",
+                    addr, packet_name, err
+                );
+                failed_clients.push(addr);
+            }
+        }
     }
 
-    // like STDOUT.println() - to be used by processes
-    fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
-        //TODO add capabilities check for each client!
-        self.send_json_to_clients(packet, "network:output");
+    if !failed_clients.is_empty() {
+        let mut graph_inout_locked = graph_inout.lock().expect("lock poisoned");
+        for addr in failed_clients {
+            graph_inout_locked.websockets.remove(&addr);
+        }
     }
+}
 
-    // like STDERR.println() - to be used by processes
-    fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
-        //TODO add capabilities check for each client!
-        self.send_json_to_clients(packet, "network:error");
+fn send_runtime_packet(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &RuntimePacketResponse,
+) {
+    {
+        let graph_inout_locked = graph_inout.lock().expect("lock poisoned");
+        if let Some(tap) = &graph_inout_locked.packet_tap {
+            let _ = tap.try_send(packet.payload.clone());
+        }
     }
+    //TODO add capabilities check for each client!
+    broadcast_to_clients(graph_inout, packet, "runtime:packet");
+}
 
-    // inform client(s) about IP transfer on an edge, with copy of data - to be used by processes (TODO maybe later runtime for mandatory debugging?)
-    fn send_network_data(&mut self, packet: &NetworkDataResponse) {
-        //TODO add capabilities check for each client!
-        //TODO add debug mode check for the graph (network:debug)
-        //TODO add check if edge was selected for debugging (network:edges)
-        self.send_json_to_clients(packet, "network:data");
-    }
+fn send_network_stopped(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &NetworkStoppedResponse,
+) {
+    //TODO add capabilities check for each client!
+    broadcast_to_clients(graph_inout, packet, "network:stopped");
+}
+
+fn send_network_output(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &NetworkOutputResponse,
+) {
+    //TODO add capabilities check for each client!
+    broadcast_to_clients(graph_inout, packet, "network:output");
+}
+
+fn send_network_error(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &NetworkErrorResponse,
+) {
+    //TODO add capabilities check for each client!
+    broadcast_to_clients(graph_inout, packet, "network:error");
+}
+
+fn send_network_data(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    packet: &NetworkDataResponse,
+) {
+    //TODO add capabilities check for each client!
+    //TODO add debug mode check for the graph (network:debug)
+    //TODO add check if edge was selected for debugging (network:edges)
+    broadcast_to_clients(graph_inout, packet, "network:data");
 }
 
 #[cfg(test)]
@@ -2857,7 +2903,7 @@ struct RuntimePacketResponse {
 
 //TODO serde: RuntimePacketRequestPayload is the same as RuntimePacketResponsePayload except the payload -- any possibility to mark this optional for the response?
 #[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct RuntimePacketResponsePayload {
     port: String,
     event: RuntimePacketEvent, //TODO spec what does this do? format? fbp-protocol says: string enum
@@ -2868,7 +2914,7 @@ struct RuntimePacketResponsePayload {
     payload: Option<String>, // spec: payload for the packet. Used only with begingroup (for group names) and data packets. //TODO type "any" allowed
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]  // fbp-protocol and noflo-ui expect this in lowercase
 enum RuntimePacketEvent {
     Connect,

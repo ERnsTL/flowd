@@ -5,7 +5,6 @@ use log::{debug, error, info, trace, warn};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::thread::Thread;
@@ -21,25 +20,14 @@ const APPEND_QUEUE_CAPACITY: usize = 64;
 const IMAP_IO_TIMEOUT: Option<Duration> = Some(Duration::from_secs(2));
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
-        thread::Builder::new()
-            .name("imap-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn imap join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    thread::Builder::new()
+        .name(format!("imap-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn imap deferred join thread");
 }
 
 pub struct IMAPAppendComponent {

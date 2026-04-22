@@ -4,7 +4,6 @@ use log::{debug, error, info, trace, warn};
 // component-specific
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, OnceLock};
 //use std::net::SocketAddr;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
@@ -31,25 +30,14 @@ const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
 const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
-        thread::Builder::new()
-            .name("tls-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn tls join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    thread::Builder::new()
+        .name(format!("tls-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn tls deferred join thread");
 }
 
 impl Component for TLSClientComponent {

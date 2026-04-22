@@ -4,7 +4,6 @@ use log::{debug, trace, info, warn, error};
 // component-specific
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, OnceLock};
 /*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;
@@ -33,25 +32,14 @@ pub struct UnixSocketClientComponent {
 }
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
-        thread::Builder::new()
-            .name("unixsocket-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn unixsocket join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    thread::Builder::new()
+        .name(format!("unixsocket-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn unixsocket deferred join thread");
 }
 
 /*

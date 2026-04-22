@@ -7,7 +7,6 @@ use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, OnceLock};
 
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
@@ -22,25 +21,14 @@ const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
 const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
-        thread::Builder::new()
-            .name("mqtt-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn mqtt join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    thread::Builder::new()
+        .name(format!("mqtt-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn mqtt deferred join thread");
 }
 
 impl Component for MQTTPublisherComponent {

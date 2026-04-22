@@ -6,7 +6,6 @@ use std::ffi::{OsStr,OsString};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::sync::mpsc;
-use std::sync::OnceLock;
 use std::time::Duration;
 use lexopt::prelude::*;
 
@@ -25,25 +24,14 @@ enum Mode { One, Each }
 const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 fn handoff_join(handle: std::thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(std::thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(std::thread::JoinHandle<()>, &'static str)>();
-        std::thread::Builder::new()
-            .name("cmd-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn cmd join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    std::thread::Builder::new()
+        .name(format!("cmd-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn cmd deferred join thread");
 }
 
 impl Component for CmdComponent {

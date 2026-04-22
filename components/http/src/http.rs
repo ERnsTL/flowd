@@ -5,7 +5,7 @@ use log::{debug, trace, info, warn};
 use std::convert::Infallible;
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Mutex};
 use std::thread::{self};
 use std::time::{Duration, Instant};
 use hyper::{Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer, StatusCode};
@@ -13,27 +13,18 @@ use hyper::service::{make_service_fn, service_fn};
 use tokio::sync::oneshot;
 
 const SERVER_JOIN_GRACE: Duration = Duration::from_secs(5);
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    static JOIN_REAPER: OnceLock<mpsc::Sender<(thread::JoinHandle<()>, &'static str)>> =
-        OnceLock::new();
-    let tx = JOIN_REAPER.get_or_init(|| {
-        let (tx, rx) = mpsc::channel::<(thread::JoinHandle<()>, &'static str)>();
-        thread::Builder::new()
-            .name("http-join-reaper".to_owned())
-            .spawn(move || {
-                while let Ok((handle, lbl)) = rx.recv() {
-                    if let Err(err) = handle.join() {
-                        warn!("{}: deferred thread join returned error: {:?}", lbl, err);
-                    }
-                }
-            })
-            .expect("failed to spawn http join reaper");
-        tx
-    });
-    if let Err(err) = tx.send((handle, label)) {
-        warn!("{}: failed to hand off thread to join reaper: {}", label, err);
-    }
+    thread::Builder::new()
+        .name(format!("http-join-{}", label))
+        .spawn(move || {
+            if let Err(err) = handle.join() {
+                warn!("{}: deferred thread join returned error: {:?}", label, err);
+            }
+        })
+        .expect("failed to spawn http deferred join thread");
 }
 
 pub struct HTTPClientComponent {
@@ -64,6 +55,11 @@ impl Component for HTTPClientComponent {
         let out_resp_wakeup = self.out_resp.wakeup.expect("got no wakeup handle for outport RESP");
         let mut out_err = self.out_err.sink;
         let out_err_wakeup = self.out_err.wakeup.expect("got no wakeup handle for outport ERR");
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .timeout(HTTP_REQUEST_TIMEOUT)
+            .build()
+            .expect("failed to build HTTP client");
         loop {
             trace!("begin of iteration");
             // check signals
@@ -97,7 +93,7 @@ impl Component for HTTPClientComponent {
                     //TODO enclose files in brackets to know where its stream of chunks start and end
                     //TODO enable use of async and/or timeout
                     debug!("making HTTP request...");
-                    match reqwest::blocking::get(file_path) {
+                    match client.get(file_path).send() {
                         Ok(resp) => {
                             // send it
                             //TODO forward response headers? useful?
