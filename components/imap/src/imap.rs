@@ -3,6 +3,8 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use std::thread;
 use std::thread::Thread;
@@ -12,6 +14,9 @@ use imap::extensions::idle::WaitOutcome;
 
 // Must exceed IDLE_TIMEOUT so stop() can wait for an in-flight idle() call to return.
 const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(12);
+const APPEND_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
+const APPEND_QUEUE_POLL: Duration = Duration::from_millis(50);
+const APPEND_QUEUE_CAPACITY: usize = 64;
 
 pub struct IMAPAppendComponent {
     conf: ProcessEdgeSource,
@@ -46,6 +51,42 @@ impl Component for IMAPAppendComponent {
         // parse and connect to IMAP server
         let parsed_url = parse_url(url);
         let (mut imap_session, mailbox) = login_and_connect(&parsed_url);
+        let mailbox = mailbox.to_owned();
+
+        // run blocking append calls in a worker so the component loop remains responsive to stop/ping.
+        let (append_tx, append_rx) = mpsc::sync_channel::<Vec<u8>>(APPEND_QUEUE_CAPACITY);
+        let append_shutdown = Arc::new(AtomicBool::new(false));
+        let append_shutdown_ref = append_shutdown.clone();
+        let append_worker = thread::Builder::new()
+            .name(format!(
+                "{}/A",
+                thread::current()
+                    .name()
+                    .expect("failed to get current thread name")
+            ))
+            .spawn(move || {
+                loop {
+                    match append_rx.recv_timeout(APPEND_QUEUE_POLL) {
+                        Ok(ip) => {
+                            if let Err(err) = imap_session.append(mailbox.as_str(), ip) {
+                                warn!("IMAPAppend worker: append failed, exiting worker: {}", err);
+                                break;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if append_shutdown_ref.load(Ordering::Relaxed) {
+                                break;
+                            }
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            break;
+                        }
+                    }
+                }
+                close(&mut imap_session);
+                debug!("IMAPAppend worker exiting");
+            })
+            .expect("failed to spawn IMAP append worker thread");
 
         // handle connection events
         //TODO automatic reconnection
@@ -63,6 +104,7 @@ impl Component for IMAPAppendComponent {
         // FBP main loop
         loop {
             trace!("begin of iteration");
+            let mut stop_requested = false;
 
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
@@ -72,11 +114,16 @@ impl Component for IMAPAppendComponent {
                 // stop signal
                 if ip == b"stop" {   //TODO optimize comparison
                     info!("got stop signal, exiting");
-                    break;
+                    stop_requested = true;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
+            }
+            if stop_requested {
+                break;
             }
 
             // check in port
@@ -98,9 +145,50 @@ impl Component for IMAPAppendComponent {
                 let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
                 for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
                     // TODO for objects and open brackets, we need headers and a body - "Type: OpenBracket\r\nProcess: Drop_xxxxx\r\nPort: IN\r\n\r\n..."
-                    imap_session.append(mailbox, ip).expect("append failed");
+                    let mut pending = ip;
+                    loop {
+                        match append_tx.try_send(pending) {
+                            Ok(()) => {
+                                break;
+                            }
+                            Err(mpsc::TrySendError::Full(returned)) => {
+                                pending = returned;
+                                if let Ok(sig) = self.signals_in.try_recv() {
+                                    trace!("received signal ip while waiting for append queue: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    if sig == b"stop" {
+                                        info!("got stop signal while waiting for append queue, exiting");
+                                        stop_requested = true;
+                                        break;
+                                    } else if sig == b"ping" {
+                                        trace!("got ping signal, responding");
+                                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                                    } else {
+                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    }
+                                }
+                                if stop_requested {
+                                    break;
+                                }
+                                thread::yield_now();
+                            }
+                            Err(mpsc::TrySendError::Disconnected(_)) => {
+                                warn!("IMAP append worker disconnected");
+                                stop_requested = true;
+                                break;
+                            }
+                        }
+                    }
+                    if stop_requested {
+                        break;
+                    }
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
+                if stop_requested {
+                    break;
+                }
+            }
+            if stop_requested {
+                break;
             }
 
             // are we done?
@@ -114,11 +202,23 @@ impl Component for IMAPAppendComponent {
             std::thread::park();
         }
 
-        // close connection -> event handler thread will exit from connection error
-        close(&mut imap_session);
-
-        // wait for event thread to exit
-        //event_handler_thread.join().expect("failed to join event handler thread");
+        append_shutdown.store(true, Ordering::Relaxed);
+        drop(append_tx);
+        let append_join_started = Instant::now();
+        while !append_worker.is_finished() && append_join_started.elapsed() < APPEND_THREAD_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if append_worker.is_finished() {
+            if let Err(err) = append_worker.join() {
+                warn!("IMAPAppend: failed to join append worker thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "IMAPAppend: append worker thread did not exit within {:?}, detaching",
+                APPEND_THREAD_JOIN_GRACE
+            );
+            drop(append_worker);
+        }
 
         info!("exiting");
     }

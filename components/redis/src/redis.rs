@@ -3,6 +3,9 @@ use log::{debug, trace, info, warn, error};
 
 // component-specific
 use std::time::Duration;
+use redis::ErrorKind as RedisErrorKind;
+
+const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
 pub struct RedisPublisherComponent {
     conf: ProcessEdgeSource,
@@ -47,6 +50,12 @@ impl Component for RedisPublisherComponent {
         // connect
         let client = redis::Client::open(url_str).expect("failed to open client");
         let mut connection = client.get_connection().expect("failed to get connection on client");
+        connection
+            .set_read_timeout(REDIS_IO_TIMEOUT)
+            .expect("failed to set redis read timeout");
+        connection
+            .set_write_timeout(REDIS_IO_TIMEOUT)
+            .expect("failed to set redis write timeout");
         let mut pipe_lpush = redis::pipe();
 
         // signal handling
@@ -132,7 +141,16 @@ impl Component for RedisPublisherComponent {
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
 
                 // send all queries at once
-                pipe_lpush.query::<Vec<u8>>(&mut connection).expect("failed to publish into redis channel");
+                if let Err(err) = pipe_lpush.query::<()>(&mut connection) {
+                    if err.kind() == RedisErrorKind::Io {
+                        warn!(
+                            "redis publish timed out or failed with I/O error, dropping current batch and continuing: {}",
+                            err
+                        );
+                    } else {
+                        error!("failed to publish into redis channel: {}", err);
+                    }
+                }
                 pipe_lpush.clear();
             }
 
