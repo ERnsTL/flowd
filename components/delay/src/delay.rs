@@ -1,9 +1,7 @@
-use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
-    PushError,
-};
+use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource, PushError};
 use log::{debug, info, trace};
+
+// component-specific
 use std::thread;
 use std::time::Duration;
 
@@ -40,13 +38,7 @@ pub struct DelayComponent {
 }
 
 impl Component for DelayComponent {
-    fn new(
-        mut inports: ProcessInports,
-        mut outports: ProcessOutports,
-        signals_in: ProcessSignalSource,
-        signals_out: ProcessSignalSink,
-        _graph_inout: GraphInportOutportHandle,
-    ) -> Self {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self {
         DelayComponent {
             conf: inports.remove("CONF").expect("delay missing CONF").pop().unwrap(),
             inn: inports.remove("IN").expect("delay missing IN").pop().unwrap(),
@@ -129,7 +121,7 @@ impl Component for DelayComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: "Configuration packet with delay, e.g. '50us', '1ms', '2s'".to_string(),
+                    description: "Configuration packet with delay, e.g. '50us', '1ms', '2s' in URL format ?delay=1ms".to_string(),
                     values_allowed: vec![],
                     value_default: "50us".to_string(),
                 },
