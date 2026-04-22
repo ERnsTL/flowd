@@ -1126,13 +1126,13 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::NetworkStartRequest(payload) => {
                         info!("got network:start message");
                         //TODO check secret
-                        //match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &mut processes.write().expect("lock poisoned")) {
-                        match runtime.write().expect("lock poisoned").start(&graph.read().expect("lock poisoned"), &components.read().expect("lock poisoned"), graph_inout.clone(), runtime.clone()) {
-                            Ok(status) => {
+                        match run_graph(runtime.clone(), graph.clone(), components.clone(), graph_inout.clone()) {
+                            Ok(()) => {
+                                let runtime_status = runtime.read().expect("lock poisoned");
                                 info!("response: sending network:started response");
                                 websocket
                                     .write(Message::text(
-                                        serde_json::to_string(&NetworkStartedResponse::new(&status))
+                                        serde_json::to_string(&NetworkStartedResponse::new(&runtime_status.status))
                                             .expect("failed to serialize network:started response"),
                                     ))
                                     .expect("failed to write message into websocket");
