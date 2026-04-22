@@ -10,7 +10,8 @@ extern crate imap;
 extern crate native_tls;
 use imap::extensions::idle::WaitOutcome;
 
-const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
+// Must exceed IDLE_TIMEOUT so stop() can wait for an in-flight idle() call to return.
+const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(12);
 
 pub struct IMAPAppendComponent {
     conf: ProcessEdgeSource,
@@ -271,8 +272,7 @@ impl Component for IMAPFetchIdleComponent {
             thread::park();
         }
 
-        // close connection -> event handler thread will exit from connection error
-        //TODO may be locked in idle() by the event handler thread - for up to 29 minutes
+        // The event handler may currently be inside idle(); wait long enough for that call to time out.
         debug!("signal event handler thread to exit");
         shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
 
@@ -457,9 +457,8 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     Ok(())
 }
 
-const IDLE_TIMEOUT: Duration = Duration::from_secs(10);  // TODO optimize this is unefficient - could idle up to 29 minutes
-//TODO optimize but I didnt find a way yet to signal the event handler thread to exit if it is stuck in idle()
-//  so wa issue IMAP idle command every 10 seconds... but this is not optimal
+const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
+// Keep this bounded so stop() can drain quickly even while the idle command is in progress.
 
 //TODO handle connection lost case
 fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>) -> Result<WaitOutcome, imap::Error> {
