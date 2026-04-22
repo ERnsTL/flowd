@@ -5827,6 +5827,22 @@ struct Process {
 
 type ProcessManager = HashMap<String, Process>;
 
+struct ThreadExitFlag {
+    exited: Arc<AtomicBool>,
+}
+
+impl ThreadExitFlag {
+    fn new(exited: Arc<AtomicBool>) -> Self {
+        ThreadExitFlag { exited }
+    }
+}
+
+impl Drop for ThreadExitFlag {
+    fn drop(&mut self) {
+        self.exited.store(true, Ordering::Release);
+    }
+}
+
 impl std::fmt::Debug for Process {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Process").field("signal", &self.signal).field("joinhandle", &self.joinhandle).finish()
