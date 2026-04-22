@@ -76,15 +76,11 @@ fn must_not_block<Role: HandshakeRole>(err: HandshakeError<Role>) -> Error {
 fn run_graph(runtime: Arc<RwLock<RuntimeRuntimePayload>>, graph: Arc<RwLock<Graph>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
     let graph_guard = graph.read().expect("lock poisoned");
     let components_guard = components.read().expect("lock poisoned");
-    runtime
-        .write()
-        .expect("lock poisoned")
-        .start(&graph_guard, &components_guard, graph_inout, runtime.clone())?;
+    runtime.write().expect("lock poisoned").start(&graph_guard, &components_guard, graph_inout, runtime.clone())?;
     Ok(())
 }
 
-// components
-//TODO optimize - currently organized as modules, because the components need certain structs from flowd-rs crate here. if putting each component into its own crate, this would create a circular dependency, which is not allowed with crates, but very well modules.
+// module-based components
 mod components;
 include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
