@@ -1,0 +1,41 @@
+name: FBP Protocol Tests
+
+on:
+  push:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+jobs:
+  fbp-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build flowd
+        run: cargo build --release
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup FBP test environment
+        run: |
+          mkdir -p fbp-tests
+          cd fbp-tests
+          npm init -y
+          npm install fbp-protocol@0.9.8
+
+      - name: Configure FBP tests
+        run: |
+          cd fbp-tests
+          npx fbp-init
+          # Update config to use port 3569
+          sed -i 's/"port": 8080/"port": 3569/' fbp-config.json
+
+      - name: Run FBP protocol tests
+        run: ./run-fbp-tests.sh
