@@ -1054,7 +1054,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::RuntimePacketRequest(payload) => {
                         info!("got runtime:packet message");
                         //TODO or maybe better send this to graph instead of runtime? in future for multi-graph support, yes.
-                        match runtime.write().expect("lock poisoned").packet(&payload, &mut graph_inout.lock().expect("lock poisoned")) {
+                        match RuntimeRuntimePayload::packet(&payload, &mut graph_inout.lock().expect("lock poisoned")) {
                             Ok(_) => {
                                 info!("response: sending runtime:packetsent response");
                                 websocket
@@ -2425,7 +2425,7 @@ impl RuntimeRuntimePayload {
         Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 
-    fn packet(&mut self, payload: &RuntimePacketRequestPayload, graph_inout: &mut GraphInportOutportHolder) -> std::result::Result<(), std::io::Error> {
+    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: &mut GraphInportOutportHolder) -> std::result::Result<(), std::io::Error> {
         //TODO check if graph exists and if that port actually exists
         //TODO check payload datatype, schema, event (?) etc.
         //TODO implement and deliver to destination process
