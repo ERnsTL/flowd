@@ -86,6 +86,21 @@ fn run_graph(runtime: Arc<RwLock<RuntimeRuntimePayload>>, graph: Arc<RwLock<Grap
 mod components;
 include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
+fn format_duration(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+
+    if hours > 0 {
+        format!("{}h {}m {}s", hours, minutes, seconds)
+    } else if minutes > 0 {
+        format!("{}m {}s", minutes, seconds)
+    } else {
+        format!("{}s", seconds)
+    }
+}
+
 pub fn main() {
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
 
