@@ -2036,7 +2036,7 @@ impl RuntimeRuntimePayload {
                 trace!("running health check...");
                 let mut now: chrono::DateTime<Utc>;   //TODO any way to not initialize this with a throwaway value?
                 let mut ok = true;
-                let mut exited_count: usize = 0;
+                let mut disconnected_components: Vec<String> = Vec::new();
                 for (name, proc) in watchdog_threadandsignal.iter() {
                     trace!("process {}...", name);
                     if proc.2.load(Ordering::Acquire) {
