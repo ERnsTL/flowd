@@ -1379,8 +1379,25 @@ impl RuntimeRuntimePayload {
         Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 
-    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
+    fn validate_secret(&self, secret: Option<&String>, graph: &str) -> Result<(), std::io::Error> {
+        if let Some(ref secret) = secret {
+            if let Some(expected_secret) = self.secrets.get(graph) {
+                if *secret != expected_secret {
+                    return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid secret token"));
+                }
+            } else {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no secret configured for graph"));
+            }
+        }
+        Ok(())
+    }
+
+    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> std::result::Result<(), std::io::Error> {
         const INPORT_PUSH_GRACE_DUR: Duration = Duration::from_secs(2);
+
+        // Implement token-based security: validate secret if provided
+        let runtime_read = runtime.read().expect("lock poisoned");
+        runtime_read.validate_secret(payload.secret.as_ref(), &payload.graph)?;
 
         //TODO check if graph exists and if that port actually exists
         //TODO check payload datatype, schema, event (?) etc.
@@ -5389,7 +5406,7 @@ pub mod bench_api {
                 payload: Some(String::from_utf8_lossy(payload).to_string()),
                 secret: None,
             };
-            RuntimeRuntimePayload::packet(&packet, self.graph_inout.clone())?;
+            RuntimeRuntimePayload::packet(&packet, self.graph_inout.clone(), self.runtime.clone())?;
             Ok(())
         }
 
