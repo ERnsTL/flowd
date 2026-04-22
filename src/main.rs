@@ -2097,7 +2097,7 @@ impl RuntimeRuntimePayload {
                 }
                 if ok {
                     debug!("process health check OK");
-                } else if exited_count == watchdog_threadandsignal.len() {
+                } else if watchdog_threadandsignal.is_empty() {
                     // network has effectively shut down
                     info!("process health check: all processes exited, shutting down network");
                     // signal runtime
