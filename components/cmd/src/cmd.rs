@@ -21,6 +21,7 @@ pub struct CmdComponent {
 }
 
 enum Mode { One, Each }
+const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 impl Component for CmdComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -197,8 +198,22 @@ impl Component for CmdComponent {
                                 }
                             }
 
-                            if let Err(err) = stdout_thread.join() {
-                                warn!("failed to join child stdout reader thread: {:?}", err);
+                            let stdout_join_started = std::time::Instant::now();
+                            while !stdout_thread.is_finished()
+                                && stdout_join_started.elapsed() < STDOUT_THREAD_JOIN_GRACE
+                            {
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            if stdout_thread.is_finished() {
+                                if let Err(err) = stdout_thread.join() {
+                                    warn!("failed to join child stdout reader thread: {:?}", err);
+                                }
+                            } else {
+                                warn!(
+                                    "child stdout reader thread did not exit within {:?}, detaching",
+                                    STDOUT_THREAD_JOIN_GRACE
+                                );
+                                drop(stdout_thread);
                             }
 
                             if stop_component {
