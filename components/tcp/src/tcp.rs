@@ -48,6 +48,18 @@ impl Component for TCPClientComponent {
         // read configuration
         trace!("read config IP...");
         while conf.is_empty() {
+            if let Ok(sig) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                if sig == b"stop" {
+                    info!("got stop signal while waiting for TCP config, exiting");
+                    return;
+                } else if sig == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                }
+            }
             thread::yield_now();
         }
         let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };

@@ -1,5 +1,5 @@
 use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info};
+use log::{debug, trace, info, warn};
 
 // component-specific
 use std::thread;
@@ -38,6 +38,18 @@ impl Component for TeraTemplateComponent {
         // check config port
         trace!("read config IP");
         while conf.is_empty() {
+            if let Ok(sig) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                if sig == b"stop" {
+                    info!("got stop signal while waiting for template config, exiting");
+                    return;
+                } else if sig == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                }
+            }
             thread::yield_now();
         }
         let Ok(template) = conf.pop() else { trace!("no config IP received - exiting"); return; };
