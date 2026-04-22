@@ -5,24 +5,144 @@ This file contains things that are unexpected, undocumented, in need of clarific
 * the FBP JSON Graph format specification
 * the FBP Network Protocol specification.
 
-Peculiarities:
 
-* noflo-ui error "connection failed" = runtime down or real network problem
-* noflo-ui error "connection timed out" is more than network-level connection timeout; testsuite and noflo-ui does WebSocket upgrade, runtime:getruntime, component:list, network:status, component:getsource ...TODO anything more?
-* Firefox seems to automatically use wss:// even if requesting ws:// in connection URL
-* If the runtime:runtime response message states that there is a currently running graph, then noflo-ui uses the component:getsource request message to get the source code of the graph. Language can be json (noflo schema) or fbp (FBP network language from J. Paul Morrison). We return a placeholder for the source code and allow the capability component:getsource, otherwise noflo-ui complains that it is not permitted to send component:getsource request messages, see [this issue](https://github.com/noflo/noflo-ui/issues/1019). Using component:getsource to request the graph source seems to make many graph:* network:* and component:list* requests useless.
-* The FBP network spec calls them messages, but sometimes the same message name is used for both the request and response direction, just with different fields. (TODO spec: either have distinct names for the requests and responses or call them requests and responses). For a strongly-typed programming language this is difficult to model and also for clarity, in flowd-rs, the messages are called requests and responses, also reflected in their struct names. Also these messages are sometimes send as an information or state update to the client, so the communication pattern is also not consistently request-response type nor event-stream type, meaning "who drives the state update"? (TODO ponder this)
-* component:list is not about the running processes nor the list of components used in the current graph, but the list of available components for placement into the graph. Like query the component repository.
-* The network:status, network:started, network:stopped responses are pretty similar. The network:status message can be used as an internal status message and constructors for the rest can read part information from the live network status struct.
-* There are similar messages about IP traffic information in runtime and network. The runtime:packet has a field "event" type which maps to the message types in the "network" category, namely network:{connect, begingroup, data, endgroup, disconnet}. The runtime message is used for connecting two runtimes together and using them as a remote subgraph using the FBP Network Protocol whereas the network messages are used for debugging and subscribing to IP traffic on certain edges using network:edges. If you look closely, the "network" messages all have a source and target and subgraph (for knowing to/from which subgraph it belongs), so they always pertain to a specific edge within the network whereas the runtime:packet only has fields which refer to a portname and a subgraph, where portname is a graph-level exported inport or outport and the subgraph field identifies to which subgraph the IP is intended to go into resp. out of. This is for the remote runtime to know "oh this packet is for me", like in a bus network topology.
-* There is a bug in noflo-ui regarding input and output message -> field metadata -> route: error is "Client sent invalid payload for graph:addedge: data.payload.metadata.route should be integer". It makes a fool of the user. One time noflo-ui sends it with metadata:{route:null}   so I change flowd to return it that way, then on next run, flowd is repared to send output/response message with route:null but noflo-ui sends it with metadata:{} and so it goes back and forth!  See struct GraphEdgeMetadata; and in schema the field "route" is defined as optional:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/shared.yml#L90 - observation: on a fresh reload it works (metadata: {}), but when doing edge delete and directly afterwards addedge, then the error shows and noflo-ui sends the metadata:{route:null}.
-* In the graph:addnode request, noflo-ui sends missing data. Name = longform Component_xxxxx (label is without it); width and height are not sent. See runtime.add_node()
-  * Also not sure why label is not updated in noflo-ui when an different label is sent back. Only after reload.
-  * Still not sure if the returned values on graph:addnode response are used - seemingly not, the label for example stays the same.
-  * But when there are multiple clients working on the same graph, then they should receive these responses as notifications in order to get updated state. So for preparation for the future, we should send it back fully.
-  * But then, when doing a rename via noflo-ui, it requests a renamenode (change id/name) and changenode (to change label to same value as name). Why does it request a rename - a changenode to update the label would be consistent so that the id/name eg. Repeat_atik2 always stays the same. A label might be longer and contain spaces etc. and so is not well-suited as an id. Expected to only send changenode for label update and keeping the id the same.
+## fbp-protocol: Issues, gaps, points needing clarification and explicitness
 
-TODO Further FBP network protocol clarifications needed:
+### Areas of improvement
+
+- Flow/state model is not explicitly specified: define allowed message sequences per protocol as a normative state machine.
+- Ordering rules are underspecified: define which messages must be in-order, which may be interleaved, and which may arrive out-of-order.
+- Request/response correlation is optional in practice: make `requestId`/`responseTo` requirements explicit (required vs optional) and define behavior when missing.
+- Response cardinality is unclear: define whether each command expects exactly one response, multiple responses, or only async events.
+- Timeout semantics are missing: define expected response time windows, timeout error behavior, and whether timeout values are server-defined or negotiated.
+- Retry semantics are missing: define which commands are safe to retry and how duplicate requests should be handled.
+- Idempotency rules are not explicit: define idempotent vs non-idempotent commands and conflict behavior on repeats.
+- Error causality is weakly specified: require linking errors to originating request/context, including causative command and graph/node scope.
+- Error taxonomy is too loose: define stable machine-readable error codes and categories beyond free-text `message`.
+- Capability gating behavior is vague: define exact error/response behavior when a client uses unsupported or unauthorized capabilities.
+- Concurrency semantics are unclear: define behavior for simultaneous commands from one or multiple clients against the same runtime state.
+- Multi-client consistency model is unspecified: define what visibility/ordering guarantees each client gets for shared runtime events.
+- Atomicity/transaction boundaries are missing: define whether multi-step graph mutations are atomic or can be observed partially.
+- Lifecycle preconditions/postconditions are incomplete: define valid command preconditions (for example start/stop/status in each runtime/network state).
+- Delivery guarantees are unspecified: define at-most-once/at-least-once/exactly-once expectations at protocol level.
+- Event duplication/loss handling is unspecified: define whether duplicates can occur and required client/runtime de-dup behavior.
+- Backpressure/rate-limit behavior is undefined: define server responses for overload and client expectations under high event volume.
+- Schema strictness is inconsistent: define policy for unknown fields, forward-compatible extensions, and strict vs permissive validation.
+- Version negotiation is incomplete: define compatibility matrix, downgrade behavior, and required handling for version mismatch.
+- Security/auth semantics are transitional: define canonical auth field placement, deprecate legacy variants with timeline, and specify failure behavior.
+- Long-running operation semantics are missing: define progress, partial failure, and cancellation message patterns.
+- Observability/correlation metadata is minimal: define required tracing fields for cross-message debugging and auditability.
+- Normative examples are insufficient: add canonical conversation transcripts for common and edge-case flows.
+- Conformance tests are permissive on sequencing: add strict sequence tests and negative tests for invalid order/state transitions.
+- Determinism expectations are unclear: define which outputs are nondeterministic and which must be reproducible across runtimes.
+
+### Current quality assessment of fbp-protocol
+
+`fbp-protocol` does contain some flow expectations, but they are mostly in prose and test behavior, not as a formal, machine-readable conversation model/state machine.
+
+- No formal state machine or sequence model.
+  `spec/protocol.js.md` explicitly says messages are independent and “not to form a request-response cycle” ([protocol.js.md](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/spec/protocol.js.md):36).
+  Result: ordering/causality is only loosely described.
+
+- Request/response correlation is described, but not enforced by schema.
+  Prose says requests include `requestId` and responses include `responseTo` ([protocol.js.md](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/spec/protocol.js.md):62), but shared schema does not require either field ([shared.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/schema/json/shared.json):26, [shared.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/schema/json/shared.json):66).
+
+- Per-command “should respond with X” exists, but as descriptions, not strict protocol transitions.
+  Example: `runtime/getruntime` description says runtime should return `runtime` and possibly follow with `ports` ([runtime.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/schema/json/runtime.json):7).
+  This is guidance text, not a validated sequence rule.
+
+- Runtime conformance tests are permissive about extra/asynchronous packets.
+  `receive(..., allowExtraPackets=true)` ignores non-matching messages in many tests ([WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):108, [WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):129).
+  Result: strict ordering guarantees are not strongly asserted.
+
+- Coverage gaps are explicitly acknowledged in TODO/comments.
+  Missing or incomplete protocol behaviors are listed (for example `getsource/source`, more port/group operations) ([WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):670, [WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):881, [README.md](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/README.md):82).
+
+- Legacy compatibility muddies strictness (not purely deficiency, but affects clarity).
+  Tests still inject `secret` in both top-level and payload with `FIXME` notes ([WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):87, [WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):117).
+  This indicates transitional behavior, reducing crisp normative semantics.
+
+If you want, I can draft a compact “missing normative spec” checklist you could use to harden your own runtime contract (ordering rules, correlation requirements, timeout semantics, idempotency, and error causality).
+
+## Implicit Requirements Discovered during refactoring for compatibility with fbp-tests
+
+* in general, the rendered spec does not show well, which fields are optional and the flow of expected/paired messages.
+- `runtime:getruntime.payload.secret` must be accepted as missing/undefined, even though the spec text marks it required.
+- Many request payloads marked with required `secret` in the HTML must be accepted without `secret` in practice.
+- `graph:clear` request must accept missing `library`, `icon`, and `description`.
+- `graph:clear` response must not echo missing optional fields as empty strings; they should be omitted.
+- `graph:addnode` must accept missing `graph` field and return `graph:error` with message exactly `No graph specified`.
+- `graph:addnode` to an unknown graph must return `graph:error` with message exactly `Requested graph not found`.
+- `graph:addnode.payload.metadata` must accept arbitrary sparse object keys, not only strict positional metadata.
+- `graph:changenode.payload.metadata` must behave like patch-merge metadata.
+- `graph:changenode` with `{}` must preserve existing metadata exactly.
+- `graph:changenode` with keys set to `null` must delete those keys.
+- `graph:changenode` responses must include only caller-visible metadata keys (no automatic `x/y/width/height` injection).
+- `graph:addinitial` must accept missing `metadata` in request.
+- `graph:removeinitial` must accept requests with `tgt+graph` only (missing `src`).
+- `graph:removeinitial` response must echo the removed `src.data` value.
+- `graph:removenode` must emit matching `graph:removeedge` events for affected edges before `graph:removenode`.
+- `graph:addinport` request must accept missing `metadata`.
+- `graph:addoutport` request must accept missing `metadata`.
+- ACK payload shape matters: `graph:addinport`, `graph:addoutport`, and `graph:removeoutport` must echo expected fields in payload, not empty payloads.
+- Component names from graph commands may be collection-prefixed (e.g. `core/Repeat`) but runtime execution may require normalized internal names (`Repeat`).
+- `component:list` flow expects at least one `component:component` with name `core/Repeat`.
+- `component:component` naming must include collection prefix even if internal catalog is unprefixed.
+- Port names from protocol-side graph messages can be lowercase (`in/out`) but runtime component ports may be uppercase (`IN/OUT`); normalization is required.
+- `network:start` test flow expects immediate `network:started`, then `network:data` packets for the test graph.
+- `network:data` packet for initial IIP flow may omit `src`.
+- `network:getstatus` immediately after test `network:start` expects `started=true, running=false` (short-lived run semantics).
+- `network:stop` followed by `network:getstatus` expects `started=false, running=false`.
+- Output payload strictness is high: extra fields in some responses can fail tests.
+- Message parsing must be tolerant: unknown/mismatched incoming payloads should not crash the client handler loop (avoid panic on decode mismatch).
+- Exact message ordering is implicitly required in several graph/network scenarios, not fully explicit in prose spec.
+
+### Above section reformatted as Proposed normative clarifications from fbp-tests compatibility (2026-04-22)
+
+These are phrased as candidate spec language (MUST/SHOULD) derived from behavior required by the `fbp-protocol` test suite and validated against the current runtime implementation.
+
+* The spec MUST clearly distinguish required vs optional payload fields for every input and output message.
+* The spec MUST define expected request/response/event ordering for each capability, not only message shapes.
+* The spec MUST state whether `payload.secret` is strictly required on every input in practice, or whether runtimes SHOULD accept missing/undefined `secret` for compatibility.
+* The spec MUST explicitly define compatibility behavior for `runtime:getruntime` when `payload.secret` is missing.
+* The spec MUST define that `graph:clear` input accepts missing `library`, `icon`, and `description`.
+* The spec MUST define whether optional output fields may be omitted, and SHOULD recommend omitting absent optional fields rather than emitting empty-string placeholders.
+* The spec MUST define error behavior for `graph:addnode` without `payload.graph`, including canonical error text if exact text matching is expected.
+* The spec MUST define error behavior for `graph:addnode` with unknown graph id, including canonical error text if exact text matching is expected.
+* The spec MUST define whether `graph:addnode.payload.metadata` is a free-form object, sparse patch, or fixed schema.
+* The spec MUST define `graph:changenode` metadata semantics as merge/replace and MUST define `null` handling (delete vs set-null vs ignore).
+* The spec MUST define whether `graph:changenode` response metadata echoes only user-specified keys or full normalized metadata.
+* The spec MUST define whether `graph:addinitial` accepts missing `metadata`.
+* The spec MUST define whether `graph:removeinitial` accepts missing `src` (target-only removal request).
+* The spec MUST define which `src` is echoed in `graph:removeinitial` response when input `src` is omitted.
+* The spec MUST define whether `graph:removenode` should emit related `graph:removeedge` events before `graph:removenode`.
+* The spec MUST define ACK payload content expectations for `graph:addinport`, `graph:addoutport`, and `graph:removeoutport` (echoed fields vs empty payload).
+* The spec MUST define whether `graph:addinport`/`graph:addoutport` requests require `metadata` or may omit it.
+* The spec MUST define collection prefix rules for component names (`core/Repeat` style) across graph and component protocols.
+* The spec SHOULD explicitly state whether runtimes may normalize component names internally while preserving protocol-visible names externally.
+* The spec SHOULD define case-normalization policy for port identifiers (`in/out` vs `IN/OUT`) and where normalization is allowed.
+* The spec MUST define `component:list` completion semantics (`component:componentsready`) and SHOULD define minimum interoperability expectations for component naming.
+* The spec MUST define whether `network:start` is expected to be followed by immediate `network:data` events for simple finite graphs.
+* The spec MUST define allowable `network:data` payload variants for event kinds where `src` may be absent (for example IIP-origin packets).
+* The spec MUST define `network:getstatus` semantics immediately after `network:start` for short-lived graphs (`started` and `running` transition timing).
+* The spec MUST define `network:getstatus` semantics after `network:stop` (`started`/`running` exact values).
+* The spec SHOULD state whether extra output payload fields are allowed, discouraged, or forbidden for strict interoperability.
+* The spec SHOULD define canonical message ordering constraints where clients/tests depend on sequence.
+* The spec SHOULD define runtime robustness expectations for malformed/unknown messages (for example: return protocol error and continue session vs terminate session).
+
+### Notes on where schemas live (basis for improvement)
+
+Short answer: `fbp-tests/` itself is basically just a harness, not the schema source.
+
+- In your repo, `fbp-tests` only has config + npm metadata (`[package.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/package.json)`, `[fbp-config.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/fbp-config.json)`), and depends on `fbp-protocol@0.9.8`.
+- The machine-readable protocol declarations are in `fbp-protocol` schemas, e.g.:
+  - `[runtime.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/schema/json/runtime.json):24` shows `payload.required: []` for `runtime/getruntime`, with `payload.secret` defined but not required.
+  - `[shared.json](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/schema/json/shared.json):26` requires `protocol`, `command`, `payload`; `secret` fields are declared but not required.
+- So for your example: `payload.secret` is declared and optional (legacy location), not required.
+
+And yes, `fbp-spec` is a separate thing, but it’s for component/graph data-driven tests, not protocol-conformance schema authority. Their README says protocol conformance is out-of-scope and points to `fbp-protocol`: https://github.com/flowbased/fbp-spec.
+
+### Further FBP network protocol clarifications needed
 
 * TODO noflo-ui complains on connect/disconnect button push that the payload of component:componentsready is non-integer, but spec defines no payload thus interpreted to be an empty object. On first connect to the runtime, it does not complain. TODO integer is number of component:component messages before the component:componentsready message?
 * for graph:changenode messages (and similarly applicable to the other response messages) the same fields as the request should be present. TODO to be useful, it should send back the same values as confirmation that these values are now set -- but if sending back a different x coordinate for example, noflo-ui does not snap back the node but acts if it was set correctly. -> TODO would probably need graph:error message.
@@ -109,7 +229,26 @@ TODO Further FBP network protocol clarifications needed:
 * TODO FBP network protocol spec webpage does not mention the required property "data", see https://flowbased.github.io/fbp-protocol/#network-data - only mentioned in the schema files:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/network.yml#L249
 * TODO in order to listen do traffic flowing on certain edges by sending network:edges and then receiving network:{connect, begingroup, data, endgroup, disconnect} messages is it necessary to put the whole graph into debug mode first using runtime:debug? or is the ability to use network:edges independent? how are they related, protocol-wise and in semantics?
 
-Clarifications for Graph schema:
+
+## noflo-ui: Issues, peculiarities and things in need of clarification
+
+* noflo-ui error "connection failed" = runtime down or real network problem
+* noflo-ui error "connection timed out" is more than network-level connection timeout; testsuite and noflo-ui does WebSocket upgrade, runtime:getruntime, component:list, network:status, component:getsource ...TODO anything more?
+* Firefox seems to automatically use wss:// even if requesting ws:// in connection URL
+* If the runtime:runtime response message states that there is a currently running graph, then noflo-ui uses the component:getsource request message to get the source code of the graph. Language can be json (noflo schema) or fbp (FBP network language from J. Paul Morrison). We return a placeholder for the source code and allow the capability component:getsource, otherwise noflo-ui complains that it is not permitted to send component:getsource request messages, see [this issue](https://github.com/noflo/noflo-ui/issues/1019). Using component:getsource to request the graph source seems to make many graph:* network:* and component:list* requests useless.
+* The FBP network spec calls them messages, but sometimes the same message name is used for both the request and response direction, just with different fields. (TODO spec: either have distinct names for the requests and responses or call them requests and responses). For a strongly-typed programming language this is difficult to model and also for clarity, in flowd-rs, the messages are called requests and responses, also reflected in their struct names. Also these messages are sometimes send as an information or state update to the client, so the communication pattern is also not consistently request-response type nor event-stream type, meaning "who drives the state update"? (TODO ponder this)
+* component:list is not about the running processes nor the list of components used in the current graph, but the list of available components for placement into the graph. Like query the component repository.
+* The network:status, network:started, network:stopped responses are pretty similar. The network:status message can be used as an internal status message and constructors for the rest can read part information from the live network status struct.
+* There are similar messages about IP traffic information in runtime and network. The runtime:packet has a field "event" type which maps to the message types in the "network" category, namely network:{connect, begingroup, data, endgroup, disconnet}. The runtime message is used for connecting two runtimes together and using them as a remote subgraph using the FBP Network Protocol whereas the network messages are used for debugging and subscribing to IP traffic on certain edges using network:edges. If you look closely, the "network" messages all have a source and target and subgraph (for knowing to/from which subgraph it belongs), so they always pertain to a specific edge within the network whereas the runtime:packet only has fields which refer to a portname and a subgraph, where portname is a graph-level exported inport or outport and the subgraph field identifies to which subgraph the IP is intended to go into resp. out of. This is for the remote runtime to know "oh this packet is for me", like in a bus network topology.
+* There is a bug in noflo-ui regarding input and output message -> field metadata -> route: error is "Client sent invalid payload for graph:addedge: data.payload.metadata.route should be integer". It makes a fool of the user. One time noflo-ui sends it with metadata:{route:null}   so I change flowd to return it that way, then on next run, flowd is repared to send output/response message with route:null but noflo-ui sends it with metadata:{} and so it goes back and forth!  See struct GraphEdgeMetadata; and in schema the field "route" is defined as optional:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/shared.yml#L90 - observation: on a fresh reload it works (metadata: {}), but when doing edge delete and directly afterwards addedge, then the error shows and noflo-ui sends the metadata:{route:null}.
+* In the graph:addnode request, noflo-ui sends missing data. Name = longform Component_xxxxx (label is without it); width and height are not sent. See runtime.add_node()
+  * Also not sure why label is not updated in noflo-ui when an different label is sent back. Only after reload.
+  * Still not sure if the returned values on graph:addnode response are used - seemingly not, the label for example stays the same.
+  * But when there are multiple clients working on the same graph, then they should receive these responses as notifications in order to get updated state. So for preparation for the future, we should send it back fully.
+  * But then, when doing a rename via noflo-ui, it requests a renamenode (change id/name) and changenode (to change label to same value as name). Why does it request a rename - a changenode to update the label would be consistent so that the id/name eg. Repeat_atik2 always stays the same. A label might be longer and contain spaces etc. and so is not well-suited as an id. Expected to only send changenode for label update and keeping the id the same.
+
+
+## Graph schema: Clarifications needed
 
 * TODO spec allows for process, port, index = indexed ports in (intra-graph) connections, but not for graph inports and outports -- how to connect an inport or outport to an indexed port of a process?
 * TODO spec has connection metadata: what is "route" used for? doc says: "Route identifier of a graph edge"
