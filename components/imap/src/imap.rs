@@ -3,12 +3,14 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::thread;
 use std::thread::Thread;
 extern crate imap;
 extern crate native_tls;
 use imap::extensions::idle::WaitOutcome;
+
+const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 pub struct IMAPAppendComponent {
     conf: ProcessEdgeSource,
@@ -276,7 +278,21 @@ impl Component for IMAPFetchIdleComponent {
 
         // wait for event handler thread to exit
         debug!("joining event handler thread");
-        event_handler_thread.join().expect("failed to join event handler thread");
+        let join_started = Instant::now();
+        while !event_handler_thread.is_finished() && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if event_handler_thread.is_finished() {
+            if let Err(err) = event_handler_thread.join() {
+                warn!("IMAPFetchIdle: failed to join event handler thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "IMAPFetchIdle: event handler thread did not exit within {:?}, detaching",
+                EVENT_THREAD_JOIN_GRACE
+            );
+            drop(event_handler_thread);
+        }
 
         // inform downstream
         //TODO fix - we dont have the outport variable here anymore
