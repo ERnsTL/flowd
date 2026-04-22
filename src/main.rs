@@ -1574,7 +1574,7 @@ impl RuntimeRuntimePayload {
         // prepare runtime reference for watchdong stopping the network
         let watchdog_runtime = runtime;
         // prepare holder of the signal back-channel for the watchdog thread
-        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread)> = HashMap::new();
+        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread, Arc<AtomicBool>)> = HashMap::new();
         let (watchdog_signalsink, watchdog_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
         // arrayports: check if multiple edges originate from the same source port
