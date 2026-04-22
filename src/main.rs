@@ -2171,12 +2171,24 @@ impl RuntimeRuntimePayload {
                 } else if watchdog_threadandsignal.is_empty() {
                     // network has effectively shut down
                     info!("process health check: all processes exited, shutting down network");
-                    // signal runtime
-                    watchdog_runtime.write().expect("watchdog failed to acquire lock for runtime").stop(watchdog_graph_inout.clone(), true).expect("watchdog failed to runtime.stop()");
+                    // signal runtime; if stop fails, keep watchdog alive and report best-effort status
+                    let stop_err = {
+                        let mut runtime_write = watchdog_runtime
+                            .write()
+                            .expect("watchdog failed to acquire lock for runtime");
+                        runtime_write.stop(watchdog_graph_inout.clone(), true).err()
+                    };
+                    if let Some(err) = stop_err {
+                        warn!("watchdog: runtime.stop() returned error: {}", err);
+                    }
                     //TODO runtime should set the time_stopped etc. values on runtime.status
                     // TODO not watchdog, but runtime.stop() should signal the FBP protocol clients
                     // send network stop notification to all FBP protocol clients//###
-                    watchdog_graph_inout.lock().expect("lock poisoned").send_network_stopped(&NetworkStoppedResponse::new(&watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime").status));
+                    let stopped_packet = {
+                        let runtime_read = watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime");
+                        NetworkStoppedResponse::new(&runtime_read.status)
+                    };
+                    watchdog_graph_inout.lock().expect("lock poisoned").send_network_stopped(&stopped_packet);
                     // exit thread
                     break;
                 }
