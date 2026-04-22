@@ -2,9 +2,11 @@ use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, Process
 use log::{debug, trace, info, warn, error};
 
 // component-specific
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
 use std::thread;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
@@ -16,6 +18,7 @@ pub struct MQTTPublisherComponent {
 
 const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
 const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
+const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 impl Component for MQTTPublisherComponent {
     fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -54,10 +57,9 @@ impl Component for MQTTPublisherComponent {
         topic = topic.trim_start_matches('/');
         debug!("topic: {}", topic);
 
-        // signal handling
-        //TODO optimize - currently not used because we use connection error (connection aborted) to stop the thread
-        // but there can be other reasons for connection close or an error...
-        //let (eventthread_signalsink, eventthread_signalsource) = std::sync::mpsc::sync_channel::<()>(0);
+        // signal handling for event thread shutdown
+        let eventthread_shutdown = Arc::new(AtomicBool::new(false));
+        let eventthread_shutdown_ref = eventthread_shutdown.clone();
 
         // handle connection events
         //TODO automatic reconnection
@@ -104,40 +106,40 @@ impl Component for MQTTPublisherComponent {
                 }
             }
             */
-            //TODO optimize - we dont want to poll for shutdown, so we currently use the Ok or Err distinction - maybe it can be more efficient with an iter() based solution?
-            // but there can be other reasons for connection close or an error...
-            while let Ok(event) = connection.recv() {
-                match event {
-                    Err(err) => {
-                        trace!("Event Err = {:?}", err);
-                        match err {
-                            rumqttc::ConnectionError::MqttState(err) => {
-                                match err {
-                                    rumqttc::StateError::Io(err) => {
-                                        if err.kind() == std::io::ErrorKind::ConnectionAborted {
-                                            debug!("MQTT connection aborted, shutting down");
-                                            break;
-                                        } else {
-                                            error!("MQTT state error: {:?}", err);
+            while !eventthread_shutdown_ref.load(Ordering::Relaxed) {
+                if let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+                    match event {
+                        Err(err) => {
+                            trace!("Event Err = {:?}", err);
+                            match err {
+                                rumqttc::ConnectionError::MqttState(err) => {
+                                    match err {
+                                        rumqttc::StateError::Io(err) => {
+                                            if err.kind() == std::io::ErrorKind::ConnectionAborted {
+                                                debug!("MQTT connection aborted, shutting down");
+                                                break;
+                                            } else {
+                                                error!("MQTT state error: {:?}", err);
+                                                //TODO optimize - maybe send a signal to the main thread to stop the component
+                                            }
+                                        },
+                                        _ => {
+                                            error!("MQTT connection error: {:?}", err);
                                             //TODO optimize - maybe send a signal to the main thread to stop the component
                                         }
-                                    },
-                                    _ => {
-                                        error!("MQTT connection error: {:?}", err);
-                                        //TODO optimize - maybe send a signal to the main thread to stop the component
                                     }
+                                },
+                                _ => {
+                                    // will be handled by the eventloop?
+                                    //TODO make sure
                                 }
-                            },
-                            _ => {
-                                // will be handled by the eventloop?
-                                //TODO make sure
                             }
+                        },
+                        _ => {
+                            trace!("Event = {:?}", event);
+                            // nothing to do, not interested in any events
+                            //TODO really?
                         }
-                    },
-                    _ => {
-                        trace!("Event = {:?}", event);
-                        // nothing to do, not interested in any events
-                        //TODO really?
                     }
                 }
             }
@@ -206,12 +208,28 @@ impl Component for MQTTPublisherComponent {
             std::thread::park();
         }
 
-        // stop MQTT event thread - close channel
-        //drop(eventthread_signalsink);
+        // stop MQTT event thread
+        eventthread_shutdown.store(true, Ordering::Relaxed);
         // close MQTT connection -> MQTT event thread will exit from special connection error ConnectionAborted
-        client.disconnect().expect("failed to disconnect");
-        // wait for event thread to exit
-        event_handler_thread.join().expect("failed to join eventloop listener thread");
+        if let Err(err) = client.disconnect() {
+            warn!("MQTTPublisher: failed to disconnect MQTT client cleanly: {:?}", err);
+        }
+        // wait for event thread to exit (bounded)
+        let join_started = Instant::now();
+        while !event_handler_thread.is_finished() && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if event_handler_thread.is_finished() {
+            if let Err(err) = event_handler_thread.join() {
+                warn!("MQTTPublisher: failed to join eventloop listener thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "MQTTPublisher: eventloop listener thread did not exit within {:?}, detaching",
+                EVENT_THREAD_JOIN_GRACE
+            );
+            drop(event_handler_thread);
+        }
 
         info!("exiting");
     }
