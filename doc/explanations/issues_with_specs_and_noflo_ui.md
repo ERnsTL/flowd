@@ -63,6 +63,25 @@ This file contains things that are unexpected, undocumented, in need of clarific
   Tests still inject `secret` in both top-level and payload with `FIXME` notes ([WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):87, [WebSocket.js](/home/ernst/code/dataflowsystem/07unix+runtime/src/github.com/ERnsTL/flowd/fbp-tests/node_modules/fbp-protocol/src/WebSocket.js):117).
   This indicates transitional behavior, reducing crisp normative semantics.
 
+- The test for adding a node to a non-existent graph expects a certain error message format, but flowd wants to provide more info, but the fbp-tests turn this into an error:
+
+  ```
+  1) flowd webSocket network runtime version 0.7
+       Graph Protocol
+         adding a node to a non-existent graph
+           should send an error:
+
+      Uncaught AssertionError: expected { Object (message) } to deeply equal { Object (message) }
+      + expected - actual
+
+       {
+      -  "message": "Graph 'another-graph' not found"
+      +  "message": "Requested graph not found"
+  ```
+
+- There is no graph:list
+- There is no real graph:delete, only graph:clear
+
 If you want, I can draft a compact “missing normative spec” checklist you could use to harden your own runtime contract (ordering rules, correlation requirements, timeout semantics, idempotency, and error causality).
 
 ## Implicit Requirements Discovered during refactoring for compatibility with fbp-tests
