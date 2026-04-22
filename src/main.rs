@@ -2245,6 +2245,7 @@ impl RuntimeRuntimePayload {
         //TODO implement in full detail
         const STOP_SIGNAL_MAX_RETRIES: usize = 64;
         const PROCESS_JOIN_GRACE_DUR: Duration = Duration::from_secs(5);
+        const WATCHDOG_JOIN_GRACE_DUR: Duration = Duration::from_secs(5);
 
         // if true, the watchdog informed us that all processes have already exited
         if !watchdog_all_exited {
@@ -2350,8 +2351,20 @@ impl RuntimeRuntimePayload {
                 info!("stop: watchdog self-stop acknowledged");
             } else {
                 info!("stop: joining watchdog");
-                if let Err(err) = watchdog_thread.join() {
-                    warn!("stop: joining watchdog returned error: {:?}", err);
+                let join_started = Instant::now();
+                while !watchdog_thread.is_finished()
+                    && join_started.elapsed() < WATCHDOG_JOIN_GRACE_DUR
+                {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if watchdog_thread.is_finished() {
+                    if let Err(err) = watchdog_thread.join() {
+                        warn!("stop: joining watchdog returned error: {:?}", err);
+                    }
+                } else {
+                    warn!("stop: joining watchdog timed out after {:?}, keeping thread tracked for retry", WATCHDOG_JOIN_GRACE_DUR);
+                    timed_out_threads.push("watchdog".to_owned());
+                    self.watchdog_thread = Some(watchdog_thread);
                 }
             }
         }
@@ -2363,7 +2376,7 @@ impl RuntimeRuntimePayload {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 format!(
-                    "network stop incomplete, detached threads: {}",
+                    "network stop incomplete, timed-out threads still running: {}",
                     timed_out_threads.join(", ")
                 ),
             ));
@@ -2528,21 +2541,18 @@ fn broadcast_to_clients<T: Serialize>(
         let mut client = match client.lock() {
             Ok(client) => client,
             Err(err) => {
-                warn!(
-                    "dropping websocket client {} after {} lock poison: {}",
-                    addr, packet_name, err
-                );
+                warn!("dropping websocket client {} after {} lock poison: {}", addr, packet_name, err);
                 failed_clients.push(addr);
                 continue;
             }
         };
+        if let Err(err) = client.get_mut().set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
+            warn!("failed to set websocket client {} write timeout before {} send: {}", addr, packet_name, err);
+        }
         match client.write(Message::text(msg.clone())) {
             Ok(_) => {}
             Err(err) => {
-                warn!(
-                    "dropping websocket client {} after failed {} send: {}",
-                    addr, packet_name, err
-                );
+                warn!("dropping websocket client {} after failed {} send: {}", addr, packet_name, err);
                 failed_clients.push(addr);
             }
         }
