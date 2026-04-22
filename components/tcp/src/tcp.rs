@@ -95,7 +95,7 @@ impl Component for TCPClientComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
                     warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
@@ -333,7 +333,7 @@ impl Component for TCPServerComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec()).expect("cloud not send pong");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
                     warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }

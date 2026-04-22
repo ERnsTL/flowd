@@ -59,7 +59,7 @@ impl Component for RegexpExtractComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
 

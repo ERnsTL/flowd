@@ -40,7 +40,7 @@ impl Component for MuxerComponent {
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
-                    self.signals_out.send(b"pong".to_vec()).expect("could not send pong");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
 
@@ -151,9 +151,7 @@ impl Component for Demux3Component {
                     break;
                 }
                 if signal == b"ping" {
-                    self.signals_out
-                        .send(b"pong".to_vec())
-                        .expect("could not send pong");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
 
