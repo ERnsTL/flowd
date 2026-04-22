@@ -3,6 +3,7 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 //use std::net::SocketAddr;
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
@@ -24,6 +25,7 @@ pub struct TLSClientComponent {
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 65536;   // is allocated once and re-used for each read() call
+const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 
 impl Component for TLSClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -315,10 +317,12 @@ impl Component for TLSServerComponent {
             .expect("failed to build server config"));
         // repare listener
         let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
+        listener.set_nonblocking(true).expect("failed to set non-blocking on tcp listener socket");
         // prepare FBP ports
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let shutdown = Arc::new(AtomicBool::new(false));
 
         // prepare variables for listen thread
         let sockets: Arc<Mutex<HashMap<u32, (TcpStream, Arc<Mutex<ServerConnection>>)>>> = Arc::new(Mutex::new(HashMap::new()));
@@ -326,12 +330,17 @@ impl Component for TLSServerComponent {
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = out_wakeup.clone();
         let config_ref = config.clone();
-        //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
-        //TODO fix - the listener thread is not stopped when the component is stopped, it will continue to listen and accept connections and on network restart the listen address will be already in use
-        let _listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+        let shutdown_listen = shutdown.clone();
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads_ref = connection_threads.clone();
+        let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             // listener loop
             let mut socketnum: u32 = 0;
             loop {
+                if shutdown_listen.load(Ordering::Relaxed) {
+                    debug!("listener got shutdown signal, exiting");
+                    break;
+                }
                 debug!("listening for a client");
                 match listener.accept() {
                     Ok((mut socket, addr)) => {
@@ -343,9 +352,10 @@ impl Component for TLSServerComponent {
                         let out_ref2 = Arc::clone(&out_ref);
                         let out_wakeup_ref2 = out_wakeup_ref.clone();
                         let config_ref2 = config_ref.clone();
+                        let shutdown_conn = shutdown_listen.clone();
 
                         // handle the individual connection in a separate thread
-                        thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
+                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
                             let socketnum_inner = socketnum;
 
                             // setup TCP stream
@@ -360,6 +370,10 @@ impl Component for TLSServerComponent {
                             // receive loop and send to component OUT tagged with socketnum
                             debug!("handling client connection");
                             loop {
+                                if shutdown_conn.load(Ordering::Relaxed) {
+                                    debug!("connection handler got shutdown signal, exiting");
+                                    break;
+                                }
                                 // read from client
                                 trace!("reading from client");
                                 {
@@ -405,17 +419,22 @@ impl Component for TLSServerComponent {
                             }
 
                             // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
                             debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
                         }).expect("could not start connection handler thread");
+                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
                     },
                     Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            thread::sleep(LISTENER_POLL_SLEEP);
+                            continue;
+                        }
                         error!("accept failed: {e:?} - exiting");
                         break;
                     },
                 }
             }
-        });
+        }).expect("could not start listener thread");
 
         // main loop
         debug!("entering main loop");
@@ -453,12 +472,15 @@ impl Component for TLSServerComponent {
                     //TODO optimize - due to the locking, we are not able to send while the the connection handler thread above is blocking on its read() and until the read timeout has passed
                     {
                         let mut sockets_locked = sockets.lock().expect("lock poisoned");
-                        let (ref mut first_socket, conn2client_arc) = sockets_locked.iter_mut().next().unwrap().1;
-                        let conn2client = conn2client_arc.clone();
-                        let mut conn_locked = conn2client.lock().expect("lock poisoned");
-                        let mut conn_writer = conn_locked.writer();
-                        conn_writer.write(&ip).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
-                        conn_locked.complete_io(first_socket).expect("could not complete IO on client socket connection = send data via TLS and underlying TCP connection to client");
+                        if let Some((_, (first_socket, conn2client_arc))) = sockets_locked.iter_mut().next() {
+                            let conn2client = conn2client_arc.clone();
+                            let mut conn_locked = conn2client.lock().expect("lock poisoned");
+                            let mut conn_writer = conn_locked.writer();
+                            conn_writer.write(&ip).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
+                            conn_locked.complete_io(first_socket).expect("could not complete IO on client socket connection = send data via TLS and underlying TCP connection to client");
+                        } else {
+                            debug!("no connected clients, dropping response packet");
+                        }
                     }
                     debug!("done");
                 } else {
@@ -471,6 +493,13 @@ impl Component for TLSServerComponent {
 
             trace!("end of iteration");
             std::thread::park();
+        }
+        shutdown.store(true, Ordering::Relaxed);
+        listen_thread.join().expect("failed to join listener thread");
+        for handle in connection_threads.lock().expect("lock poisoned").drain(..) {
+            if let Err(err) = handle.join() {
+                warn!("failed to join tls connection handler thread: {:?}", err);
+            }
         }
         info!("exiting");
     }
