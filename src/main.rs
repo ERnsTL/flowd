@@ -2428,6 +2428,8 @@ impl RuntimeRuntimePayload {
     }
 
     fn packet(payload: &RuntimePacketRequestPayload, graph_inout: &mut GraphInportOutportHolder) -> std::result::Result<(), std::io::Error> {
+        const INPORT_PUSH_GRACE_DUR: Duration = Duration::from_secs(2);
+
         //TODO check if graph exists and if that port actually exists
         //TODO check payload datatype, schema, event (?) etc.
         //TODO implement and deliver to destination process
@@ -2435,11 +2437,16 @@ impl RuntimeRuntimePayload {
         // deliver to destination process
         if let Some(inports) = graph_inout.inports.as_mut() {
             if let Some(inport) = inports.get_mut(payload.port.as_str()) {
+                let wait_started = Instant::now();
                 while inport.sink.is_full() {
                     // wait until non-full
                     //TODO optimize
                     //condvar_notify!(&*inport.wake_notify);
                     inport.wakeup.as_ref().unwrap().unpark();
+
+                    if wait_started.elapsed() >= INPORT_PUSH_GRACE_DUR {
+                        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("graph inport {} backpressured for {:?}", payload.port, INPORT_PUSH_GRACE_DUR)));
+                    }
 
                     // sleep some time resp. give up CPU timeslot
                     thread::yield_now();
