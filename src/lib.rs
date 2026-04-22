@@ -479,6 +479,24 @@ impl RuntimeRuntimePayload {
 
     // persistence
     fn persist(&self, graph: &Graph) -> std::result::Result<(), std::io::Error> {
+        //###
+        // get source
+        //TODO is the source according to the FBP JSON Network Protocol the same as the specified FBP JSON Graph format or does it differ? In which do we want to persist?
+        //TODO where in noflo-ui is the button to trigger network:persist command?
+
+        //TODO check for valid graph - do we want to allow unconnected ports, work in progress state?
+        //TODO add integrity checker:
+        //  critical and non-critical errors
+        //  critical - cannot load, cannot start network
+        //  noncritical - found missing connections, unconnected ports, unavailable components.
+
+        //TODO automatic saving in time intervals? how many autosaves to keep? how to handle autosave on crash and after restart?
+
+        //TODO saving on ctrl-c? No, ctrl-c means "abort".
+        //TODO saving on panic? yes. goal: never lose your data.
+
+        //TODO handle .bak file
+
         let mut persisted_graphs: HashMap<String, Graph> = HashMap::new();
         for graph_id in self.graphs.list_graphs() {
             if let Some(graph_arc) = self.graphs.get_graph(&graph_id) {
