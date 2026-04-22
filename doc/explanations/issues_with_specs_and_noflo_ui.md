@@ -36,6 +36,9 @@ This file contains things that are unexpected, undocumented, in need of clarific
 - Normative examples are insufficient: add canonical conversation transcripts for common and edge-case flows.
 - Conformance tests are permissive on sequencing: add strict sequence tests and negative tests for invalid order/state transitions.
 - Determinism expectations are unclear: define which outputs are nondeterministic and which must be reproducible across runtimes.
+- For graphs, there is no graph listing, no graph management:
+  - The FBP protocol treats graphs as: “Named mutable documents” — not managed resources
+  - Meaning: No lifecycle (create/list/delete), Only mutations on a known id
 
 ### Current quality assessment of fbp-protocol
 
