@@ -50,6 +50,7 @@ pub use flowd_component_api::{
 
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
+const WATCHDOG_POLL_DUR: core::time::Duration = Duration::from_millis(50);
 const WATCHDOG_MAX_MISSED_PONGS: u8 = 2;
 const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
@@ -2052,12 +2053,11 @@ impl RuntimeRuntimePayload {
         let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
             debug!("watchdog is running");
             let mut missed_pongs: HashMap<String, u8> = HashMap::new();
-            loop {
-                //TODO optimize, there is also try_recv() and recv_timeout()
-                if let Ok(ip) = watchdog_signalsource2.try_recv() {
+            'watchdog_loop: loop {
+                while let Ok(ip) = watchdog_signalsource2.try_recv() {
                     if ip == b"stop" {
                         debug!("got stop signal, exiting");
-                        break;
+                        break 'watchdog_loop;
                     }
                 }
 
@@ -2067,6 +2067,12 @@ impl RuntimeRuntimePayload {
                 let mut ok = true;
                 let mut disconnected_components: Vec<String> = Vec::new();
                 for (name, proc) in watchdog_threadandsignal.iter() {
+                    if let Ok(ip) = watchdog_signalsource2.try_recv() {
+                        if ip == b"stop" {
+                            debug!("got stop signal, exiting");
+                            break 'watchdog_loop;
+                        }
+                    }
                     trace!("process {}...", name);
                     if proc.2.load(Ordering::Acquire) {
                         trace!("process {} already exited", name);
@@ -2102,41 +2108,58 @@ impl RuntimeRuntimePayload {
                     proc.1.unpark();
                     now = chrono::Utc::now();   //TODO is it really useful to measure 0.000005ms response time?
 
-                    // read response
-                    match proc.3.recv_timeout(core::time::Duration::from_millis(1000)) {
-                        Ok(ip) => {
-                            if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
-                                trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
-                                debug!("process {} OK", name);
+                    // read response with polling so watchdog stop stays responsive
+                    let wait_started = Instant::now();
+                    let mut got_pong = false;
+                    let mut disconnected = false;
+                    while wait_started.elapsed() < core::time::Duration::from_millis(1000) {
+                        match proc.3.recv_timeout(WATCHDOG_POLL_DUR) {
+                            Ok(ip) => {
+                                if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
+                                    trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
+                                    debug!("process {} OK", name);
+                                    missed_pongs.remove(name);
+                                } else {
+                                    warn!("process {} sent a spurious response: {}", name, str::from_utf8(&ip).expect("got non-utf8 data"));
+                                    //TODO one spurious response currently trips up the logic
+                                }
+                                got_pong = true;
+                                break;
+                            },
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                if let Ok(ip) = watchdog_signalsource2.try_recv() {
+                                    if ip == b"stop" {
+                                        debug!("got stop signal, exiting");
+                                        break 'watchdog_loop;
+                                    }
+                                }
+                            },
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                                warn!("process {} disconnected signal channel!", name);
                                 missed_pongs.remove(name);
-                            } else {
-                                warn!("process {} sent a spurious response: {}", name, str::from_utf8(&ip).expect("got non-utf8 data"));
-                                //TODO one spurious response currently trips up the logic
-                            }
-                        },
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            let misses = missed_pongs.entry(name.clone()).or_insert(0);
-                            *misses = misses.saturating_add(1);
-                            if *misses >= WATCHDOG_MAX_MISSED_PONGS {
-                                warn!(
-                                    "process {} failed to respond within 1000ms ({} consecutive misses)!",
-                                    name,
-                                    *misses
-                                );
                                 ok = false;
-                            } else {
-                                debug!(
-                                    "process {} missed watchdog pong once ({} / {}), tolerating transient miss",
-                                    name,
-                                    *misses,
-                                    WATCHDOG_MAX_MISSED_PONGS
-                                );
+                                disconnected = true;
+                                break;
                             }
-                        },
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                            warn!("process {} disconnected signal channel!", name);
-                            missed_pongs.remove(name);
+                        }
+                    }
+                    if !got_pong && !disconnected {
+                        let misses = missed_pongs.entry(name.clone()).or_insert(0);
+                        *misses = misses.saturating_add(1);
+                        if *misses >= WATCHDOG_MAX_MISSED_PONGS {
+                            warn!(
+                                "process {} failed to respond within 1000ms ({} consecutive misses)!",
+                                name,
+                                *misses
+                            );
                             ok = false;
+                        } else {
+                            debug!(
+                                "process {} missed watchdog pong once ({} / {}), tolerating transient miss",
+                                name,
+                                *misses,
+                                WATCHDOG_MAX_MISSED_PONGS
+                            );
                         }
                     }
                 }
@@ -2161,7 +2184,16 @@ impl RuntimeRuntimePayload {
                     // exit thread
                     break;
                 }
-                thread::sleep(PROCESS_HEALTHCHECK_DUR);
+                let sleep_started = Instant::now();
+                while sleep_started.elapsed() < PROCESS_HEALTHCHECK_DUR {
+                    if let Ok(ip) = watchdog_signalsource2.try_recv() {
+                        if ip == b"stop" {
+                            debug!("got stop signal, exiting");
+                            break 'watchdog_loop;
+                        }
+                    }
+                    thread::sleep(WATCHDOG_POLL_DUR);
+                }
             }
         }).expect("failed to spawn watchdog thread");
 
