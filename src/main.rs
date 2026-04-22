@@ -2134,8 +2134,9 @@ impl RuntimeRuntimePayload {
 
     fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement in full detail
+        const STOP_SIGNAL_MAX_RETRIES: usize = 64;
 
-        // if true, the network is simply marked shut down because watchdog informed us that all processes have exited
+        // if true, the watchdog informed us that all processes have already exited
         if !watchdog_all_exited {
             // close front door early - inform FBP Network Protocol clients that graph inports are now disconnected (runtime:packet event type = connect)
             //NOTE: this happens before the GraphOutports handler thread is notified below among all the processes, so processing can be finished but no new packets are sent in anymore by the FBP client(s)
