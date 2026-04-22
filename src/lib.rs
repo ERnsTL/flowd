@@ -328,7 +328,7 @@ impl<'a> RuntimeRuntimeMessage<'a> {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RuntimeRuntimePayload {
+pub struct RuntimeRuntimePayload {
     id: String,                        // spec: UUID of this runtime instance
     label: String,                     // spec: human-readable description of the runtime
     version: String,                   // spec: supported protocol version //TODO which versions are there? implement proper
@@ -1424,7 +1424,7 @@ impl RuntimeRuntimePayload {
 
 // runtime state of graph inports and outports
 #[derive(Debug)]
-struct GraphInportOutportHolder {
+pub struct GraphInportOutportHolder {
     // inports
     // the edge sinks are stored here because the connection handler in handle_client() needs to send into these
     inports: Option<HashMap<String, ProcessEdgeSink>>,
@@ -4533,7 +4533,7 @@ impl TraceErrorResponse {
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")] // spec: for example the field "caseSensitive"
-struct Graph {
+pub struct Graph {
     case_sensitive: bool, // always true for flowd TODO optimize
     properties: GraphProperties,
     inports: HashMap<String, GraphPort>, // spec: object/hashmap. TODO will not be accessed concurrently - to be used inside Arc<RwLock<>>
@@ -5277,7 +5277,7 @@ impl std::fmt::Debug for Process {
 //TODO cannot think of a better name ATM, see https://stackoverflow.com/questions/1866794/naming-classes-how-to-avoid-calling-everything-a-whatevermanager
 //TODO implement some functionality
 #[derive(Default)]
-struct ComponentLibrary {
+pub struct ComponentLibrary {
     available: Vec<ComponentComponentPayload>,
 }
 
