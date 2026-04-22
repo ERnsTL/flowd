@@ -50,6 +50,7 @@ pub use flowd_component_api::{
 
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
+const WATCHDOG_MAX_MISSED_PONGS: u8 = 2;
 const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
 const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
@@ -2050,6 +2051,7 @@ impl RuntimeRuntimePayload {
         let (watchdog_signalsink2, watchdog_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
         let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
             debug!("watchdog is running");
+            let mut missed_pongs: HashMap<String, u8> = HashMap::new();
             loop {
                 //TODO optimize, there is also try_recv() and recv_timeout()
                 if let Ok(ip) = watchdog_signalsource2.try_recv() {
@@ -2069,6 +2071,7 @@ impl RuntimeRuntimePayload {
                     if proc.2.load(Ordering::Acquire) {
                         trace!("process {} already exited", name);
                         disconnected_components.push(name.clone());
+                        missed_pongs.remove(name);
                         ok = false;
                         continue;
                     }
@@ -2087,6 +2090,7 @@ impl RuntimeRuntimePayload {
                         Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                             warn!("process {} signal channel disconnected", name);
                             disconnected_components.push(name.clone());
+                            missed_pongs.remove(name);
                             ok = false;
                             continue;
                         },
@@ -2104,17 +2108,34 @@ impl RuntimeRuntimePayload {
                             if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
                                 trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
                                 debug!("process {} OK", name);
+                                missed_pongs.remove(name);
                             } else {
                                 warn!("process {} sent a spurious response: {}", name, str::from_utf8(&ip).expect("got non-utf8 data"));
                                 //TODO one spurious response currently trips up the logic
                             }
                         },
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            warn!("process {} failed to respond within 1000ms!", name);
-                            ok = false;
+                            let misses = missed_pongs.entry(name.clone()).or_insert(0);
+                            *misses = misses.saturating_add(1);
+                            if *misses >= WATCHDOG_MAX_MISSED_PONGS {
+                                warn!(
+                                    "process {} failed to respond within 1000ms ({} consecutive misses)!",
+                                    name,
+                                    *misses
+                                );
+                                ok = false;
+                            } else {
+                                debug!(
+                                    "process {} missed watchdog pong once ({} / {}), tolerating transient miss",
+                                    name,
+                                    *misses,
+                                    WATCHDOG_MAX_MISSED_PONGS
+                                );
+                            }
                         },
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                             warn!("process {} disconnected signal channel!", name);
+                            missed_pongs.remove(name);
                             ok = false;
                         }
                     }
@@ -2122,6 +2143,7 @@ impl RuntimeRuntimePayload {
                 if !disconnected_components.is_empty() {
                     for name in disconnected_components {
                         warn!("watchdog: removing exited process {}", name);
+                        missed_pongs.remove(&name);
                         watchdog_threadandsignal.remove(&name);
                     }
                 }
