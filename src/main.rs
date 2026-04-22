@@ -2039,6 +2039,12 @@ impl RuntimeRuntimePayload {
                 let mut exited_count: usize = 0;
                 for (name, proc) in watchdog_threadandsignal.iter() {
                     trace!("process {}...", name);
+                    if proc.2.load(Ordering::Acquire) {
+                        trace!("process {} already exited", name);
+                        disconnected_components.push(name.clone());
+                        ok = false;
+                        continue;
+                    }
                     // send query to process
                     match proc.0.try_send(b"ping".to_vec()) {
                         Ok(_) => {},
@@ -2081,6 +2087,12 @@ impl RuntimeRuntimePayload {
                             warn!("process {} disconnected signal channel!", name);
                             ok = false;
                         }
+                    }
+                }
+                if !disconnected_components.is_empty() {
+                    for name in disconnected_components {
+                        warn!("watchdog: removing exited process {}", name);
+                        watchdog_threadandsignal.remove(&name);
                     }
                 }
                 if ok {
