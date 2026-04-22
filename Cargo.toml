@@ -78,6 +78,7 @@ flowd-ssh = { path = "components/ssh" }
 flowd-telegram = { path = "components/telegram" }
 flowd-matrix = { path = "components/matrix" }
 flowd-sexp = { path = "components/sexp" }
+flowd-delay = { path = "components/delay" }
 
 # for build.rs
 [build-dependencies]
