@@ -304,7 +304,9 @@ See:
 
 ## License
 
-GNU LGPLv3+ (see [LICENSE](LICENSE))
+Apache License 2.0 (see [LICENSE](LICENSE))
+
+See [Licensing Strategy](doc/adr/adr-024-licensing_strategy.md) for rationale.
 
 
 ## Commercial Support
@@ -315,6 +317,8 @@ Professional services around `flowd` are available, including:
 * Managed runtime
 * Solution-as-a-Service
 * Consulting
+* Custom components and system-level integrations
+* Advanced platform features (control plane, monitoring, scaling, enterprise capabilities)
 
 Contact:
 
