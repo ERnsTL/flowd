@@ -2791,27 +2791,25 @@ struct NetworkGetstatusPayload {
 // ----------
 
 #[derive(Serialize, Debug)]
-struct NetworkStatusMessage<'a> {
+struct NetworkStatusMessage {
     protocol: String,
     command: String,
-    payload: &'a NetworkStatusPayload,
+    payload: NetworkStatusPayload,
 }
 
-impl Default for NetworkStatusMessage<'_> {
+impl Default for NetworkStatusMessage {
     fn default() -> Self {
         NetworkStatusMessage {
             protocol: String::from("network"),
             command: String::from("status"),
-            //TODO fix - currently using recursive Default::default() because the following does not work:
-            //payload: &NetworkStatusPayload::default(),
-            ..Default::default()
+            payload: NetworkStatusPayload::default(),
         }
     }
 }
 
 //TODO payload has small size, we could copy it, problem is NetworkStatusPayload cannot automatically derive Copy because of the String does not implement Copy
-impl<'a> NetworkStatusMessage<'a> {
-    fn new(payload: &'a NetworkStatusPayload) -> Self {
+impl NetworkStatusMessage {
+    fn new(payload: NetworkStatusPayload) -> Self {
         NetworkStatusMessage {
             protocol: String::from("network"),
             command: String::from("status"),
@@ -2821,7 +2819,7 @@ impl<'a> NetworkStatusMessage<'a> {
 }
 
 #[serde_with::skip_serializing_none]
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 struct NetworkStatusPayload {
     graph: String,
     uptime: Option<i64>, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network. NOTE: i64 because of return type from new() chrono calculations return type, which cannot be converted to u32.
