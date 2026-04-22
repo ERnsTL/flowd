@@ -29,6 +29,7 @@ impl Component for RepeatComponent {
         let mut inn = self.inn;
         let mut out = self.out.sink;
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let mut stop_requested = false;
         loop {
             trace!("begin of iteration");
 
@@ -40,15 +41,30 @@ impl Component for RepeatComponent {
                 // stop signal
                 if ip == b"stop" { //TODO optimize comparison
                     info!("got stop signal, exiting");
-                    break;
+                    stop_requested = true;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
+            if stop_requested {
+                break;
+            }
 
             // check in port
             loop {
+                // stay responsive to stop/ping even while draining a busy input buffer
+                if let Ok(sig) = self.signals_in.try_recv() {
+                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                    if sig == b"stop" {
+                        info!("got stop signal while draining input, exiting");
+                        stop_requested = true;
+                        break;
+                    } else if sig == b"ping" {
+                        trace!("got ping signal, responding");
+                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                    }
+                }
                 if let Ok(ip) = inn.pop() {
                     debug!("repeating packet...");
                     out.push(ip).expect("could not push into OUT");
@@ -77,6 +93,9 @@ impl Component for RepeatComponent {
                 } else {
                     break;
                 }
+            }
+            if stop_requested {
+                break;
             }
 
             // are we done?
