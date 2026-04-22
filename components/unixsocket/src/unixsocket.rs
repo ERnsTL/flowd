@@ -3,6 +3,7 @@ use log::{debug, trace, info, warn, error};
 
 // component-specific
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 /*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;
@@ -16,7 +17,7 @@ use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
 */
 use std::time::Duration;
 use uds::UnixSocketAddr;
-use std::io::{Write, Read};
+use std::io::{ErrorKind, Write, Read};
 use std::thread::{self};
 use std::collections::HashMap;
 
@@ -54,6 +55,7 @@ enum SocketType {
 
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
+const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 
 impl Component for UnixSocketClientComponent {
     fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
@@ -369,64 +371,88 @@ impl Component for UnixSocketServerComponent {
         trace!("got path {}", listenpath);
         std::fs::remove_file(&listenpath).ok();
         let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
+        listener.set_nonblocking(true).expect("set listen socket to non-blocking");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let shutdown = Arc::new(AtomicBool::new(false));
 
-        //listener.set_nonblocking(true).expect("set listen socket to non-blocking");
         let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> = Arc::new(Mutex::new(HashMap::new()));
         let sockets_ref = Arc::clone(&sockets);
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = out_wakeup.clone();
-        //TODO use that variable and properly terminate the listener thread on network stop - who tells it to stop listening?
-        let _listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
+        let shutdown_listen = shutdown.clone();
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads_ref = connection_threads.clone();
+        let listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             let mut socketnum: u32 = 0;
             loop {
+                if shutdown_listen.load(Ordering::Relaxed) {
+                    debug!("listener got shutdown signal, exiting");
+                    break;
+                }
                 debug!("listening for a client");
                 match listener.accept() {
                     Ok((mut socket, addr)) => {
                         println!("handling client: {addr:?}");
                         socketnum += 1;
+                        socket.set_read_timeout(Some(DEFAULT_READ_TIMEOUT)).expect("failed to set read timeout on unix socket");
                         sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
                         let sockets_ref2 = Arc::clone(&sockets_ref);
                         let out_ref2 = Arc::clone(&out_ref);
                         let out_wakeup_ref2 = out_wakeup_ref.clone();
-                        thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
+                        let shutdown_conn = shutdown_listen.clone();
+                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
                             let socketnum_inner = socketnum;
                             // receive loop and send to component OUT tagged with socketnum
                             debug!("handling client connection");
                             loop {
+                                if shutdown_conn.load(Ordering::Relaxed) {
+                                    debug!("connection handler got shutdown signal, exiting");
+                                    break;
+                                }
                                 trace!("reading from client");
                                 let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
-                                if let Ok(bytes) = socket.read(&mut buf) {
-                                    if bytes == 0 {
-                                        // correctly closed (or given buffer had size 0)
-                                        debug!("connection closed ok, exiting connection handler");
+                                match socket.read(&mut buf) {
+                                    Ok(bytes) => {
+                                        if bytes == 0 {
+                                            // correctly closed (or given buffer had size 0)
+                                            debug!("connection closed ok, exiting connection handler");
+                                            break;
+                                        }
+                                        debug!("got data from client, pushing data to OUT");
+                                        buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
+                                        out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
+                                        trace!("unparking OUT thread");
+                                        out_wakeup_ref2.unpark();
+                                    }
+                                    Err(err) => {
+                                        if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
+                                            continue;
+                                        }
+                                        debug!("connection non-ok result, exiting connection handler");
                                         break;
                                     }
-                                    debug!("got data from client, pushing data to OUT");
-                                    buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
-                                    out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
-                                    trace!("unparking OUT thread");
-                                    out_wakeup_ref2.unpark();
-                                } else {
-                                    debug!("connection non-ok result, exiting connection handler");
-                                    break;
-                                };
+                                }
                                 trace!("-- end of iteration")
                             }
                             // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner).expect("could not remove my socketnum from sockets hashmap");
+                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
                             debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
                         }).expect("could not start connection handler thread");
+                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
                     },
                     Err(e) => {
+                        if e.kind() == ErrorKind::WouldBlock {
+                            thread::sleep(LISTENER_POLL_SLEEP);
+                            continue;
+                        }
                         error!("accept failed: {e:?} - exiting");
                         break;
                     },
                 }
             }
-        });
+        }).expect("could not start listener thread");
         debug!("entering main loop");
 
         loop {
@@ -458,7 +484,11 @@ impl Component for UnixSocketServerComponent {
 
                     // send into unix socket to peer
                     //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
+                    if let Some((_, socket)) = sockets.lock().expect("lock poisoned").iter_mut().next() {
+                        socket.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
+                    } else {
+                        debug!("no connected clients, dropping response packet");
+                    }
                     debug!("done");
                 } else {
                     break;
@@ -471,8 +501,15 @@ impl Component for UnixSocketServerComponent {
             trace!("end of iteration");
             std::thread::park();
         }
+        shutdown.store(true, Ordering::Relaxed);
+        listen_thread.join().expect("failed to join listener thread");
+        for handle in connection_threads.lock().expect("lock poisoned").drain(..) {
+            if let Err(err) = handle.join() {
+                warn!("failed to join unixsocket connection handler thread: {:?}", err);
+            }
+        }
         debug!("cleaning up");
-        std::fs::remove_file(listenpath).unwrap();
+        std::fs::remove_file(listenpath).ok();
         info!("exiting");
     }
 
