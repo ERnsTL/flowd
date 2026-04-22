@@ -216,7 +216,22 @@ impl Component for WSServerComponent {
 
         // get configuration IP
         trace!("spinning for configuration IP...");
-        while conf.is_empty() {
+        loop {
+            if !conf.is_empty() {
+                break;
+            }
+            if let Ok(ip) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                if ip == b"stop" {
+                    info!("got stop signal while waiting for CONF, exiting");
+                    return;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
             thread::yield_now();
         }
         //TODO optimize string conversions to on an address

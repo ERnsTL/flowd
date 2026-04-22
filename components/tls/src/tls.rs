@@ -279,7 +279,22 @@ impl Component for TLSServerComponent {
 
         // get configuration IP
         trace!("spinning for configuration IP...");
-        while conf.is_empty() {
+        loop {
+            if !conf.is_empty() {
+                break;
+            }
+            if let Ok(ip) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                if ip == b"stop" {
+                    info!("got stop signal while waiting for CONF, exiting");
+                    return;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
             thread::yield_now();
         }
         //TODO optimize string conversions to on an address
@@ -289,7 +304,22 @@ impl Component for TLSServerComponent {
 
         // get certificate
         trace!("waiting for certificate IP...");
-        while cert_in.is_empty() {
+        loop {
+            if !cert_in.is_empty() {
+                break;
+            }
+            if let Ok(ip) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                if ip == b"stop" {
+                    info!("got stop signal while waiting for CERT, exiting");
+                    return;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
             thread::yield_now();
         }
         let cert_vec = cert_in.pop().expect("not empty but still got an error on pop");
@@ -298,7 +328,22 @@ impl Component for TLSServerComponent {
 
         // get key
         trace!("waiting for private key IP...");
-        while key_in.is_empty() {
+        loop {
+            if !key_in.is_empty() {
+                break;
+            }
+            if let Ok(ip) = self.signals_in.try_recv() {
+                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                if ip == b"stop" {
+                    info!("got stop signal while waiting for KEY, exiting");
+                    return;
+                } else if ip == b"ping" {
+                    trace!("got ping signal, responding");
+                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else {
+                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                }
+            }
             thread::yield_now();
         }
         let key_vec = key_in.pop().expect("not empty but still got an error on pop");
