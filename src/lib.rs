@@ -149,6 +149,9 @@ pub fn load_or_create_graph() -> std::result::Result<Arc<RwLock<Graph>>, std::io
 mod components;
 include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
+// multi-graph support
+pub mod multi_graph;
+
 // server module
 pub mod server;
 
@@ -355,6 +358,8 @@ pub struct RuntimeRuntimePayload {
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
     #[serde(skip)]
     secrets: HashMap<String, String>, // graph name -> secret token for token-based security
+    #[serde(skip)]
+    graphs: multi_graph::MultiGraphManager, // multi-graph support
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -401,12 +406,22 @@ impl Default for RuntimeRuntimePayload {
             watchdog_thread: None,
             watchdog_channel: None,
             secrets: HashMap::new(),
+            graphs: multi_graph::MultiGraphManager::new(),
         }
     }
 }
 
 impl RuntimeRuntimePayload {
     fn new(active_graph: String) -> Self {
+        let mut graphs = multi_graph::MultiGraphManager::new();
+        // Create initial graph
+        let initial_graph = Arc::new(RwLock::new(Graph::new(
+            active_graph.clone(),
+            "Initial graph".to_string(),
+            "default".to_string()
+        )));
+        graphs.add_graph(active_graph.clone(), initial_graph);
+
         RuntimeRuntimePayload{
             graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
             status: NetworkStartedResponsePayload {
@@ -416,6 +431,7 @@ impl RuntimeRuntimePayload {
                 running: false,
                 debug: None,
             },
+            graphs,
             ..Default::default()  //TODO mock other fields as well
         }
     }
@@ -2554,8 +2570,21 @@ struct NetworkStartedResponsePayload {
 }
 
 //NOTE: this type alias allows us to implement Serialize (a trait from another crate) for DateTime (also from another crate)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct UtcTime(chrono::DateTime<Utc>);
+
+impl<'de> Deserialize<'de> for UtcTime {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let dt = chrono::DateTime::parse_from_rfc3339(&s)
+            .map_err(serde::de::Error::custom)?
+            .with_timezone(&Utc);
+        Ok(UtcTime(dt))
+    }
+}
 
 impl Serialize for UtcTime {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
