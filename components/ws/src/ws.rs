@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tungstenite::protocol::Message;
 use tungstenite::util::NonBlockingError;
 use std::time::{Duration, Instant};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread::{self};
 use std::collections::HashMap;
 use tungstenite::WebSocket;
@@ -401,6 +401,12 @@ impl Component for WSServerComponent {
             std::thread::park();
         }
         shutdown.store(true, Ordering::Relaxed);
+        {
+            let mut sockets_locked = sockets.lock().expect("lock poisoned");
+            for socket in sockets_locked.values_mut() {
+                let _ = socket.get_mut().shutdown(Shutdown::Both);
+            }
+        }
         let listen_join_started = Instant::now();
         while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
             thread::sleep(Duration::from_millis(10));

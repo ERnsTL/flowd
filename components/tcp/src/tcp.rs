@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::thread::{self};
 use std::collections::HashMap;
 
@@ -443,6 +443,12 @@ impl Component for TCPServerComponent {
             std::thread::park();
         }
         shutdown.store(true, Ordering::Relaxed);
+        {
+            let mut sockets_locked = sockets.lock().expect("lock poisoned");
+            for socket in sockets_locked.values_mut() {
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+        }
         let listen_join_started = Instant::now();
         while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
             thread::sleep(Duration::from_millis(10));

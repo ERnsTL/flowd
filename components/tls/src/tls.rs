@@ -5,7 +5,7 @@ use log::{debug, error, info, trace, warn};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 //use std::net::SocketAddr;
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 use rustls::{RootCertStore, ServerConnection};
 use std::thread::{self};
@@ -542,6 +542,12 @@ impl Component for TLSServerComponent {
             std::thread::park();
         }
         shutdown.store(true, Ordering::Relaxed);
+        {
+            let mut sockets_locked = sockets.lock().expect("lock poisoned");
+            for (socket, _) in sockets_locked.values_mut() {
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+        }
         let listen_join_started = Instant::now();
         while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
             thread::sleep(Duration::from_millis(10));
