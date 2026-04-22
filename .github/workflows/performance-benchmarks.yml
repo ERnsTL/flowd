@@ -1,0 +1,65 @@
+name: Performance Benchmarks
+
+on:
+  push:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Run Criterion Benchmarks
+        run: cargo bench --bench micro_benchmarks --bench pipeline_benchmarks -- --noplot
+
+      - name: Upload Criterion Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-${{ github.sha }}
+          path: target/criterion
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install Bencher CLI
+        if: ${{ secrets.BENCHER_API_TOKEN != '' && vars.BENCHER_PROJECT != '' }}
+        uses: bencherdev/bencher@main
+
+      - name: Track Benchmarks with Bencher (push)
+        if: ${{ github.event_name == 'push' && secrets.BENCHER_API_TOKEN != '' && vars.BENCHER_PROJECT != '' }}
+        run: |
+          bencher run \
+            --project "${{ vars.BENCHER_PROJECT }}" \
+            --token "${{ secrets.BENCHER_API_TOKEN }}" \
+            --branch "${{ github.ref_name }}" \
+            --testbed "ubuntu-latest" \
+            --adapter rust_criterion \
+            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            --err \
+            "cargo bench --bench micro_benchmarks --bench pipeline_benchmarks -- --noplot"
+
+      - name: Track Benchmarks with Bencher (pull_request)
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && secrets.BENCHER_API_TOKEN != '' && vars.BENCHER_PROJECT != '' }}
+        run: |
+          bencher run \
+            --project "${{ vars.BENCHER_PROJECT }}" \
+            --token "${{ secrets.BENCHER_API_TOKEN }}" \
+            --branch "${{ github.head_ref }}" \
+            --start-point "${{ github.base_ref }}" \
+            --start-point-hash "${{ github.event.pull_request.base.sha }}" \
+            --start-point-clone-thresholds \
+            --start-point-reset \
+            --testbed "ubuntu-latest" \
+            --adapter rust_criterion \
+            --github-actions "${{ secrets.GITHUB_TOKEN }}" \
+            --err \
+            "cargo bench --bench micro_benchmarks --bench pipeline_benchmarks -- --noplot"

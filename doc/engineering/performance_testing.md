@@ -417,3 +417,109 @@ This specification ensures:
 * continuous performance tracking
 * separation of cause (micro) and effect (pipeline)
 * realistic, runtime-based benchmarking
+
+
+## 17. Repository Implementation (Issue #335)
+
+The current implementation in this repository uses:
+
+* Criterion benchmark suites at:
+  * `benches/micro_benchmarks.rs`
+  * `benches/pipeline_benchmarks.rs`
+* benchmark harness configuration in `Cargo.toml`:
+  * `[[bench]]`
+  * `name = "micro_benchmarks"`
+  * `harness = false`
+  * `[[bench]]`
+  * `name = "pipeline_benchmarks"`
+  * `harness = false`
+* GitHub Actions workflow:
+  * `.github/workflows/performance-benchmarks.yml`
+
+Implemented micro-bench scenarios (primitive layer):
+
+* ringbuffer push/pop throughput
+* edge/message transfer cost (payload-size dependent)
+* cross-thread handover latency
+
+Implemented pipeline scenarios (runtime layer):
+
+* linear pipeline (`Source → Node → Node → Sink`)
+* fan-out pipeline (`Source → Demux → Node A/B/C → Merge → Sink`)
+* fan-in / merge pipeline (`Source A/B → Merge → Node → Sink`)
+* high-volume linear pipeline
+* IO-simulated pipeline (`Source → Delay → Node → Sink`)
+
+Each pipeline scenario has two benchmark sets:
+
+* persistence-loaded graph set:
+  * graph is serialized and loaded with the same `read_to_string + serde_json::from_str` mechanism as runtime startup
+* direct graph/runtime set:
+  * graph and runtime structs are synthesized in-memory and runtime functions are called directly (without websocket graph mutation)
+
+Runtime execution path used by pipeline benchmarks:
+
+* shared internal `run_graph()` in `src/lib.rs`
+* `network:start` handler and benchmark harness both call `run_graph()`
+* component instantiation, edge wiring, and execution loop are therefore exercised through the same runtime start path
+* runtime fix included:
+  * source array-port validation now checks repeated use of the same source *port* (not only process), enabling valid multi-outport fan-out graphs
+
+Metrics currently captured:
+
+* throughput via Criterion `Throughput::Elements` (messages/sec) in both micro and pipeline groups
+* latency via dedicated Criterion latency groups (including end-to-end runtime scenarios)
+* statistical stability via Criterion defaults + configured sample sizes
+
+
+## 18. Local Usage
+
+Run full benchmark suite:
+
+```sh
+cargo bench --bench micro_benchmarks --bench pipeline_benchmarks -- --noplot
+```
+
+Outputs are stored in:
+
+```text
+target/criterion/
+```
+
+
+## 19. CI Integration
+
+On each `push` and `pull_request`, CI:
+
+* runs both Criterion benchmark targets (`micro_benchmarks` and `pipeline_benchmarks`)
+* uploads `target/criterion` as build artifact
+* optionally uploads results to Bencher (if configured)
+
+No static baseline file is used.
+
+
+## 20. Bencher Setup
+
+To enable commit-level history tracking in CI:
+
+1. Create a Bencher project and copy its project slug.
+2. Add repository secret `BENCHER_API_TOKEN`.
+3. Add repository variable `BENCHER_PROJECT` (project slug).
+4. Push a commit or open a PR to trigger the workflow.
+
+CI then publishes each benchmark run with:
+
+* adapter: `rust_criterion`
+* branch metadata from GitHub event context
+* PR start-point comparison for regression review
+
+
+## 21. Interpretation Guidance
+
+Use trend comparison between commits, not single-run absolutes:
+
+* throughput drops indicate potential regression in data movement
+* latency increases indicate added pipeline overhead
+* high-volume drift indicates long-run behavior changes
+
+Manual regression review is the default for now. Soft threshold automation can be added later.

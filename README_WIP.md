@@ -307,9 +307,10 @@ TODO Linear maintenance cost in relation to program size.
 Run benchmark targets for `flowd`:
 
 ```sh
-cargo bench
+cargo bench --bench micro_benchmarks --bench pipeline_benchmarks -- --noplot
 ```
 
-At the moment, no Criterion benchmark targets are defined in this repository yet, so this command may be a no-op.
+Benchmark results are written to `target/criterion/`.
 
-TODO add performance regression tracking
+For methodology and CI/Bencher tracking details, see:
+`doc/engineering/performance_testing.md`.
