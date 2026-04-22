@@ -259,6 +259,10 @@ pub fn main() {
             error!("Error accepting stream: {}", e);
         }
     }
+
+    // output flowd uptime on exit
+    let flowd_uptime = flowd_start_time.elapsed();
+    println!("flowd uptime: {}", format_duration(flowd_uptime));
 }
 
 //fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, processes: Arc<RwLock<ProcessManager>>) -> Result<()> {
@@ -3829,12 +3833,15 @@ impl Default for NetworkStoppedResponsePayload {
 
 impl NetworkStoppedResponse {
     fn new(status: &NetworkStartedResponsePayload) -> Self {
+        let uptime_duration = chrono::Utc::now() - status.time_started.0;
+        let uptime_seconds = uptime_duration.num_seconds();
+        println!("graph '{}' uptime: {}", status.graph, format_duration(Duration::from_secs(uptime_seconds as u64)));
         NetworkStoppedResponse {
             protocol: String::from("network"),
             command: String::from("stopped"),
             payload: NetworkStoppedResponsePayload {
                 time_stopped: UtcTime(chrono::Utc::now()),
-                uptime: (chrono::Utc::now() - status.time_started.0).num_seconds(),
+                uptime: uptime_seconds,
                 graph: status.graph.clone(),
                 started: status.started,
                 running: status.running,
