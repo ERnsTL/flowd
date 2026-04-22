@@ -2314,7 +2314,8 @@ impl RuntimeRuntimePayload {
         //TODO what if one of them wont join? hangs? -> kill, how much time to give?
         info!("stop: joining all threads...");
         let mut timed_out_threads: Vec<String> = Vec::new();
-        for (name, proc) in self.processes.drain() {
+        let mut still_running: ProcessManager = ProcessManager::new();
+        for (name, proc) in std::mem::take(&mut self.processes) {
             info!("stop: joining {}", name);
             let join_started = Instant::now();
             while !proc.joinhandle.is_finished() && join_started.elapsed() < PROCESS_JOIN_GRACE_DUR {
@@ -2325,11 +2326,12 @@ impl RuntimeRuntimePayload {
                     warn!("stop: joining {} returned error: {:?}", name, err);
                 }
             } else {
-                warn!( "stop: joining {} timed out after {:?}, detaching thread", name, PROCESS_JOIN_GRACE_DUR);
+                warn!( "stop: joining {} timed out after {:?}, keeping thread tracked for retry", name, PROCESS_JOIN_GRACE_DUR);
                 timed_out_threads.push(name.clone());
-                drop(proc.joinhandle);
+                still_running.insert(name, proc);
             } //TODO there is .thread() -> for killing
         }
+        self.processes = still_running;
         info!("done");
 
         // join watchdog thread (unless stop() was called from watchdog itself)
