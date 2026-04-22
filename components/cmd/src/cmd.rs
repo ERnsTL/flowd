@@ -5,6 +5,8 @@ use log::{debug, info, warn, trace};
 use std::ffi::{OsStr,OsString};
 use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
+use std::sync::mpsc;
+use std::time::Duration;
 use lexopt::prelude::*;
 
 pub struct CmdComponent {
@@ -127,11 +129,11 @@ impl Component for CmdComponent {
                             }
 
                             // set up reader from child STDOUT
-                            let reader = BufReader::new(child
+                            let child_stdout = child
                                 .stdout
+                                .take()
                                 .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
-                                .expect("could not get standard output")    //TODO optimize looks like duplication from above line
-                            );
+                                .expect("could not get standard output");   //TODO optimize looks like duplication from above line
                             // set up writer into child STDIN
                             let mut writer = child
                                 .stdin
@@ -144,17 +146,67 @@ impl Component for CmdComponent {
                             writer.write(ip.as_slice()).expect("could not write into child STDIN");
                             drop(writer);   // close STDIN
 
-                            // read child STDOUT until closed
-                            reader
-                                .lines()
-                                .filter_map(|line| line.ok())
-                                //.filter(|line| line.find("usb").is_some())
-                                //.for_each(|line| println!("{}", line));
-                                .for_each(|line| {
-                                    //debug!("repeating packet...");
-                                    out.push(line.into_bytes()).expect("could not push into OUT");
-                                    out_wakeup.unpark();
-                                });
+                            // read child STDOUT in a dedicated thread so this component can keep handling stop/ping.
+                            let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
+                            let stdout_thread = std::thread::spawn(move || {
+                                let reader = BufReader::new(child_stdout);
+                                for line in reader.lines().map_while(Result::ok) {
+                                    if stdout_tx.send(line.into_bytes()).is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+
+                            let mut stop_component = false;
+                            let mut stdout_closed = false;
+                            while !stop_component {
+                                // child output
+                                match stdout_rx.recv_timeout(Duration::from_millis(50)) {
+                                    Ok(line) => {
+                                        out.push(line).expect("could not push into OUT");
+                                        out_wakeup.unpark();
+                                    }
+                                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                        stdout_closed = true;
+                                    }
+                                }
+
+                                // process signals while child may still be running
+                                if let Ok(sig) = self.signals_in.try_recv() {
+                                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    if sig == b"stop" {
+                                        info!("got stop signal while child process is running, terminating child");
+                                        let _ = child.kill();
+                                        let _ = child.wait();
+                                        stop_component = true;
+                                        break;
+                                    } else if sig == b"ping" {
+                                        trace!("got ping signal, responding");
+                                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                                    } else {
+                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"))
+                                    }
+                                }
+
+                                // child exit
+                                if let Some(_status) = child.try_wait().expect("failed to query child process status") {
+                                    if stdout_closed {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if let Err(err) = stdout_thread.join() {
+                                warn!("failed to join child stdout reader thread: {:?}", err);
+                            }
+
+                            if stop_component {
+                                drop(out);
+                                out_wakeup.unpark();
+                                info!("exiting");
+                                return;
+                            }
                         },
                         Mode::One => { unimplemented!(); }  //TODO implement
                     }
