@@ -1054,7 +1054,7 @@ fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLo
                     FBPMessage::RuntimePacketRequest(payload) => {
                         info!("got runtime:packet message");
                         //TODO or maybe better send this to graph instead of runtime? in future for multi-graph support, yes.
-                        match RuntimeRuntimePayload::packet(&payload, &mut graph_inout.lock().expect("lock poisoned")) {
+                        match RuntimeRuntimePayload::packet(&payload, graph_inout.clone()) {
                             Ok(_) => {
                                 info!("response: sending runtime:packetsent response");
                                 websocket
@@ -2427,40 +2427,44 @@ impl RuntimeRuntimePayload {
         Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 
-    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: &mut GraphInportOutportHolder) -> std::result::Result<(), std::io::Error> {
+    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
         const INPORT_PUSH_GRACE_DUR: Duration = Duration::from_secs(2);
 
         //TODO check if graph exists and if that port actually exists
         //TODO check payload datatype, schema, event (?) etc.
         //TODO implement and deliver to destination process
         info!("runtime: got a packet for port {}: {:?}", payload.port, payload.payload);
-        // deliver to destination process
-        if let Some(inports) = graph_inout.inports.as_mut() {
-            if let Some(inport) = inports.get_mut(payload.port.as_str()) {
-                let wait_started = Instant::now();
-                while inport.sink.is_full() {
-                    // wait until non-full
-                    //TODO optimize
-                    //condvar_notify!(&*inport.wake_notify);
-                    inport.wakeup.as_ref().unwrap().unpark();
-
-                    if wait_started.elapsed() >= INPORT_PUSH_GRACE_DUR {
-                        return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("graph inport {} backpressured for {:?}", payload.port, INPORT_PUSH_GRACE_DUR)));
+        let packet = payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes();
+        let wait_started = Instant::now();
+        loop {
+            let mut graph_inout_locked = graph_inout.lock().expect("lock poisoned");
+            // deliver to destination process
+            if let Some(inports) = graph_inout_locked.inports.as_mut() {
+                if let Some(inport) = inports.get_mut(payload.port.as_str()) {
+                    if inport.sink.is_full() {
+                        //TODO optimize
+                        //condvar_notify!(&*inport.wake_notify);
+                        inport.wakeup.as_ref().unwrap().unpark();
+                    } else {
+                        inport.sink.push(packet).expect("push packet from graph inport into component failed");
+                        //condvar_notify!(&*inport.wake_notify);
+                        inport.wakeup.as_ref().unwrap().unpark();
+                        return Ok(());
                     }
-
-                    // sleep some time resp. give up CPU timeslot
-                    thread::yield_now();
+                } else {
+                    return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph inport with that name not found")));
                 }
-                //TODO optimize String -> Vec<u8> conversion? is clone+into_bytes better or as_bytes+to_vec ?
-                inport.sink.push(payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes()).expect("push packet from graph inport into component failed");
-                //condvar_notify!(&*inport.wake_notify);
-                inport.wakeup.as_ref().unwrap().unpark();
-                return Ok(());
             } else {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph inport with that name not found")));
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("no graph inports exist")));
             }
-        } else {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("no graph inports exist")));
+            drop(graph_inout_locked);
+
+            if wait_started.elapsed() >= INPORT_PUSH_GRACE_DUR {
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("graph inport {} backpressured for {:?}", payload.port, INPORT_PUSH_GRACE_DUR)));
+            }
+
+            // sleep some time resp. give up CPU timeslot
+            thread::yield_now();
         }
     }
 
