@@ -36,7 +36,7 @@ use multimap::MultiMap;
 //use dashmap::DashMap;
 
 // timekeeping in watchdog thread etc.
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use chrono::prelude::*;
 
 // flowd component API crate
@@ -2149,6 +2149,7 @@ impl RuntimeRuntimePayload {
     fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         //TODO implement in full detail
         const STOP_SIGNAL_MAX_RETRIES: usize = 64;
+        const PROCESS_JOIN_GRACE_DUR: Duration = Duration::from_secs(5);
 
         // if true, the watchdog informed us that all processes have already exited
         if !watchdog_all_exited {
@@ -2229,8 +2230,17 @@ impl RuntimeRuntimePayload {
         info!("stop: joining all threads...");
         for (name, proc) in self.processes.drain() {
             info!("stop: joining {}", name);
-            if let Err(err) = proc.joinhandle.join() {
-                warn!("stop: joining {} returned error: {:?}", name, err);
+            let join_started = Instant::now();
+            while !proc.joinhandle.is_finished() && join_started.elapsed() < PROCESS_JOIN_GRACE_DUR {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if proc.joinhandle.is_finished() {
+                if let Err(err) = proc.joinhandle.join() {
+                    warn!("stop: joining {} returned error: {:?}", name, err);
+                }
+            } else {
+                warn!( "stop: joining {} timed out after {:?}, detaching thread", name, PROCESS_JOIN_GRACE_DUR);
+                drop(proc.joinhandle);
             } //TODO there is .thread() -> for killing
         }
         info!("done");
