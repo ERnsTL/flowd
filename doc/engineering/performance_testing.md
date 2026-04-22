@@ -1,298 +1,390 @@
-# Performance Regression Testing Specification
+# Performance Testing & Regression Tracking
 
-Status: Accepted
-Date: 2026-04-16
+## Status
 
+Accepted
+
+## Date
+
+2026-04-16
+
+---
 
 ## 1. Purpose
 
-This document defines the performance regression testing approach for the flowd runtime.
+This document defines the performance benchmarking and regression tracking strategy for flowd.
 
-The goal is:
+The goals are:
 
-> To continuously measure and track performance characteristics across commits, ensuring that changes do not introduce unintended regressions.
+* establish a reliable performance baseline (pre-ADR-0002)
+* track performance across commits
+* detect unintended regressions
+* understand trade-offs introduced by architectural changes
 
-This is especially critical before introducing the scheduler (ADR-0002), in order to:
+> Performance must be tracked continuously, not assumed.
 
-* establish a reliable baseline
-* quantify the cost of architectural changes
-* maintain control over performance evolution
-
+---
 
 ## 2. Scope
 
 This specification applies to:
 
-* core runtime execution
+* runtime execution
 * message passing
-* pipeline throughput and latency
+* pipeline behavior
 
-It does NOT cover:
+It explicitly includes:
 
-* micro-optimizations
-* system-level benchmarking (OS, network)
+* micro-benchmarks (isolated primitives)
+* pipeline benchmarks (full runtime execution)
+
+It excludes:
+
 * production monitoring
+* deep profiling
+* micro-optimizations
 
+---
 
 ## 3. Benchmarking Framework
 
-### 3.1 Required Tool
-
 All benchmarks MUST use:
 
-> `criterion` (Rust benchmarking library)
+> Criterion.rs
 
 Rationale:
 
 * statistically sound measurements
-* noise reduction
 * reproducibility
-* standard ecosystem tool
+* noise reduction
 
-### 3.2 Configuration
+Custom benchmarking implementations are NOT allowed.
 
-* warm-up phase enabled
-* multiple sample runs
-* stable measurement time (no ad-hoc timing)
+---
 
-No custom benchmarking frameworks are allowed.
+## 4. Benchmark Architecture
 
+Performance testing is divided into two mandatory layers:
 
-## 4. Benchmark Categories
+---
 
-The following benchmark scenarios MUST be implemented.
+### 4.1 Micro Benchmarks (Primitives)
 
-### 4.1 Linear Pipeline
+Measure isolated building blocks without involving the runtime.
 
-#### Description
+---
 
-A simple sequential pipeline:
+#### Targets
 
-```text
+* ringbuffer throughput (push/pop)
+* edge/message transfer cost
+* cross-thread handover latency
+
+---
+
+#### Purpose
+
+> Understand the cost of fundamental primitives in isolation.
+
+---
+
+#### Requirements
+
+* MUST NOT use the runtime
+* MUST isolate the specific primitive under test
+* MUST be minimal and deterministic
+
+---
+
+### 4.2 Pipeline Benchmarks (Runtime)
+
+Measure full system behavior using the actual flowd runtime.
+
+---
+
+### ⚠️ Mandatory Requirement
+
+> Pipeline benchmarks MUST execute through the real flowd runtime.
+
+This includes:
+
+* real component execution
+* real edges
+* real pipeline construction
+* actual runtime behavior
+
+---
+
+### ❌ Explicitly Forbidden
+
+* bypassing the runtime
+* manually wiring functions instead of using flowd
+* simulating pipelines outside the runtime
+* replacing runtime execution with shortcuts
+
+---
+
+### Rationale
+
+If the runtime is bypassed:
+
+* results are invalid
+* overhead (edges, scheduling) is invisible
+* benchmarks become misleading
+
+---
+
+## 5. Component Usage Rules
+
+Pipeline benchmarks MUST reuse existing flowd components whenever possible.
+
+---
+
+### Examples
+
+* Source components
+* Demux / fan-out components
+* Merge / sink components
+
+---
+
+### Rules
+
+If suitable components exist:
+
+> They MUST be used.
+
+---
+
+If suitable components do NOT exist:
+
+> Minimal local components MAY be implemented inside `/benches`
+
+Constraints:
+
+* strictly minimal logic
+* only for benchmarking
+* clearly documented as benchmark-only
+
+---
+
+### Rationale
+
+* ensures realistic execution paths
+* avoids artificial benchmarks
+* keeps tests aligned with real usage
+
+---
+
+## 6. Benchmark Scenarios
+
+---
+
+### 6.1 Linear Pipeline
+
+```text id="lin001"
 Source → Node → Node → Sink
 ```
 
-#### Purpose
+Purpose:
 
-* measure raw throughput
-* measure minimal overhead of message passing
+* baseline throughput
+* minimal overhead measurement
 
-### 4.2 Fan-Out Pipeline
+---
 
-#### Description
+### 6.2 Fan-Out Pipeline
 
-A branching pipeline:
-
-```text
+```text id="fan001"
 Source → Node → (Node A, Node B, Node C) → Merge → Sink
 ```
 
-#### Purpose
+Purpose:
 
-* measure cost of fan-out
-* detect copying / allocation overhead
-* validate memory model behavior
+* message distribution cost
+* allocation / duplication overhead
 
-### 4.3 Fan-In / Merge Pipeline
+---
 
-#### Description
+### 6.3 Fan-In / Merge Pipeline
 
-Multiple sources merging:
-
-```text
+```text id="merge001"
 Source A →
            → Merge → Node → Sink
 Source B →
 ```
 
-#### Purpose
+Purpose:
 
-* measure coordination overhead
-* evaluate queue handling
+* coordination overhead
 
-### 4.4 High-Volume Pipeline
+---
 
-#### Description
+### 6.4 High-Volume Pipeline
 
-Large number of messages processed:
+* large message count (e.g. 1M+)
 
-* e.g. 1M+ messages
-
-#### Purpose
+Purpose:
 
 * detect long-run degradation
-* observe memory behavior
+* observe stability
 
-### 4.5 IO-Simulated Pipeline
+---
 
-#### Description
+### 6.5 IO-Simulated Pipeline
 
-Pipeline with artificial delay:
+* artificial delay (sleep)
 
-* simulated IO (sleep / async delay)
+Purpose:
 
-#### Purpose
+* baseline for future async/scheduler changes
 
-* baseline before async integration
-* measure scheduling impact later
+---
 
+## 7. Metrics
 
-## 5. Metrics
+Each benchmark MUST measure:
 
-The following metrics MUST be captured.
+---
 
-### 5.1 Throughput
+### 7.1 Throughput
 
-```text
+```text id="met001"
 messages per second
 ```
 
-Primary metric.
+---
 
-### 5.2 Latency
+### 7.2 Latency
 
-```text
-time from input to output
+```text id="met002"
+end-to-end processing time
 ```
 
-Measured as:
+---
 
-* average
-* percentile (p50, p95 if feasible)
+### 7.3 Statistical Stability
 
-### 5.3 CPU Time (Indirect)
+Handled by Criterion:
 
-Criterion provides timing; no direct CPU profiling required at this stage.
+* variance
+* confidence intervals
 
-### 5.4 Allocation Behavior (Optional, recommended)
+---
 
-If feasible:
+### Optional
 
-* number of allocations
-* memory footprint trends
+* allocation behavior
+* memory trends
 
-## 6. Measurement Strategy
+---
 
-### 6.1 No Static Baseline Files
+## 8. Execution Strategy
 
-The system MUST NOT rely on:
+---
+
+### 8.1 No Static Baselines
+
+The system MUST NOT use:
 
 * `baseline.json`
-* hardcoded thresholds in code
+* hardcoded performance thresholds
 
-### 6.2 Commit-Based Tracking
+---
 
-Each benchmark run MUST:
+### 8.2 Commit-Based Tracking
 
-* be executed per commit (locally or CI)
-* produce measurement output
-* be comparable across history
+Performance is tracked via:
 
-### 6.3 Storage
+* benchmark execution per commit
+* historical comparison
+* CI artifact storage
+
+---
+
+### 8.3 Storage
 
 Results SHOULD be:
 
-* stored as Criterion outputs (default)
-* optionally exported to structured format (CSV/JSON)
+* stored as Criterion outputs
+* optionally exported (CSV/JSON)
+* tracked via CI and external tools
 
-Tracking is done via:
+---
 
-* commit history
-* CI artifacts
-* optional external visualization tools
+## 9. Regression Tracking
 
+Performance is evaluated over time using:
 
-## 7. Regression Detection
+> Bencher
 
-### 7.1 Philosophy
+---
+
+### Approach
+
+* track performance across commits
+* compare trends
+* identify regressions manually (initially)
+
+---
+
+### Important Principle
 
 > Not all performance changes are regressions.
 
-A regression is defined as:
+A regression is:
 
-* a significant performance degradation
-* without intentional architectural reason
+* a significant degradation
+* without architectural justification
 
-### 7.2 Evaluation
+---
 
-Performance changes must be interpreted:
+## 10. Workflow
 
-* in context of changes (e.g. scheduler introduction)
-* not blindly rejected
+---
 
-### 7.3 Optional Thresholds
+### Before Major Changes
 
-Soft thresholds MAY be defined, e.g.:
-
-* throughput drop > 20%
-* latency increase > 30%
-
-These are guidelines, not hard failures.
-
-
-## 8. Workflow
-
-### 8.1 Before Major Changes
-
-Before implementing:
-
-* scheduler (ADR-0002)
-* backpressure (ADR-0004)
-* async execution
-
-You MUST:
+(e.g. scheduler, backpressure)
 
 * run full benchmark suite
-* document baseline behavior
+* document baseline
 
-### 8.2 After Changes
+---
+
+### After Changes
 
 * rerun benchmarks
 * compare results
-* document differences
+* document impact
 
-### 8.3 Documentation
+---
 
-Significant changes MUST be documented:
-
-* expected performance impact
-* observed impact
-* justification
-
-
-## 9. Constraints
-
-### 9.1 Deterministic Environment
+## 11. Environment Constraints
 
 Benchmarks SHOULD:
 
 * run on stable hardware
-* avoid background load
-* minimize external noise
+* avoid background noise
+* be reproducible
 
-### 9.2 Reproducibility
+---
 
-Benchmarks MUST be:
-
-* deterministic in setup
-* repeatable across runs
-
-
-## 10. Non-Goals
+## 12. Non-Goals
 
 This system does NOT aim to:
 
 * guarantee absolute performance numbers
 * replace profiling tools
-* simulate real-world production load fully
+* simulate full production load
 
+---
 
-## 11. Future Extensions
+## 13. Future Extensions
 
 After ADR-0002 (Scheduler):
 
-* compare pre/post scheduler performance
-* analyze fairness vs throughput trade-offs
+* measure fairness vs throughput trade-offs
 
 After ADR-0008 (Memory Model):
 
@@ -300,18 +392,28 @@ After ADR-0008 (Memory Model):
 
 After ADR-0009 (Distribution):
 
-* introduce network benchmarks
+* add network-level benchmarks
 
+---
 
-## 12. Key Insight
+## 14. Key Principles
 
-> Performance must be tracked continuously, not assumed.
+> Measure primitives in isolation.
+> Measure behavior in composition.
 
+---
 
-## 13. Summary
+## 15. Additional Principle
 
-This specification establishes:
+> Benchmarks must reflect real system behavior — not idealized shortcuts.
 
-* a consistent benchmarking methodology
-* commit-based performance tracking
-* a foundation for evaluating architectural trade-offs
+---
+
+## 16. Summary
+
+This specification ensures:
+
+* reliable baseline measurement
+* continuous performance tracking
+* separation of cause (micro) and effect (pipeline)
+* realistic, runtime-based benchmarking
