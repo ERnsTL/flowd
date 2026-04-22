@@ -2200,7 +2200,15 @@ impl RuntimeRuntimePayload {
                     }
                 }
             }
-            info!("done");
+            if !sent_or_disconnected {
+                warn!(
+                    "stop: process {} signal channel stayed full after {} retries, continuing with join",
+                    name,
+                    STOP_SIGNAL_MAX_RETRIES
+                );
+            }
+        }
+        info!("done");
 
         // join all threads
         //TODO what if one of them wont join? hangs? -> kill, how much time to give?
