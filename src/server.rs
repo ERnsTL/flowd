@@ -127,6 +127,19 @@ impl FlowdServer {
 
     fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> Result<()> {
         log::info!("handle_client called");
+
+        fn validate_secret(runtime: &Arc<RwLock<RuntimeRuntimePayload>>, secret: Option<&String>, graph: &str) -> Result<(), ()> {
+            if let Some(ref secret) = secret {
+                if let Some(expected_secret) = runtime.read().expect("lock poisoned").secrets.get(graph) {
+                    if *secret != expected_secret {
+                        return Err(());
+                    }
+                } else {
+                    return Err(());
+                }
+            }
+            Ok(())
+        }
         if let Err(err) = stream.set_write_timeout(Some(Duration::SECOND)) {
             log::warn!("set_write_timeout call failed: {:?}", err);
         }
