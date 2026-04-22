@@ -2055,14 +2055,13 @@ impl RuntimeRuntimePayload {
                         },
                         Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
                             warn!("process {} signal channel disconnected", name);
-                            exited_count += 1;
+                            disconnected_components.push(name.clone());
                             ok = false;
                             continue;
                         },
                     }
 
-                    // check if process is still running
-                    //TODO currently we have only Thread, not a JoinHandle here -> is it possible to get a JoinHandle here, then it would be directly possible to check.
+                    // process liveness already checked via ThreadExitFlag above
 
                     // wake process
                     proc.1.unpark();
