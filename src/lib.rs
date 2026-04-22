@@ -353,6 +353,8 @@ pub struct RuntimeRuntimePayload {
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
     #[serde(skip)]
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
+    #[serde(skip)]
+    secrets: HashMap<String, String>, // graph name -> secret token for token-based security
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -398,6 +400,7 @@ impl Default for RuntimeRuntimePayload {
             processes: ProcessManager::default(),
             watchdog_thread: None,
             watchdog_channel: None,
+            secrets: HashMap::new(),
         }
     }
 }
