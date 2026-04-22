@@ -1,5 +1,6 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort, PushError};
 use log::{debug, trace, info};
+use std::thread;
 
 pub struct MuxerComponent {
     inn: Vec<ProcessEdgeSource>,
@@ -103,6 +104,129 @@ impl Component for MuxerComponent {
                 }
             ],
             ..Default::default()
+        }
+    }
+}
+
+pub struct Demux3Component {
+    inn: ProcessEdgeSource,
+    out_a: ProcessEdgeSink,
+    out_b: ProcessEdgeSink,
+    out_c: ProcessEdgeSink,
+    signals_in: ProcessSignalSource,
+    signals_out: ProcessSignalSink,
+}
+
+impl Component for Demux3Component {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self {
+        Demux3Component {
+            inn: inports.remove("IN").expect("demux missing IN").pop().unwrap(),
+            out_a: outports.remove("A").expect("demux missing A").pop().unwrap(),
+            out_b: outports.remove("B").expect("demux missing B").pop().unwrap(),
+            out_c: outports.remove("C").expect("demux missing C").pop().unwrap(),
+            signals_in,
+            signals_out,
+        }
+    }
+
+    fn run(self) {
+        debug!("Demux3 is now run()ning!");
+        let mut inn = self.inn;
+        let mut out_a = self.out_a.sink;
+        let mut out_b = self.out_b.sink;
+        let mut out_c = self.out_c.sink;
+        let wake_a = self.out_a.wakeup.expect("demux A wake missing");
+        let wake_b = self.out_b.wakeup.expect("demux B wake missing");
+        let wake_c = self.out_c.wakeup.expect("demux C wake missing");
+
+        let mut branch = 0usize;
+        loop {
+            if let Ok(signal) = self.signals_in.try_recv() {
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&signal).expect("invalid utf-8")
+                );
+                if signal == b"stop" {
+                    info!("got stop signal, exiting");
+                    break;
+                }
+                if signal == b"ping" {
+                    self.signals_out
+                        .send(b"pong".to_vec())
+                        .expect("could not send pong");
+                }
+            }
+
+            while let Ok(ip) = inn.pop() {
+                match branch % 3 {
+                    0 => push_blocking(&mut out_a, &wake_a, ip),
+                    1 => push_blocking(&mut out_b, &wake_b, ip),
+                    _ => push_blocking(&mut out_c, &wake_c, ip),
+                }
+                branch += 1;
+            }
+
+            if inn.is_abandoned() {
+                info!("EOF on inport, shutting down");
+                drop(out_a);
+                drop(out_b);
+                drop(out_c);
+                wake_a.unpark();
+                wake_b.unpark();
+                wake_c.unpark();
+                break;
+            }
+
+            thread::park();
+        }
+        info!("exiting");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload {
+        ComponentComponentPayload {
+            name: "Demux3".to_string(),
+            description: "Demux router (IN -> A|B|C round-robin)".to_string(),
+            icon: "random".to_string(),
+            subgraph: false,
+            in_ports: vec![ComponentPort {
+                name: "IN".to_string(),
+                allowed_type: "any".to_string(),
+                ..ComponentPort::default_in()
+            }],
+            out_ports: vec![
+                ComponentPort {
+                    name: "A".to_string(),
+                    allowed_type: "any".to_string(),
+                    ..ComponentPort::default_out()
+                },
+                ComponentPort {
+                    name: "B".to_string(),
+                    allowed_type: "any".to_string(),
+                    ..ComponentPort::default_out()
+                },
+                ComponentPort {
+                    name: "C".to_string(),
+                    allowed_type: "any".to_string(),
+                    ..ComponentPort::default_out()
+                },
+            ],
+            ..Default::default()
+        }
+    }
+}
+
+fn push_blocking(sink: &mut flowd_component_api::ProcessEdgeSinkConnection, wake: &thread::Thread, mut packet: Vec<u8>) {
+    loop {
+        match sink.push(packet) {
+            Ok(()) => {
+                wake.unpark();
+                return;
+            }
+            Err(PushError::Full(returned)) => {
+                packet = returned;
+                wake.unpark();
+                thread::yield_now();
+            }
         }
     }
 }
