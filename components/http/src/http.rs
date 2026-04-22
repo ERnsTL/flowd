@@ -2,10 +2,17 @@ use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, Process
 use log::{debug, trace, info, warn};
 
 // component-specific
+use std::convert::Infallible;
+use std::net::ToSocketAddrs;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::borrow::BorrowMut;
 use std::thread::{self};
-use astra::{Body, Request, Response, Server};
+use std::time::{Duration, Instant};
+use hyper::{Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer, StatusCode};
+use hyper::service::{make_service_fn, service_fn};
+use tokio::sync::oneshot;
+
+const SERVER_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 pub struct HTTPClientComponent {
     req: ProcessEdgeSource,
@@ -226,77 +233,122 @@ impl Component for HTTPServerComponent {
 
         // set up work inports and outports
         let resp = Arc::new(Mutex::new(self.resp));
-        //TODO optimize
-        /*
-        let mut out_req = vec![];
-        let mut out_req_wakeup = vec![];
-        for req in self.req.iter() {
-            out_req.push(req.as_mut().sink);
-            out_req_wakeup.push(req.wakeup.expect("got no wakeup handle for outport REQ"));
-        }
-        let out_req = Arc::new(Mutex::new(self.req.iter().map(|p| p.sink).collect::<Vec<_>>()));    // all sinks
-        let out_req_wakeup = self.req.iter().map(|p| p.wakeup.expect("got no wakeup handle for outport REQ")).collect::<Vec<_>>();    // all wakeup handles
-        */
         let out_req = Arc::new(Mutex::new(self.req));
+        let server_shutdown = Arc::new(AtomicBool::new(false));
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        let mut shutdown_tx = Some(shutdown_tx);
 
-        // start HTTP server in separate thread so we can also handle signals
-        let _server = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
-            Server::bind(listenaddress)
-                .serve(move |mut req: Request, _| {
-                    debug!("request for {:?}", req.uri());
+        // start HTTP server in separate thread so we can also handle stop/ping in the component thread
+        let resp_for_server = resp.clone();
+        let out_req_for_server = out_req.clone();
+        let routes_for_server = routes.clone();
+        let shutdown_for_server = server_shutdown.clone();
+        let server_thread = thread::Builder::new()
+            .name(format!("{}_handler", thread::current().name().expect("could not get component thread name")))
+            .spawn(move || {
+                let bind_addr = listenaddress
+                    .to_socket_addrs()
+                    .expect("failed to resolve HTTP listen address")
+                    .next()
+                    .expect("no resolved address for HTTP listen address");
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(2)
+                    .enable_all()
+                    .build()
+                    .expect("failed to build tokio runtime for HTTPServer");
+                rt.block_on(async move {
+                    let make_svc = make_service_fn(move |_| {
+                        let routes = routes_for_server.clone();
+                        let out_req = out_req_for_server.clone();
+                        let resp = resp_for_server.clone();
+                        let shutdown = shutdown_for_server.clone();
+                        async move {
+                            Ok::<_, Infallible>(service_fn(move |mut req: HyperRequest<HyperBody>| {
+                                let routes = routes.clone();
+                                let out_req = out_req.clone();
+                                let resp = resp.clone();
+                                let shutdown = shutdown.clone();
+                                async move {
+                                    if shutdown.load(Ordering::Relaxed) {
+                                        let mut response = HyperResponse::new(HyperBody::from("server shutting down"));
+                                        *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                                        return Ok::<_, Infallible>(response);
+                                    }
 
-                    // decide which route to use
-                    let route_req = req.uri().path();
-                    let mut route_index = usize::MAX;
-                    for (i, route) in routes.iter().enumerate() {
-                        if route_req.starts_with(route) {   //TODO optimize, does it convert and thus clone?
-                            debug!("matched route {} at index {}", route, i);
-                            route_index = i;
-                            break;
+                                    let route_req = req.uri().path().to_owned();
+                                    let mut route_index = usize::MAX;
+                                    for (i, route) in routes.iter().enumerate() {
+                                        if route_req.starts_with(route) {
+                                            route_index = i;
+                                            break;
+                                        }
+                                    }
+                                    if route_index == usize::MAX {
+                                        let mut response = HyperResponse::new(HyperBody::from("no route matched"));
+                                        *response.status_mut() = StatusCode::NOT_FOUND;
+                                        return Ok::<_, Infallible>(response);
+                                    }
+
+                                    let body = match hyper::body::to_bytes(req.body_mut()).await {
+                                        Ok(bytes) => bytes,
+                                        Err(err) => {
+                                            warn!("HTTPServer: failed to read request body: {}", err);
+                                            let mut response = HyperResponse::new(HyperBody::from("failed to read request body"));
+                                            *response.status_mut() = StatusCode::BAD_REQUEST;
+                                            return Ok::<_, Infallible>(response);
+                                        }
+                                    };
+
+                                    let pushed_ok = {
+                                        let mut out_req_locked = out_req.lock().expect("poisoned lock on REQ outport");
+                                        if let Some(out_req_one) = out_req_locked.get_mut(route_index) {
+                                            out_req_one
+                                                .sink
+                                                .push(body.to_vec())
+                                                .expect("could not push IP into FBP network");
+                                            out_req_one
+                                                .wakeup
+                                                .as_ref()
+                                                .expect("got no wakeup handle on REQ outport")
+                                                .unpark();
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    };
+                                    if !pushed_ok {
+                                        let mut response = HyperResponse::new(HyperBody::from("internal route mismatch"));
+                                        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                        return Ok::<_, Infallible>(response);
+                                    }
+
+                                    // wait for response from FBP network
+                                    loop {
+                                        if shutdown.load(Ordering::Relaxed) {
+                                            let mut response = HyperResponse::new(HyperBody::from("server shutting down"));
+                                            *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                                            return Ok::<_, Infallible>(response);
+                                        }
+                                        if let Ok(ip) = resp.lock().expect("poisoned lock on RESP inport").pop() {
+                                            return Ok::<_, Infallible>(HyperResponse::new(HyperBody::from(ip)));
+                                        }
+                                        tokio::task::yield_now().await;
+                                    }
+                                }
+                            }))
                         }
+                    });
+
+                    let server = HyperServer::bind(&bind_addr).serve(make_svc);
+                    let graceful = server.with_graceful_shutdown(async {
+                        let _ = shutdown_rx.await;
+                    });
+                    if let Err(err) = graceful.await {
+                        warn!("HTTPServer: server thread exited with error: {}", err);
                     }
-                    if route_index == usize::MAX {
-                        warn!("no route matched, responding with 404");
-
-                        let response = Response::new("no route matched".into());
-                        let (mut parts, body) = response.into_parts();
-
-                        parts.status = reqwest::StatusCode::NOT_FOUND;
-                        let response = Response::from_parts(parts, body);
-
-                        return response;
-                    }
-
-                    // read and send body to outport based on route index
-                    let mut body = Vec::new();
-                    for chunk in req.body_mut() {
-                        body.extend_from_slice(&chunk.unwrap());    //TODO optimize - this clones!
-                    }
-                    //req.body_mut().reader().read_to_end(&mut body).expect("failed to read full request body");
-                    //TODO optimize
-                    let mut out_req_inner = out_req.lock().expect("poisoned lock on REQ inport");
-                    unsafe {
-                        let out_req_one = out_req_inner.borrow_mut().get_unchecked_mut(route_index);    // already checked this above
-                        debug!("pushing to outport index {} -> {}", route_index, out_req_one.proc_name.as_ref().expect("no proc_name"));
-                        out_req_one.sink.push(body).expect("could not push IP into FBP network");
-                        out_req_one.wakeup.as_ref().unwrap().unpark();
-                    }
-
-                    // read back response from inport and send to client
-                    debug!("waiting for response from FBP network...");
-                    //TODO currently this needs a Muxer before it and the RESP port is thus intentionally not marked as an arrayport
-                    while resp.lock().expect("poisoned lock on RESP outport").is_empty() {
-                        //TODO optimize spinning
-                        thread::yield_now();
-                    }
-                    debug!("got a packet, writing into HTTP response...");
-                    let ip = resp.lock().expect("poisoned lock on RESP outport").pop().expect("no response data available, but said !is_empty() before");
-                    Response::new(Body::new(ip))
-
-                    //Response::new(Body::from("Hello, World!"))
-                })
-                .expect("failed to start server");
-        });
+                });
+            })
+            .expect("failed to spawn HTTP server thread");
 
         debug!("entering main loop");
         loop {
@@ -318,35 +370,29 @@ impl Component for HTTPServerComponent {
                     warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
-
-            // check in port
-            //TODO while !inn.is_empty() {
-            /*
-            loop {
-                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
-                    // output the packet data with newline
-                    debug!("got a packet, writing into unix socket...");
-
-                    // send into unix socket to peer
-                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    sockets.lock().expect("lock poisoned").iter().next().unwrap().1.write(&ip).expect("could not send data from FBP network into Unix socket connection");   //TODO harden write_timeout() //TODO optimize
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-            */
-
-            // check socket
-            //NOTE: happens in connection handler threads, see above
-
             trace!("end of iteration");
             std::thread::park();
         }
         debug!("cleaning up");
-        //std::fs::remove_file(listenpath).unwrap();
-        //TODO stop listening thread
-        //TODO inform services
+        server_shutdown.store(true, Ordering::Relaxed);
+        if let Some(tx) = shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        let join_started = Instant::now();
+        while !server_thread.is_finished() && join_started.elapsed() < SERVER_JOIN_GRACE {
+            thread::sleep(Duration::from_millis(10));
+        }
+        if server_thread.is_finished() {
+            if let Err(err) = server_thread.join() {
+                warn!("HTTPServer: failed to join server thread: {:?}", err);
+            }
+        } else {
+            warn!(
+                "HTTPServer: server thread did not exit within {:?}, detaching",
+                SERVER_JOIN_GRACE
+            );
+            drop(server_thread);
+        }
         info!("exiting");
     }
 
