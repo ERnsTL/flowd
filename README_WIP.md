@@ -314,3 +314,14 @@ Benchmark results are written to `target/criterion/`.
 
 For methodology and CI/Bencher tracking details, see:
 `doc/engineering/performance_testing.md`.
+
+
+## Building blocks of an FBP runtime
+
+* For a good List, see [fractalide](https://github.com/fractalide/fractalide?tab=readme-ov-file#features)
+  * is flowd feature-wise on par with fractalide?
+* multi-profile Executor, which defines a profile of:
+  * Component API implementation = how components are loaded, run and stopped
+  * Ideally, distribution of components
+  * WASMComponent?
+  * abstraction of FbpComponent
