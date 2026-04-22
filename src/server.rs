@@ -5,8 +5,7 @@ use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use tungstenite::handshake::server::{Request, Response};
-use tungstenite::handshake::HandshakeRole;
-use tungstenite::{accept_hdr, Error, HandshakeError, Message, Result};
+use tungstenite::{accept_hdr, Error, Message, Result};
 
 use crate::{
     Graph, RuntimeRuntimePayload, ComponentLibrary, GraphInportOutportHolder,
