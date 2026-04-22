@@ -56,6 +56,13 @@ const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
 const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
 
+#[derive(Serialize, Deserialize, Debug)]
+struct PersistedGraphSet {
+    #[serde(rename = "activeGraph")]
+    active_graph: String,
+    graphs: HashMap<String, Graph>,
+}
+
 trait RunnableComponent {
     fn run(self: Box<Self>);
 }
@@ -95,54 +102,88 @@ pub fn create_graph_inout_holder() -> Arc<Mutex<GraphInportOutportHolder>> {
     }))
 }
 
-/// Load graph from persistence file or create default graph
-pub fn load_or_create_graph() -> std::result::Result<Arc<RwLock<Graph>>, std::io::Error> {
+fn create_default_graph() -> std::result::Result<Graph, std::io::Error> {
+    let mut graph = Graph::new(
+        String::from("main_graph"),
+        String::from("basic description"),
+        String::from("usd")
+    );
+
+    // add graph exported/published inport and outport
+    graph.inports.insert("GRAPHIN".to_owned(), GraphPort {
+        process: "Repeat_31337".to_owned(),
+        port: "IN".to_owned(),
+        metadata: GraphPortMetadata {
+            x: 36,
+            y: 72,
+        }
+    });
+    graph.outports.insert("GRAPHOUT".to_owned(), GraphPort {
+        process: "Repeat_31338".to_owned(),
+        port: "OUT".to_owned(),
+        metadata: GraphPortMetadata {
+            x: 468,
+            y: 72,
+        }
+    });
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
+    //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
+    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
+    // add components required for test suite
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
+    graph.add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()) })?;
+    graph.add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()) })?;
+    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
+    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
+    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
+    Ok(graph)
+}
+
+/// Load graph set from persistence file or create a default set.
+pub fn load_or_create_graph_set() -> std::result::Result<(HashMap<String, Arc<RwLock<Graph>>>, String), std::io::Error> {
     if Path::new(PERSISTENCE_FILE_NAME).exists() {
-        // persistence: load graph from file
         let json_data = std::fs::read_to_string(PERSISTENCE_FILE_NAME)?;
-        let graph = Arc::new(RwLock::new(serde_json::from_str(&json_data)?));
-        info!("graph loaded from persistence file");
-        Ok(graph)
+        if let Ok(graph_set) = serde_json::from_str::<PersistedGraphSet>(&json_data) {
+            let mut graph_map: HashMap<String, Arc<RwLock<Graph>>> = HashMap::new();
+            for (graph_id, graph) in graph_set.graphs {
+                graph_map.insert(graph_id, Arc::new(RwLock::new(graph)));
+            }
+            if graph_map.is_empty() {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "persisted graph set is empty"));
+            }
+            let active = if graph_map.contains_key(&graph_set.active_graph) {
+                graph_set.active_graph
+            } else {
+                graph_map.keys().next().expect("already checked non-empty").clone()
+            };
+            info!("loaded multi-graph persistence with {} graph(s), active '{}'", graph_map.len(), active);
+            return Ok((graph_map, active));
+        }
+
+        let graph: Graph = serde_json::from_str(&json_data)?;
+        let graph_name = graph.properties.name.clone();
+        let mut graph_map: HashMap<String, Arc<RwLock<Graph>>> = HashMap::new();
+        graph_map.insert(graph_name.clone(), Arc::new(RwLock::new(graph)));
+        info!("loaded single-graph persistence, graph '{}'", graph_name);
+        Ok((graph_map, graph_name))
     } else {
-        // Create default graph
-        let mut graph = Graph::new(
-            String::from("main_graph"),
-            String::from("basic description"),
-            String::from("usd")
-        );
-
-        // add graph exported/published inport and outport
-        graph.inports.insert("GRAPHIN".to_owned(), GraphPort {
-            process: "Repeat_31337".to_owned(),
-            port: "IN".to_owned(),
-            metadata: GraphPortMetadata {
-                x: 36,
-                y: 72,
-            }
-        });
-        graph.outports.insert("GRAPHOUT".to_owned(), GraphPort {
-            process: "Repeat_31338".to_owned(),
-            port: "OUT".to_owned(),
-            metadata: GraphPortMetadata {
-                x: 468,
-                y: 72,
-            }
-        });
-        graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
-        //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
-        graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-        graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
-        // add components required for test suite
-        graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
-        graph.add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()) })?;
-        graph.add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()) })?;
-        graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-        graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-        graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-
+        let graph = create_default_graph()?;
+        let graph_name = graph.properties.name.clone();
+        let mut graph_map: HashMap<String, Arc<RwLock<Graph>>> = HashMap::new();
+        graph_map.insert(graph_name.clone(), Arc::new(RwLock::new(graph)));
         info!("graph initialized");
-        Ok(Arc::new(RwLock::new(graph)))
+        Ok((graph_map, graph_name))
     }
+}
+
+/// Load active graph from persistence, keeping backward compatibility for single-graph callers.
+pub fn load_or_create_graph() -> std::result::Result<Arc<RwLock<Graph>>, std::io::Error> {
+    let (graph_map, active_graph) = load_or_create_graph_set()?;
+    graph_map
+        .get(&active_graph)
+        .cloned()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "active graph not found after load"))
 }
 
 // module-based components
@@ -438,29 +479,40 @@ impl RuntimeRuntimePayload {
 
     // persistence
     fn persist(&self, graph: &Graph) -> std::result::Result<(), std::io::Error> {
-        //###
-        // get source
-        //TODO is the source according to the FBP JSON Network Protocol the same as the specified FBP JSON Graph format or does it differ? In which do we want to persist?
-        let net_source = graph.get_source(self.graph.clone())?; //TODO optimize clone - accept &str?
+        let mut persisted_graphs: HashMap<String, Graph> = HashMap::new();
+        for graph_id in self.graphs.list_graphs() {
+            if let Some(graph_arc) = self.graphs.get_graph(&graph_id) {
+                let graph_read = graph_arc.read().expect("lock poisoned");
+                let graph_value = serde_json::to_value(&*graph_read).map_err(|err| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to serialize graph '{}': {}", graph_id, err))
+                })?;
+                let graph_obj: Graph = serde_json::from_value(graph_value).map_err(|err| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to clone graph '{}': {}", graph_id, err))
+                })?;
+                persisted_graphs.insert(graph_id, graph_obj);
+            }
+        }
+        if persisted_graphs.is_empty() {
+            persisted_graphs.insert(self.graph.clone(), serde_json::from_value(serde_json::to_value(graph).map_err(|err| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to serialize fallback graph: {}", err))
+            })?).map_err(|err| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to clone fallback graph: {}", err))
+            })?);
+        }
+        let active_graph = if persisted_graphs.contains_key(&self.graph) {
+            self.graph.clone()
+        } else {
+            persisted_graphs.keys().next().expect("graph set is non-empty").clone()
+        };
+        let graph_set = PersistedGraphSet {
+            active_graph,
+            graphs: persisted_graphs,
+        };
 
-        //TODO where in noflo-ui is the button to trigger network:persist command?
-
-        //TODO check for valid graph - do we want to allow unconnected ports, work in progress state?
-        //TODO add integrity checker:
-        //  critical and non-critical errors
-        //  critical - cannot load, cannot start network
-        //  noncritical - found missing connections, unconnected ports, unavailable components.
-
-        //TODO automatic saving in time intervals? how many autosaves to keep? how to handle autosave on crash and after restart?
-
-        //TODO saving on ctrl-c? No, ctrl-c means "abort".
-        //TODO saving on panic? yes. goal: never lose your data.
-
-        //TODO handle .bak file
-
-        // save to file
         let mut output = File::create(PERSISTENCE_FILE_NAME)?;
-        output.write(net_source.code.as_bytes())?;
+        output.write(serde_json::to_string_pretty(&graph_set).map_err(|err| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to encode graph set: {}", err))
+        })?.as_bytes())?;
 
         Ok(())
     }
@@ -1337,27 +1389,28 @@ impl RuntimeRuntimePayload {
     }
 
     fn debug_mode(&mut self, graph: &str, mode: bool) -> std::result::Result<(), std::io::Error> {
-        // Validate graph parameter matches current graph (single-graph mode)
-        if graph != self.graph {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
-                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
-                    graph, self.graph)));
+        if self.graphs.get_graph(graph).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found", graph),
+            ));
         }
-
-        // TODO: check if the given graph exists (for future multi-graph support)
-        // TODO: check if the given graph is the currently selected one
+        self.graph = graph.to_string();
+        self.status.graph = graph.to_string();
         self.status.debug = Some(mode);
         Ok(())
     }
 
     //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
     fn set_debug_edges(&mut self, graph: &str, edges: &Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
-        // Validate graph parameter matches current graph (single-graph mode)
-        if graph != self.graph {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
-                format!("Graph '{}' not found. Current graph is '{}'. Multi-graph support not yet implemented.",
-                    graph, self.graph)));
+        if self.graphs.get_graph(graph).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found", graph),
+            ));
         }
+        self.graph = graph.to_string();
+        self.status.graph = graph.to_string();
 
         // TODO: clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
         // TODO: implement actual debug edge handling

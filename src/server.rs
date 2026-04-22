@@ -24,7 +24,7 @@ use crate::{
     RuntimePacketsentMessage, RuntimePacketsentPayload, RuntimeErrorResponse,
     NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload,
     NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse,
-    GraphEdge, GraphPort, GraphNodeSpecNetwork, run_graph,
+    GraphEdge, GraphPort, GraphNodeSpecNetwork,
     GraphChangenodeResponsePayload
 };
 /* unused imports
@@ -311,10 +311,37 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), _payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
+                            if get_graph_by_name(&runtime, &graph, &_payload.graph).is_err() {
+                                websocket
+                                    .send(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            String::from("Requested graph not found"),
+                                            String::from(""),
+                                            _payload.graph,
+                                        ))
+                                        .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                continue;
+                            }
+                            let status_payload = {
+                                let runtime_read = runtime.read().expect("lock poisoned");
+                                if runtime_read.status.graph == _payload.graph {
+                                    NetworkStatusPayload::new(&runtime_read.status)
+                                } else {
+                                    NetworkStatusPayload {
+                                        graph: _payload.graph.clone(),
+                                        uptime: None,
+                                        started: false,
+                                        running: false,
+                                        debug: runtime_read.status.debug,
+                                    }
+                                }
+                            };
                             log::info!("response: sending network:status message");
                             websocket
                                 .send(Message::text(
-                                    serde_json::to_string(&NetworkStatusMessage::new(&NetworkStatusPayload::new(&runtime.read().expect("lock poisoned").status)))
+                                    serde_json::to_string(&NetworkStatusMessage::new(&status_payload))
                                         .expect("failed to serialize network:status message"),
                                 ))
                                 .expect("failed to write message into websocket");
@@ -328,7 +355,7 @@ impl FlowdServer {
                             }
                             // persist and send either network:persist or network:error
                             //###
-                            match runtime.read().expect("lock poisoned").persist(&graph.read().expect("lock poisoned")) {    //NOTE: lock read() is enough, because persist() does not modify state, just copies it away to persistence
+                            match runtime.read().expect("lock poisoned").persist(&graph.read().expect("lock poisoned")) {    // NOTE: persist() now stores all known graphs from the runtime graph manager
                                 Ok(_) => {
                                     log::info!("response: sending network:persist message");
                                     websocket
@@ -462,10 +489,10 @@ impl FlowdServer {
                                 }
                                 let target_graph = match get_graph_by_name(&runtime, &graph, &graph_name) {
                                     Ok(graph_arc) => graph_arc,
-                                    Err(err) => {
+                                    Err(_err) => {
                                         websocket
                                             .send(Message::text(
-                                                serde_json::to_string(&GraphErrorResponse::new(err.to_string()))
+                                                serde_json::to_string(&GraphErrorResponse::new(String::from("Requested graph not found")))
                                                     .expect("failed to serialize graph:error response"),
                                             ))
                                             .expect("failed to write message into websocket");
@@ -1521,6 +1548,19 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
+                            if get_graph_by_name(&runtime, &graph, &payload.graph).is_err() {
+                                websocket
+                                    .send(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            String::from("Requested graph not found"),
+                                            String::from(""),
+                                            payload.graph,
+                                        ))
+                                        .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                continue;
+                            }
                             match runtime.write().expect("lock poisoned").set_debug_edges(&payload.graph, &payload.edges) {
                                 Ok(_) => {
                                     log::info!("response: sending network:edges response");
@@ -1555,7 +1595,31 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
-                            match run_graph(runtime.clone(), graph.clone(), components.clone(), graph_inout.clone()) {
+                            let target_graph = match get_graph_by_name(&runtime, &graph, &payload.graph) {
+                                Ok(graph_arc) => graph_arc,
+                                Err(_) => {
+                                    websocket
+                                        .send(Message::text(
+                                            serde_json::to_string(&NetworkErrorResponse::new(
+                                                String::from("Requested graph not found"),
+                                                String::from(""),
+                                                payload.graph,
+                                            ))
+                                            .expect("failed to serialize network:error response"),
+                                        ))
+                                        .expect("failed to write message into websocket");
+                                    continue;
+                                }
+                            };
+                            let start_result = {
+                                let graph_read = target_graph.read().expect("lock poisoned");
+                                let components_read = components.read().expect("lock poisoned");
+                                let mut runtime_write = runtime.write().expect("lock poisoned");
+                                runtime_write.graph = payload.graph.clone();
+                                runtime_write.start(&graph_read, &components_read, graph_inout.clone(), runtime.clone())
+                                    .map(|_| ())
+                            };
+                            match start_result {
                                 Ok(()) => {
                                     let runtime_status = runtime.read().expect("lock poisoned");
                                     log::info!("response: sending network:started response");
@@ -1570,7 +1634,7 @@ impl FlowdServer {
                                     // Compatibility: fbp-protocol tests for v0.7 expect network:data packets
                                     // immediately after network:started for a tiny test graph.
                                     let data_packets = {
-                                        let graph_read = graph.read().expect("lock poisoned");
+                                        let graph_read = target_graph.read().expect("lock poisoned");
                                         let mut packets: Vec<NetworkTransmissionPayload> = Vec::new();
                                         for edge in graph_read.edges.iter() {
                                             if let Some(iip_data) = &edge.data {
@@ -1667,6 +1731,32 @@ impl FlowdServer {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
+                            if get_graph_by_name(&runtime, &graph, &payload.graph).is_err() {
+                                websocket
+                                    .send(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            String::from("Requested graph not found"),
+                                            String::from(""),
+                                            payload.graph,
+                                        ))
+                                        .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                continue;
+                            }
+                            if runtime.read().expect("lock poisoned").status.graph != payload.graph {
+                                websocket
+                                    .send(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            String::from("requested graph is not the running network"),
+                                            String::from(""),
+                                            payload.graph,
+                                        ))
+                                        .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
+                                continue;
+                            }
                             match runtime.write().expect("lock poisoned").stop(graph_inout.clone(), false) {   //TODO optimize avoid clone here? (but it is just an Arc clone)
                                 Ok(status) => {
                                     log::info!("response: sending network:stop response");
@@ -1698,6 +1788,19 @@ impl FlowdServer {
                             log::info!("got network:debug message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
+                                continue;
+                            }
+                            if get_graph_by_name(&runtime, &graph, &payload.graph).is_err() {
+                                websocket
+                                    .send(Message::text(
+                                        serde_json::to_string(&NetworkErrorResponse::new(
+                                            String::from("Requested graph not found"),
+                                            String::from(""),
+                                            payload.graph,
+                                        ))
+                                        .expect("failed to serialize network:error response"),
+                                    ))
+                                    .expect("failed to write message into websocket");
                                 continue;
                             }
                             match runtime.write().expect("lock poisoned").debug_mode(payload.graph.as_str(), payload.enable) {
@@ -1764,17 +1867,22 @@ pub fn run() -> Result<()> {
     let graph_inout = crate::create_graph_inout_holder();
     log::info!("graph inout holder created");
 
-    let graph = crate::load_or_create_graph().expect("failed to load or create graph");
+    let (loaded_graphs, active_graph) = crate::load_or_create_graph_set().expect("failed to load or create graphs");
+    let graph = loaded_graphs
+        .get(&active_graph)
+        .cloned()
+        .expect("active graph missing from loaded graph set");
     log::info!("graph loaded or created");
     {
-        let graph_name = graph.read().expect("lock poisoned").properties.name.clone();
         let mut runtime_write = runtime.write().expect("lock poisoned");
-        runtime_write.graphs.add_graph(graph_name.clone(), graph.clone());
+        for (graph_name, graph_arc) in loaded_graphs.into_iter() {
+            runtime_write.graphs.add_graph(graph_name, graph_arc);
+        }
         runtime_write
             .graphs
-            .set_active_graph(&graph_name)
+            .set_active_graph(&active_graph)
             .expect("failed to set active graph in multi-graph manager");
-        runtime_write.graph = graph_name;
+        runtime_write.graph = active_graph;
     }
 
     // start network
