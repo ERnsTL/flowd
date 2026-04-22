@@ -1533,6 +1533,12 @@ impl RuntimeRuntimePayload {
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
     fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
+        if self.status.running || !self.processes.is_empty() || self.watchdog_thread.is_some() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                String::from("network already running or previous shutdown incomplete"),
+            ));
+        }
         // get all graph in and out ports
         let mut graph_inout = graph_inout_arc.lock().expect("could not acquire lock for network start()");
         //TODO implement
@@ -1921,7 +1927,11 @@ impl RuntimeRuntimePayload {
                 //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
                 let graph_inoutref = graph_inout_arc.clone();
                 //let ports_this_wake_notify = ports_this.wake_notify.clone();
+                let graph_out_exited = Arc::new(AtomicBool::new(false));
+                let graph_out_exited_in_thread = graph_out_exited.clone();
                 let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
+                    // marks graph out handler as exited even when unwinding from panic
+                    let _thread_exit_flag = ThreadExitFlag::new(graph_out_exited_in_thread);
                     let signals = signalsource;
                     // arrayports: Note that this does currently not handle arrayports, but since this is forbidden via the graph definition, we can ignore that for now //TODO add check
                     if inports.len() == 0 {
@@ -1996,6 +2006,11 @@ impl RuntimeRuntimePayload {
                 // store thread handle for wakeup in components
                 thread_wake_handles.lock().expect("failed to get lock posting graph outport thread handle").insert(format!("{}-OUT", graph.properties.name), joinhandle.thread().clone());
                 //thread_wake_handles.insert(format!("{}-OUT", graph.properties.name), ports_this.wake_notify);
+                // store process signal channel and thread handle for watchdog thread
+                watchdog_threadandsignal.insert(
+                    format!("{}-OUT", graph.properties.name),
+                    (signalsink.clone(), joinhandle.thread().clone(), graph_out_exited),
+                );
                 // store process signal channel and join handle so that the other processes writing into this graph outport component can find it
                 self.processes.insert(format!("{}-OUT", graph.properties.name), Process {
                     signal: signalsink,
@@ -2228,6 +2243,7 @@ impl RuntimeRuntimePayload {
         // join all threads
         //TODO what if one of them wont join? hangs? -> kill, how much time to give?
         info!("stop: joining all threads...");
+        let mut timed_out_threads: Vec<String> = Vec::new();
         for (name, proc) in self.processes.drain() {
             info!("stop: joining {}", name);
             let join_started = Instant::now();
@@ -2240,6 +2256,7 @@ impl RuntimeRuntimePayload {
                 }
             } else {
                 warn!( "stop: joining {} timed out after {:?}, detaching thread", name, PROCESS_JOIN_GRACE_DUR);
+                timed_out_threads.push(name.clone());
                 drop(proc.joinhandle);
             } //TODO there is .thread() -> for killing
         }
@@ -2256,6 +2273,19 @@ impl RuntimeRuntimePayload {
                     warn!("stop: joining watchdog returned error: {:?}", err);
                 }
             }
+        }
+
+        if !timed_out_threads.is_empty() {
+            self.status.graph = self.graph.clone();
+            self.status.started = true;
+            self.status.running = true;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "network stop incomplete, detached threads: {}",
+                    timed_out_threads.join(", ")
+                ),
+            ));
         }
 
         // set status
