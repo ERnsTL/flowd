@@ -1,4 +1,4 @@
-# ADR-XXX: Graph Management Extensions (`graph:list`, `graph:delete`)
+# ADR-025: Graph Management Extensions (`graph:list`, `graph:delete`)
 
 Status: Proposed
 Date: 2026-04-22
