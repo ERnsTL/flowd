@@ -74,7 +74,7 @@ impl FlowdServer {
 
     pub fn start(&mut self) -> Result<()> {
         let server = TcpListener::bind(&self.bind_addr).unwrap();
-        log::info!("management listening on {} - manage via GUI at https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2F{}",
+        log::info!("management listening on {} - manage via GUI at https://app.noflojs.org/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2F{}",
                    self.bind_addr,
                    self.bind_addr.replace("localhost:", "localhost:"));
 

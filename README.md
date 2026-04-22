@@ -68,7 +68,7 @@ ws://localhost:3569
 
 Connect to your local `flowd` runtime.
 
-[Open the online editor](https://app.flowhub.io/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
+[Open the online editor](https://app.noflojs.org/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2Flocalhost%3A3569). This loads the management application from a central server, but connects to your local runtime.
 
 You should see a predefined test network.
 

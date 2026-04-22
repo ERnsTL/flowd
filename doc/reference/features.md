@@ -102,7 +102,7 @@ Component repository from local files:
 
 Component hub/repository in the internet:
 
-* (planned) Integration/registration with Flowhub ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))?
+* (planned) Integration/registration with Flowhub resp. noflojs.org ([source](https://github.com/flowbased/protocol-examples/blob/master/python/flowhub_register.py))?
 * (planned) much later.
 
 Deployment and reproducible setups:
