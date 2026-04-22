@@ -102,6 +102,7 @@ fn format_duration(duration: Duration) -> String {
 }
 
 pub fn main() {
+    let flowd_start_time = Instant::now();
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
 
     //NOTE: important to show the thread name = the FBP process name
