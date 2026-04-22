@@ -459,10 +459,12 @@ impl Component for TCPServerComponent {
             }
         } else {
             warn!(
-                "tcpserver: listener thread did not exit within {:?}, detaching",
+                "tcpserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
                 LISTENER_JOIN_GRACE
             );
-            drop(listen_thread);
+            if let Err(err) = listen_thread.join() {
+                warn!("tcpserver: listener thread join after grace returned error: {:?}", err);
+            }
         }
 
         let handles = {
@@ -480,10 +482,12 @@ impl Component for TCPServerComponent {
                 }
             } else {
                 warn!(
-                    "tcpserver: connection handler thread did not exit within {:?}, detaching",
+                    "tcpserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
                     CONNECTION_JOIN_GRACE
                 );
-                drop(handle);
+                if let Err(err) = handle.join() {
+                    warn!("tcpserver: connection handler join after grace returned error: {:?}", err);
+                }
             }
         }
         info!("exiting");

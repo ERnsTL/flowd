@@ -558,10 +558,12 @@ impl Component for TLSServerComponent {
             }
         } else {
             warn!(
-                "tlsserver: listener thread did not exit within {:?}, detaching",
+                "tlsserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
                 LISTENER_JOIN_GRACE
             );
-            drop(listen_thread);
+            if let Err(err) = listen_thread.join() {
+                warn!("tlsserver: listener thread join after grace returned error: {:?}", err);
+            }
         }
 
         let handles = {
@@ -579,10 +581,12 @@ impl Component for TLSServerComponent {
                 }
             } else {
                 warn!(
-                    "tlsserver: connection handler thread did not exit within {:?}, detaching",
+                    "tlsserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
                     CONNECTION_JOIN_GRACE
                 );
-                drop(handle);
+                if let Err(err) = handle.join() {
+                    warn!("tlsserver: connection handler join after grace returned error: {:?}", err);
+                }
             }
         }
         info!("exiting");

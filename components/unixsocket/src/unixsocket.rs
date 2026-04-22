@@ -560,10 +560,12 @@ impl Component for UnixSocketServerComponent {
             }
         } else {
             warn!(
-                "unixsocketserver: listener thread did not exit within {:?}, detaching",
+                "unixsocketserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
                 LISTENER_JOIN_GRACE
             );
-            drop(listen_thread);
+            if let Err(err) = listen_thread.join() {
+                warn!("unixsocketserver: listener thread join after grace returned error: {:?}", err);
+            }
         }
 
         let handles = {
@@ -581,10 +583,12 @@ impl Component for UnixSocketServerComponent {
                 }
             } else {
                 warn!(
-                    "unixsocketserver: connection handler thread did not exit within {:?}, detaching",
+                    "unixsocketserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
                     CONNECTION_JOIN_GRACE
                 );
-                drop(handle);
+                if let Err(err) = handle.join() {
+                    warn!("unixsocketserver: connection handler join after grace returned error: {:?}", err);
+                }
             }
         }
         debug!("cleaning up");

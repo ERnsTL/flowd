@@ -417,10 +417,12 @@ impl Component for WSServerComponent {
             }
         } else {
             warn!(
-                "wsserver: listener thread did not exit within {:?}, detaching",
+                "wsserver: listener thread did not exit within {:?}, waiting to avoid orphan thread",
                 LISTENER_JOIN_GRACE
             );
-            drop(listen_thread);
+            if let Err(err) = listen_thread.join() {
+                warn!("wsserver: listener thread join after grace returned error: {:?}", err);
+            }
         }
 
         let handles = {
@@ -438,10 +440,12 @@ impl Component for WSServerComponent {
                 }
             } else {
                 warn!(
-                    "wsserver: connection handler thread did not exit within {:?}, detaching",
+                    "wsserver: connection handler thread did not exit within {:?}, waiting to avoid orphan thread",
                     CONNECTION_JOIN_GRACE
                 );
-                drop(handle);
+                if let Err(err) = handle.join() {
+                    warn!("wsserver: connection handler join after grace returned error: {:?}", err);
+                }
             }
         }
         info!("exiting");
