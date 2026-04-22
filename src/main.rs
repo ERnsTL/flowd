@@ -2453,60 +2453,61 @@ struct GraphInportOutportHolder {
     outports: Option<Process>,
 
     // connected client websockets ready to send responses to connected clients, for graphout process
-    websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>
+    websockets: HashMap<std::net::SocketAddr, tungstenite::WebSocket<TcpStream>>,
+    // benchmark hook to observe runtime packets without websocket transport
+    packet_tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>,
 }
 
 //TODO optimize - get rid of dyn (see component API declaration for GraphInportOutportHandle)
 impl GraphInportOutport for GraphInportOutportHolder {}
 
 impl GraphInportOutportHolder {
+    fn send_json_to_clients<T: Serialize>(&mut self, packet: &T, packet_name: &str) {
+        let msg = serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
+        self.websockets.retain(|addr, client| {
+            match client.write(Message::text(msg.clone())) {
+                Ok(_) => true,
+                Err(err) => {
+                    warn!(
+                        "dropping websocket client {} after failed {} send: {}",
+                        addr, packet_name, err
+                    );
+                    false
+                }
+            }
+        });
+    }
+
     // should not be used by components but only by GraphOutHandler (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
     fn send_runtime_packet(&mut self, packet: &RuntimePacketResponse) {
-        //TODO add capabilities check for each client!
-        for client in self.websockets.iter_mut() {
-            client.1.write(Message::text(
-                serde_json::to_string(packet)
-                .expect("failed to serialize runtime:packet response"),
-            ))
-            .expect("failed to write message into websocket");
+        if let Some(tap) = &self.packet_tap {
+            let _ = tap.try_send(packet.payload.clone());
         }
+        //TODO add capabilities check for each client!
+        self.send_json_to_clients(packet, "runtime:packet");
+    }
+
+    fn set_packet_tap(&mut self, tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>) {
+        self.packet_tap = tap;
     }
 
     //###
     // should not be used by components but only by watchdog (TODO enforce that - just inline that method there? but the field websockets is still visible - both GraphOutHandler and processes...)
     fn send_network_stopped(&mut self, packet: &NetworkStoppedResponse) {
         //TODO add capabilities check for each client!
-        for client in self.websockets.iter_mut() {
-            client.1.write(Message::text(
-                serde_json::to_string(packet)
-                .expect("failed to serialize network:stopped response"),
-            ))
-            .expect("failed to write message into websocket");
-        }
+        self.send_json_to_clients(packet, "network:stopped");
     }
 
     // like STDOUT.println() - to be used by processes
     fn send_network_output(&mut self, packet: &NetworkOutputResponse) {
         //TODO add capabilities check for each client!
-        for client in self.websockets.iter_mut() {
-            client.1.write(Message::text(
-                serde_json::to_string(packet)
-                .expect("failed to serialize network:output response"),
-            ))
-            .expect("failed to write message into websocket");
-        }
+        self.send_json_to_clients(packet, "network:output");
     }
 
     // like STDERR.println() - to be used by processes
     fn send_network_error(&mut self, packet: &NetworkErrorResponse) {
         //TODO add capabilities check for each client!
-        for client in self.websockets.iter_mut() {
-            client.1.write(Message::text(
-                serde_json::to_string(packet)
-                .expect("failed to serialize network:error response"),
-            ))
-            .expect("failed to write message into websocket");
-        }
+        self.send_json_to_clients(packet, "network:error");
     }
 
     // inform client(s) about IP transfer on an edge, with copy of data - to be used by processes (TODO maybe later runtime for mandatory debugging?)
@@ -2514,12 +2515,56 @@ impl GraphInportOutportHolder {
         //TODO add capabilities check for each client!
         //TODO add debug mode check for the graph (network:debug)
         //TODO add check if edge was selected for debugging (network:edges)
-        for client in self.websockets.iter_mut() {
-            client.1.write(Message::text(
-                serde_json::to_string(packet)
-                .expect("failed to serialize network:data response"),
-            ))
-            .expect("failed to write message into websocket");
+        self.send_json_to_clients(packet, "network:data");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bench_api::linear_harness_direct;
+    use std::any::Any;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn bench_harness_stop_does_not_deadlock_under_repetition() {
+        let (done_tx, done_rx) = mpsc::sync_channel::<Result<(), String>>(1);
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(|| {
+                for _ in 0..8 {
+                    let harness = linear_harness_direct("bench_deadlock_regression");
+                    harness.start().expect("runtime start failed in regression loop");
+                    harness
+                        .send_data_to_inport("IN", b"x")
+                        .expect("runtime packet send failed in regression loop");
+                    harness
+                        .wait_for_outport_data("OUT", 1, Duration::from_secs(2))
+                        .expect("did not observe expected output packet in regression loop");
+                    harness.stop().expect("runtime stop failed in regression loop");
+                }
+            });
+
+            let send_result = match result {
+                Ok(()) => done_tx.send(Ok(())),
+                Err(panic_payload) => {
+                    let msg = if let Some(s) = (&*panic_payload as &dyn Any).downcast_ref::<&str>() {
+                        (*s).to_string()
+                    } else if let Some(s) = (&*panic_payload as &dyn Any).downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic payload".to_string()
+                    };
+                    done_tx.send(Err(msg))
+                }
+            };
+            send_result.expect("failed to signal regression completion");
+        });
+
+        match done_rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(Ok(())) => {}
+            Ok(Err(msg)) => panic!("regression worker panicked: {msg}"),
+            Err(_) => panic!("timeout waiting for regression loop completion (possible stop deadlock)"),
         }
     }
 }
