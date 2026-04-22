@@ -2164,26 +2164,38 @@ impl RuntimeRuntimePayload {
             if let Some(watchdog_thread) = &self.watchdog_thread {
                 watchdog_thread.thread().unpark();
             }
+        } else {
+            // runtime stop triggered from watchdog because all processes already exited
+            self.watchdog_channel.take();
+        }
 
-            // signal all threads
-            info!("stop: signaling all processes...");
-            for (name, proc) in self.processes.iter() {
-                info!("stop: signaling {}", name);
-                // wake first, then send stop non-blocking to avoid deadlock on full bounded channels
-                proc.joinhandle.thread().unpark();
-                let mut pending = b"stop".to_vec();
-                loop {
-                    match proc.signal.try_send(pending) {
-                        Ok(()) => {
-                            proc.joinhandle.thread().unpark();
-                            break;
-                        }
-                        Err(std::sync::mpsc::TrySendError::Full(returned)) => {
-                            pending = returned;
-                            proc.joinhandle.thread().unpark();
-                            thread::yield_now();
-                        }
-                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+        // signal all threads
+        info!("stop: signaling all processes...");
+        for (name, proc) in self.processes.iter() {
+            if proc.joinhandle.is_finished() {
+                info!("stop: process {} already exited", name);
+                continue;
+            }
+            info!("stop: signaling {}", name);
+            // wake first, then send stop non-blocking to avoid deadlock on full bounded channels
+            proc.joinhandle.thread().unpark();
+            let mut pending = b"stop".to_vec();
+            let mut sent_or_disconnected = false;
+            for _ in 0..STOP_SIGNAL_MAX_RETRIES {
+                match proc.signal.try_send(pending) {
+                    Ok(()) => {
+                        sent_or_disconnected = true;
+                        proc.joinhandle.thread().unpark();
+                        break;
+                    }
+                    Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+                        pending = returned;
+                        proc.joinhandle.thread().unpark();
+                        thread::yield_now();
+                    }
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                        sent_or_disconnected = true;
+                        break;
                     }
                 }
             }
