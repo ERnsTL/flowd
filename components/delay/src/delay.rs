@@ -1,5 +1,5 @@
 use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource, PushError};
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use std::thread;
@@ -89,9 +89,17 @@ impl Component for DelayComponent {
                 }
             }
 
+            let mut stop_requested = false;
             while let Ok(ip) = inn.pop() {
                 thread::sleep(delay);
-                push_blocking(&mut out, &wake, ip);
+                if push_blocking(&mut out, &wake, ip, &self.signals_in, &self.signals_out) {
+                    stop_requested = true;
+                    break;
+                }
+            }
+            if stop_requested {
+                info!("stop requested while waiting on full outport, exiting");
+                break;
             }
 
             if inn.is_abandoned() {
@@ -139,16 +147,38 @@ impl Component for DelayComponent {
     }
 }
 
-fn push_blocking(sink: &mut flowd_component_api::ProcessEdgeSinkConnection, wake: &thread::Thread, mut packet: Vec<u8>) {
+fn push_blocking(
+    sink: &mut flowd_component_api::ProcessEdgeSinkConnection,
+    wake: &thread::Thread,
+    mut packet: Vec<u8>,
+    signals_in: &ProcessSignalSource,
+    signals_out: &ProcessSignalSink,
+) -> bool {
     loop {
         match sink.push(packet) {
             Ok(()) => {
                 wake.unpark();
-                return;
+                return false;
             }
             Err(PushError::Full(returned)) => {
                 packet = returned;
                 wake.unpark();
+                if let Ok(signal) = signals_in.try_recv() {
+                    trace!(
+                        "received signal ip while waiting for outport: {}",
+                        std::str::from_utf8(&signal).expect("invalid utf-8")
+                    );
+                    if signal == b"stop" {
+                        return true;
+                    } else if signal == b"ping" {
+                        let _ = signals_out.try_send(b"pong".to_vec());
+                    } else {
+                        warn!(
+                            "received unknown signal ip: {}",
+                            std::str::from_utf8(&signal).expect("invalid utf-8")
+                        );
+                    }
+                }
                 thread::yield_now();
             }
         }

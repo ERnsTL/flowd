@@ -30,6 +30,7 @@ impl Component for SplitLinesComponent {
         let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
+            let mut stop_requested = false;
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
@@ -70,13 +71,33 @@ impl Component for SplitLinesComponent {
                                 // full, so wake up output-side component
                                 out_wakeup.unpark();
                                 while out.is_full() {
+                                    if let Ok(sig) = self.signals_in.try_recv() {
+                                        trace!(
+                                            "received signal ip while waiting for OUT outport: {}",
+                                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                                        );
+                                        if sig == b"stop" {
+                                            stop_requested = true;
+                                            break;
+                                        } else if sig == b"ping" {
+                                            let _ = self.signals_out.try_send(b"pong".to_vec());
+                                        } else {
+                                            warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                        }
+                                    }
                                     out_wakeup.unpark();
                                     // wait
                                     std::thread::yield_now();
                                 }
+                                if stop_requested {
+                                    break;
+                                }
                                 // send first line now that outport is !full
                                 out.push(line).expect("could not push into OUT - but said !is_full");
                             }
+                        }
+                        if stop_requested {
+                            break;
                         }
                         // write as much as possible from the iterator into outport ringbuffer
                         if let Ok(chunk) = out.write_chunk_uninit(out.slots()) {
@@ -109,6 +130,10 @@ impl Component for SplitLinesComponent {
                 } else {
                     break;
                 }
+            }
+            if stop_requested {
+                info!("stop requested while waiting on full outport, exiting");
+                break;
             }
 
             // are we done?

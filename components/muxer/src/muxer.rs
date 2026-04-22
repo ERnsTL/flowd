@@ -1,5 +1,5 @@
 use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort, PushError};
-use log::{debug, trace, info};
+use log::{debug, trace, info, warn};
 use std::thread;
 
 pub struct MuxerComponent {
@@ -49,8 +49,10 @@ impl Component for MuxerComponent {
                 loop {
                     if let Ok(ip) = inport.pop() {
                         debug!("repeating packet...");
-                        out.push(ip).expect("could not push into OUT");
-                        out_wakeup.unpark();
+                        if push_blocking(&mut out, &out_wakeup, ip, &self.signals_in, &self.signals_out) {
+                            info!("stop requested while waiting on full outport, exiting");
+                            return;
+                        }
                         debug!("done");
                     } else {
                         break;
@@ -155,13 +157,33 @@ impl Component for Demux3Component {
                 }
             }
 
+            let mut stop_requested = false;
             while let Ok(ip) = inn.pop() {
                 match branch % 3 {
-                    0 => push_blocking(&mut out_a, &wake_a, ip),
-                    1 => push_blocking(&mut out_b, &wake_b, ip),
-                    _ => push_blocking(&mut out_c, &wake_c, ip),
+                    0 => {
+                        if push_blocking(&mut out_a, &wake_a, ip, &self.signals_in, &self.signals_out) {
+                            stop_requested = true;
+                            break;
+                        }
+                    }
+                    1 => {
+                        if push_blocking(&mut out_b, &wake_b, ip, &self.signals_in, &self.signals_out) {
+                            stop_requested = true;
+                            break;
+                        }
+                    }
+                    _ => {
+                        if push_blocking(&mut out_c, &wake_c, ip, &self.signals_in, &self.signals_out) {
+                            stop_requested = true;
+                            break;
+                        }
+                    }
                 }
                 branch += 1;
+            }
+            if stop_requested {
+                info!("stop requested while waiting on full outport, exiting");
+                break;
             }
 
             if inn.is_abandoned() {
@@ -213,16 +235,38 @@ impl Component for Demux3Component {
     }
 }
 
-fn push_blocking(sink: &mut flowd_component_api::ProcessEdgeSinkConnection, wake: &thread::Thread, mut packet: Vec<u8>) {
+fn push_blocking(
+    sink: &mut flowd_component_api::ProcessEdgeSinkConnection,
+    wake: &thread::Thread,
+    mut packet: Vec<u8>,
+    signals_in: &ProcessSignalSource,
+    signals_out: &ProcessSignalSink,
+) -> bool {
     loop {
         match sink.push(packet) {
             Ok(()) => {
                 wake.unpark();
-                return;
+                return false;
             }
             Err(PushError::Full(returned)) => {
                 packet = returned;
                 wake.unpark();
+                if let Ok(signal) = signals_in.try_recv() {
+                    trace!(
+                        "received signal ip while waiting for outport: {}",
+                        std::str::from_utf8(&signal).expect("invalid utf-8")
+                    );
+                    if signal == b"stop" {
+                        return true;
+                    } else if signal == b"ping" {
+                        let _ = signals_out.try_send(b"pong".to_vec());
+                    } else {
+                        warn!(
+                            "received unknown signal ip: {}",
+                            std::str::from_utf8(&signal).expect("invalid utf-8")
+                        );
+                    }
+                }
                 thread::yield_now();
             }
         }

@@ -1,5 +1,5 @@
 use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort, PushError};
-use log::{debug, trace, info, error};
+use log::{debug, trace, info, error, warn};
 
 pub struct EqualsComponent {
     cmp: ProcessEdgeSource,
@@ -47,6 +47,7 @@ impl Component for EqualsComponent {
         // main loop
         loop {
             trace!("begin of iteration");
+            let mut stop_requested = false;
 
             // check signals
             //TODO optimize, there is also try_recv() and recv_timeout()
@@ -74,9 +75,26 @@ impl Component for EqualsComponent {
                             // full, so wake up output-side component
                             out_true_wakeup.unpark();
                             while out_true.is_full() {
+                                if let Ok(sig) = self.signals_in.try_recv() {
+                                    trace!(
+                                        "received signal ip while waiting for TRUE outport: {}",
+                                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                                    );
+                                    if sig == b"stop" {
+                                        stop_requested = true;
+                                        break;
+                                    } else if sig == b"ping" {
+                                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                                    } else {
+                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    }
+                                }
                                 out_true_wakeup.unpark();
                                 // wait     //TODO optimize
                                 std::thread::yield_now();
+                            }
+                            if stop_requested {
+                                break;
                             }
                             // send nao
                             out_true.push(ip_ret).expect("could not push into TRUE - but said !is_full");
@@ -89,9 +107,26 @@ impl Component for EqualsComponent {
                             // full, so wake up output-side component
                             out_false_wakeup.unpark();
                             while out_false.is_full() {
+                                if let Ok(sig) = self.signals_in.try_recv() {
+                                    trace!(
+                                        "received signal ip while waiting for FALSE outport: {}",
+                                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                                    );
+                                    if sig == b"stop" {
+                                        stop_requested = true;
+                                        break;
+                                    } else if sig == b"ping" {
+                                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                                    } else {
+                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    }
+                                }
                                 out_false_wakeup.unpark();
                                 // wait     //TODO optimize
                                 std::thread::yield_now();
+                            }
+                            if stop_requested {
+                                break;
                             }
                             // send nao
                             out_false.push(ip_ret).expect("could not push into FALSE - but said !is_full");
@@ -102,6 +137,10 @@ impl Component for EqualsComponent {
                 } else {
                     break;
                 }
+            }
+            if stop_requested {
+                info!("stop requested while waiting on full outport, exiting");
+                break;
             }
 
             // are we done?
