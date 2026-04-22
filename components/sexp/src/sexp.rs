@@ -2,13 +2,14 @@ use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, Process
 use log::{debug, info, warn, trace};
 
 // component-specific imports
-use assoc::AssocExt;
+//use assoc::AssocExt;
 
 /*
 TODO this is a draft for a component that can handle S-expressions (Sexp) as input and output
 */
 
 // component-specific structs
+/*  TODO implement
 enum Sexp {
     None,
     AtomU8(u8),     // small number
@@ -57,6 +58,7 @@ enum XMLBody {
     Atom(Vec<u8>),  // Sexp::AtomVecU8
     None,
 }
+*/
 
 pub struct SexpComponent {
     inn: ProcessEdgeSource,
