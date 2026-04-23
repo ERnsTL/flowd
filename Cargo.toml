@@ -41,6 +41,9 @@ rtrb = "0.2"
 #dashmap = { version = "5.3.4", features = ["serde"] }
 multimap = "0.10.0"
 
+# signal handling for graceful shutdown
+signal-hook = "0.3"
+
 flowd_component_api = { path = "component_api" }
 
 # components

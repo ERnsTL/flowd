@@ -4,6 +4,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+
+use signal_hook::consts::signal::*;
+use signal_hook::flag;
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{accept_hdr, Error, Message, Result};
 
@@ -52,7 +55,8 @@ pub struct FlowdServer {
     graph: Arc<RwLock<Graph>>,
     components: Arc<RwLock<ComponentLibrary>>,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
-    shutdown_flag: Arc<AtomicBool>,
+    sigterm_received: Arc<AtomicBool>,
+    sigint_received: Arc<AtomicBool>,
 }
 
 impl FlowdServer {
@@ -69,7 +73,8 @@ impl FlowdServer {
             graph,
             components,
             graph_inout,
-            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            sigterm_received: Arc::new(AtomicBool::new(false)),
+            sigint_received: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -80,23 +85,12 @@ impl FlowdServer {
                    self.bind_addr.replace("localhost:", "localhost:"));
 
         // setup signal handling for graceful shutdown
-        let shutdown_flag_clone = self.shutdown_flag.clone();
-
-        // spawn signal handler thread
-        thread::spawn(move || {
-            // simple signal handling using channel or just sleep and check
-            // for simplicity, we'll just wait for a short time and check if we should shutdown
-            // in a real implementation, use signal-hook crate
-            loop {
-                thread::sleep(Duration::from_secs(1));
-                // check for shutdown (in real impl, check signals)
-                // for now, just continue
-            }
-        });
+        flag::register(SIGINT, self.sigint_received.clone()).expect("failed to register SIGINT handler");
+        flag::register(SIGTERM, self.sigterm_received.clone()).expect("failed to register SIGTERM handler");
 
         // start listening for incoming connections
         for stream_res in server.incoming() {
-            if self.shutdown_flag.load(Ordering::Relaxed) {
+            if self.sigterm_received.load(Ordering::Relaxed) || self.sigint_received.load(Ordering::Relaxed) {
                 break;
             }
             if let Ok(stream) = stream_res {
@@ -122,11 +116,30 @@ impl FlowdServer {
             }
         }
 
+        // Graceful shutdown: handle signal-specific actions
+        if self.sigterm_received.load(Ordering::Relaxed) {
+            // Persist on SIGTERM (systemd graceful shutdown)
+            if let Err(e) = self.runtime.read().unwrap().persist(&self.graph.read().unwrap()) {
+                log::warn!("Failed to persist graph on SIGTERM: {}", e);
+            } else {
+                log::info!("Graph persisted on SIGTERM");
+            }
+        }
+
+        // Stop network if running
+        if self.runtime.read().unwrap().status.running {
+            log::info!("Signal received, waiting for network shutdown...");
+            match self.runtime.write().unwrap().stop(self.graph_inout.clone(), false) {
+                Ok(_) => log::info!("Network stopped gracefully"),
+                Err(e) => log::warn!("Network stop failed: {}", e),
+            }
+        }
+
         Ok(())
     }
 
     pub fn stop(&mut self) -> Result<()> {
-        self.shutdown_flag.store(true, Ordering::Relaxed);
+        self.sigterm_received.store(true, Ordering::Relaxed);
         Ok(())
     }
 
