@@ -126,14 +126,14 @@ fn create_default_graph() -> std::result::Result<Graph, std::io::Error> {
             y: 72,
         }
     });
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
     //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
     graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
     // add components required for test suite
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()) })?;
-    graph.add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()) })?;
-    graph.add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()) })?;
+    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
+    graph.add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()), icon: None })?;
+    graph.add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()), icon: None })?;
     graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
     graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
     graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
@@ -3267,6 +3267,7 @@ struct GraphNodeMetadata {
     width: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
     height: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
     label: Option<String>,  // not mentioned in specs, but used by noflo-ui, used for the process name in bigger letters than component name
+    icon: Option<String>,  // icon for the node, used by FBP protocol clients like noflo-ui
 }
 
 impl Clone for GraphNodeMetadata {
@@ -3277,6 +3278,7 @@ impl Clone for GraphNodeMetadata {
             width: self.width,
             height: self.height,
             label: self.label.clone(),
+            icon: self.icon.clone(),
         }
     }
 }
@@ -3289,6 +3291,7 @@ impl Default for GraphNodeMetadata {
             width: Some(NODE_WIDTH_DEFAULT),
             height: Some(NODE_HEIGHT_DEFAULT),
             label: None,
+            icon: None,
         }
     }
 
@@ -4953,6 +4956,9 @@ fn graph_node_metadata_from_payload(metadata: &JsonMap<String, JsonValue>) -> Gr
     if let Some(JsonValue::String(label)) = metadata.get("label") {
         parsed.label = Some(label.clone());
     }
+    if let Some(JsonValue::String(icon)) = metadata.get("icon") {
+        parsed.icon = Some(icon.clone());
+    }
     parsed
 }
 
@@ -4968,6 +4974,9 @@ fn graph_node_metadata_to_payload(metadata: &GraphNodeMetadata) -> JsonMap<Strin
     }
     if let Some(label) = &metadata.label {
         out.insert(String::from("label"), JsonValue::from(label.clone()));
+    }
+    if let Some(icon) = &metadata.icon {
+        out.insert(String::from("icon"), JsonValue::from(icon.clone()));
     }
     out
 }
@@ -5776,6 +5785,7 @@ pub mod bench_api {
             height: Some(NODE_HEIGHT_DEFAULT),
             width: Some(NODE_WIDTH_DEFAULT),
             label: Some(label.to_string()),
+            icon: None,
         }
     }
 
