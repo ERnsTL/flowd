@@ -25,7 +25,7 @@ use crate::{
     NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload,
     NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse, NetworkStartedResponsePayload,
     GraphEdge, GraphPort, GraphNodeSpecNetwork,
-    GraphChangenodeResponsePayload
+    GraphChangenodeResponsePayload, AccessLevel, Capability
 };
 /* unused imports
 , RuntimePacketRequestPayload,
@@ -133,16 +133,30 @@ impl FlowdServer {
         log::info!("handle_client called");
 
         fn validate_secret(runtime: &Arc<RwLock<Runtime>>, secret: Option<&String>, graph: &str) -> Result<(), ()> {
-            if let Some(ref secret) = secret {
-                if let Some(expected_secret) = runtime.read().expect("lock poisoned").secrets.get(graph) {
-                    if *secret != expected_secret {
-                        return Err(());
-                    }
-                } else {
-                    return Err(());
-                }
-            }
-            Ok(())
+            runtime
+                .read()
+                .expect("lock poisoned")
+                .validate_secret_with_access(secret, graph, AccessLevel::ReadWrite)
+                .map_err(|_| ())
+        }
+
+        fn validate_secret_readonly(runtime: &Arc<RwLock<Runtime>>, secret: Option<&String>, graph: &str) -> Result<(), ()> {
+            runtime
+                .read()
+                .expect("lock poisoned")
+                .validate_secret_with_access(secret, graph, AccessLevel::ReadOnly)
+                .map_err(|_| ())
+        }
+
+        fn has_readonly_secret_for_graph(runtime: &Arc<RwLock<Runtime>>, secret: Option<&String>, graph: &str) -> bool {
+            let Some(secret) = secret else {
+                return false;
+            };
+            let runtime_read = runtime.read().expect("lock poisoned");
+            let Some((expected_secret, access_level)) = runtime_read.secrets.get(graph) else {
+                return false;
+            };
+            secret == expected_secret && *access_level == AccessLevel::ReadOnly
         }
 
         fn get_graph_by_name(
@@ -254,19 +268,25 @@ impl FlowdServer {
                         // runtime base
                         FBPMessage::RuntimeGetruntimeMessage(payload) => {
                             log::info!("got runtime:getruntime message with secret {:?}", payload.secret);
-                            if validate_secret(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
+                            if validate_secret_readonly(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&RuntimeErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize runtime:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
                             // send response = runtime:runtime message
                             log::info!("response: sending runtime:runtime message");
+                            let mut runtime_payload = {
+                                let runtime_read = runtime.read().expect("lock poisoned");
+                                RuntimeRuntimePayload::from(runtime_read.snapshot())
+                            };
+                            if has_readonly_secret_for_graph(&runtime, payload.secret.as_ref(), &runtime_payload.graph)
+                                && !runtime_payload.capabilities.contains(&Capability::GraphReadonly)
+                            {
+                                runtime_payload.capabilities.push(Capability::GraphReadonly);
+                            }
                             websocket
                                 .send(Message::text(
                                     //TODO handing over value inside lock would work like this:  serde_json::to_string(&*runtime.read().expect("lock poisoned"))
-                                            serde_json::to_string(&RuntimeRuntimeMessage::new({
-                                                let runtime_read = runtime.read().expect("lock poisoned");
-                                                RuntimeRuntimePayload::from(runtime_read.snapshot())
-                                            }))
+                                            serde_json::to_string(&RuntimeRuntimeMessage::new(runtime_payload))
                                     .expect("failed to serialize runtime:runtime message"),
                                 ))
                                 .expect("failed to write message into websocket");
@@ -283,7 +303,7 @@ impl FlowdServer {
                         // protocol:component
                         FBPMessage::ComponentListRequest(_payload) => {
                             log::info!("got component:list message");
-                            if validate_secret(&runtime, _payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
+                            if validate_secret_readonly(&runtime, _payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
@@ -310,7 +330,7 @@ impl FlowdServer {
 
                         FBPMessage::NetworkGetstatusMessage(_payload) => {
                             log::info!("got network:getstatus message");
-                            if validate_secret(&runtime, _payload.secret.as_ref(), &_payload.graph).is_err() {
+                            if validate_secret_readonly(&runtime, _payload.secret.as_ref(), &_payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), _payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
@@ -388,7 +408,7 @@ impl FlowdServer {
 
                         FBPMessage::ComponentGetsourceMessage(payload) => {
                             log::info!("got component:getsource message");
-                            if validate_secret(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
+                            if validate_secret_readonly(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }
@@ -1473,7 +1493,7 @@ impl FlowdServer {
 
                         FBPMessage::TraceDumpRequest(payload) => {
                             log::info!("got trace:dump message");
-                            if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
+                            if validate_secret_readonly(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&TraceErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize trace:error response"))).expect("failed to write message into websocket");
                                 continue;
                             }

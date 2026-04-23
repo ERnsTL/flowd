@@ -407,7 +407,7 @@ pub struct Runtime {
     processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
-    secrets: HashMap<String, String>, // graph name -> secret token for token-based security
+    secrets: HashMap<String, (String, AccessLevel)>, // graph name -> (secret token, access level) for token-based security
     graphs: multi_graph::MultiGraphManager, // multi-graph support
 }
 
@@ -460,6 +460,7 @@ impl Default for RuntimeRuntimePayload {
                 Capability::ComponentSetsource,
                 Capability::ProtocolRuntime,
                 Capability::ProtocolGraph,
+                Capability::GraphReadonly,
                 Capability::ProtocolTrace,
             ],
             capabilities: vec![
@@ -1601,10 +1602,17 @@ impl Runtime {
     }
 
     fn validate_secret(&self, secret: Option<&String>, graph: &str) -> Result<(), std::io::Error> {
+        self.validate_secret_with_access(secret, graph, AccessLevel::ReadWrite)
+    }
+
+    fn validate_secret_with_access(&self, secret: Option<&String>, graph: &str, required_access: AccessLevel) -> Result<(), std::io::Error> {
         if let Some(ref secret) = secret {
-            if let Some(expected_secret) = self.secrets.get(graph) {
+            if let Some((expected_secret, access_level)) = self.secrets.get(graph) {
                 if *secret != expected_secret {
                     return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid secret token"));
+                }
+                if *access_level == AccessLevel::ReadOnly && required_access == AccessLevel::ReadWrite {
+                    return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "readonly access not sufficient for write operation"));
                 }
             } else {
                 return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no secret configured for graph"));
@@ -1856,7 +1864,7 @@ mod tests {
     }
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 enum Capability {
     // spec: deprecated. Implies capabilities network:status, network:data, network:control. Does not imply capability network:persist.
     #[serde(rename = "protocol:network")]
@@ -4872,6 +4880,12 @@ pub struct Graph {
     nodes: HashMap<String, GraphNode>,
     #[serde(rename = "connections")]
     edges: Vec<GraphEdge>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+enum AccessLevel {
+    ReadOnly,
+    ReadWrite,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
