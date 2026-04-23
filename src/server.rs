@@ -59,40 +59,50 @@ impl FlowdServer {
     }
 
     pub fn start(&mut self) -> Result<()> {
+        // setup signal handling for graceful shutdown (first thing for safety)
+        flag::register(SIGINT, self.sigint_received.clone()).expect("failed to register SIGINT handler");
+        flag::register(SIGTERM, self.sigterm_received.clone()).expect("failed to register SIGTERM handler");
+
+        // open TCP/IP socket
         let server = TcpListener::bind(&self.bind_addr).unwrap();
+        server.set_nonblocking(true).expect("Failed to set non-blocking mode");
         log::info!("management listening on {} - manage via GUI at https://app.noflojs.org/#runtime/endpoint?protocol%3Dwebsocket%26address%3Dws%3A%2F%2F{}",
                    self.bind_addr,
                    self.bind_addr.replace("localhost:", "localhost:"));
 
-        // setup signal handling for graceful shutdown
-        flag::register(SIGINT, self.sigint_received.clone()).expect("failed to register SIGINT handler");
-        flag::register(SIGTERM, self.sigterm_received.clone()).expect("failed to register SIGTERM handler");
-
-        // start listening for incoming connections
+        // start listening for incoming connections on socket
         for stream_res in server.incoming() {
             if self.sigterm_received.load(Ordering::Relaxed) || self.sigint_received.load(Ordering::Relaxed) {
                 break;
             }
-            if let Ok(stream) = stream_res {
-                // create Arc pointers for the new thread
-                let graphref = self.graph.clone();
-                let runtimeref = self.runtime.clone();
-                let componentlibref = self.components.clone();
-                let graph_inoutref = self.graph_inout.clone();
+            match stream_res {
+                Ok(stream) => {
+                    // create Arc pointers for the new thread
+                    let graphref = self.graph.clone();
+                    let runtimeref = self.runtime.clone();
+                    let componentlibref = self.components.clone();
+                    let graph_inoutref = self.graph_inout.clone();
 
-                // start thread
-                // since the thread name can only be 15 characters on Linux and an IP address already has up to 15, the IP address is not in the name
-                thread::Builder::new().name("client-handler".into()).spawn(move || {
-                    log::info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
-                    if let Err(err) = Self::handle_client(stream, graphref, runtimeref, componentlibref, graph_inoutref) {
-                        match err {
-                            Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
-                            e => log::error!("test: {}", e),
+                    // start thread
+                    // since the thread name can only be 15 characters on Linux and an IP address already has up to 15, the IP address is not in the name
+                    thread::Builder::new().name("client-handler".into()).spawn(move || {
+                        log::info!("got a client from {}", stream.peer_addr().expect("get peer address failed"));
+                        if let Err(err) = Self::handle_client(stream, graphref, runtimeref, componentlibref, graph_inoutref) {
+                            match err {
+                                Error::ConnectionClosed | Error::Protocol(_) | Error::Utf8 => (),
+                                e => log::error!("test: {}", e),
+                            }
                         }
-                    }
-                }).expect("thread start for connection handler failed");
-            } else if let Err(e) = stream_res {
-                log::error!("Error accepting stream: {}", e);
+                    }).expect("thread start for connection handler failed");
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No connection available, sleep briefly and check signals again
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                Err(e) => {
+                    log::error!("Error accepting stream: {}", e);
+                }
             }
         }
 
