@@ -1510,17 +1510,22 @@ impl Runtime {
     }
 
     fn validate_secret_with_access(&self, secret: Option<&String>, graph: &str, required_access: AccessLevel) -> Result<(), std::io::Error> {
-        if let Some(ref secret) = secret {
-            if let Some((expected_secret, access_level)) = self.secrets.get(graph) {
-                if *secret != expected_secret {
-                    return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid secret token"));
-                }
-                if *access_level == AccessLevel::ReadOnly && required_access == AccessLevel::ReadWrite {
-                    return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "readonly access not sufficient for write operation"));
-                }
-            } else {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no secret configured for graph"));
+        // Compatibility: many FBP clients send empty-string secrets by default.
+        // Treat that the same as not providing a secret token.
+        let secret = match secret {
+            Some(secret) if !secret.is_empty() => secret,
+            _ => return Ok(()),
+        };
+
+        if let Some((expected_secret, access_level)) = self.secrets.get(graph) {
+            if secret != expected_secret {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid secret token"));
             }
+            if *access_level == AccessLevel::ReadOnly && required_access == AccessLevel::ReadWrite {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "readonly access not sufficient for write operation"));
+            }
+        } else {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no secret configured for graph"));
         }
         Ok(())
     }

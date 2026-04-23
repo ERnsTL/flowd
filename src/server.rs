@@ -163,7 +163,7 @@ impl FlowdServer {
         }
 
         fn has_readonly_secret_for_graph(runtime: &Arc<RwLock<Runtime>>, secret: Option<&String>, graph: &str) -> bool {
-            let Some(secret) = secret else {
+            let Some(secret) = secret.filter(|secret| !secret.is_empty()) else {
                 return false;
             };
             let runtime_read = runtime.read().expect("lock poisoned");
@@ -249,9 +249,9 @@ impl FlowdServer {
                     let msg_data = msg.into_data();
                     log::debug!("received message data: {}", String::from_utf8_lossy(&msg_data));
 
-                    // Compatibility: many FBP clients include envelope keys like `protocol`
+                    // Compatibility: many FBP clients include optional envelope keys (`id`, top-level `secret`)
                     // and may omit `payload` on commands with optional fields.
-                    // FBPMessage is command-tagged only, so normalize before deserializing.
+                    // FBPMessage is protocol-tagged, so keep `protocol`/`command` intact.
                     let mut json_envelope: serde_json::Value = match serde_json::from_slice(&msg_data) {
                         Ok(value) => value,
                         Err(err) => {
@@ -260,8 +260,8 @@ impl FlowdServer {
                         }
                     };
                     if let Some(map) = json_envelope.as_object_mut() {
-                        map.remove("protocol");
                         map.remove("id");
+                        map.remove("secret");
                         if !map.contains_key("payload") {
                             map.insert("payload".to_string(), serde_json::json!({}));
                         }
