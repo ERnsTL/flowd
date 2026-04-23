@@ -282,13 +282,17 @@ Run tests only for flowd itself (main crate):
 cargo test -p flowd-rs
 ```
 
+`flowd` is validated against the FBP protocol test suite and includes integration and pipeline-level tests to ensure correct runtime behavior.
+
+See [Testing Strategy](doc/engineering/testing_strategy.md).
+
 Run benchmarks (if present):
 
 ```sh
 cargo bench --workspace
 ```
 
-See [Performance Testing](doc/engineering/performance_testing.md)
+See [Performance Testing](doc/engineering/performance_testing.md).
 
 
 ## Contributing
