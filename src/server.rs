@@ -8,7 +8,7 @@ use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{accept_hdr, Error, Message, Result};
 
 use crate::{
-    Graph, RuntimeRuntimePayload, ComponentLibrary, GraphInportOutportHolder,
+    Graph, Runtime, RuntimeRuntimePayload, ComponentLibrary, GraphInportOutportHolder,
     FBPMessage, RuntimeRuntimeMessage, RuntimePortsMessage, ComponentComponentMessage,
     ComponentComponentsreadyMessage, NetworkStatusMessage, NetworkStatusPayload,
     NetworkPersistResponse, NetworkErrorResponse, ComponentSourceMessage,
@@ -47,7 +47,7 @@ fn must_not_block<Role: tungstenite::handshake::HandshakeRole>(err: tungstenite:
 
 pub struct FlowdServer {
     bind_addr: String,
-    runtime: Arc<RwLock<RuntimeRuntimePayload>>,
+    runtime: Arc<RwLock<Runtime>>,
     graph: Arc<RwLock<Graph>>,
     components: Arc<RwLock<ComponentLibrary>>,
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
@@ -57,7 +57,7 @@ pub struct FlowdServer {
 impl FlowdServer {
     pub fn new(
         bind_addr: String,
-        runtime: Arc<RwLock<RuntimeRuntimePayload>>,
+        runtime: Arc<RwLock<Runtime>>,
         graph: Arc<RwLock<Graph>>,
         components: Arc<RwLock<ComponentLibrary>>,
         graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
@@ -129,10 +129,10 @@ impl FlowdServer {
         Ok(())
     }
 
-    fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> Result<()> {
+    fn handle_client(stream: TcpStream, graph: Arc<RwLock<Graph>>, runtime: Arc<RwLock<Runtime>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>) -> Result<()> {
         log::info!("handle_client called");
 
-        fn validate_secret(runtime: &Arc<RwLock<RuntimeRuntimePayload>>, secret: Option<&String>, graph: &str) -> Result<(), ()> {
+        fn validate_secret(runtime: &Arc<RwLock<Runtime>>, secret: Option<&String>, graph: &str) -> Result<(), ()> {
             if let Some(ref secret) = secret {
                 if let Some(expected_secret) = runtime.read().expect("lock poisoned").secrets.get(graph) {
                     if *secret != expected_secret {
@@ -146,7 +146,7 @@ impl FlowdServer {
         }
 
         fn get_graph_by_name(
-            runtime: &Arc<RwLock<RuntimeRuntimePayload>>,
+            runtime: &Arc<RwLock<Runtime>>,
             fallback_graph: &Arc<RwLock<Graph>>,
             graph_name: &str,
         ) -> Result<Arc<RwLock<Graph>>, std::io::Error> {
@@ -263,7 +263,10 @@ impl FlowdServer {
                             websocket
                                 .send(Message::text(
                                     //TODO handing over value inside lock would work like this:  serde_json::to_string(&*runtime.read().expect("lock poisoned"))
-                                    serde_json::to_string(&RuntimeRuntimeMessage::new(&runtime.read().expect("lock poisoned")))
+                                            serde_json::to_string(&RuntimeRuntimeMessage::new({
+                                                let runtime_read = runtime.read().expect("lock poisoned");
+                                                RuntimeRuntimePayload::from(runtime_read.snapshot())
+                                            }))
                                     .expect("failed to serialize runtime:runtime message"),
                                 ))
                                 .expect("failed to write message into websocket");
@@ -271,7 +274,7 @@ impl FlowdServer {
                             log::info!("response: sending runtime:ports message");
                             websocket
                                 .send(Message::text(
-                                    serde_json::to_string(&RuntimePortsMessage::new(&runtime.read().expect("lock poisoned"), &graph.read().expect("lock poisoned")))
+                                    serde_json::to_string(&RuntimePortsMessage::new(&*runtime.read().expect("lock poisoned"), &graph.read().expect("lock poisoned")))
                                         .expect("failed to serialize runtime:ports message"),
                                 ))
                                 .expect("failed to write message into websocket");
@@ -1505,7 +1508,7 @@ impl FlowdServer {
                                 continue;
                             }
                             //TODO or maybe better send this to graph instead of runtime? in future for multi-graph support, yes.
-                            match RuntimeRuntimePayload::packet(&payload, graph_inout.clone(), runtime.clone()) {
+                            match Runtime::packet(&payload, graph_inout.clone(), runtime.clone()) {
                                 Ok(_) => {
                                     log::info!("response: sending runtime:packetsent response");
                                     websocket

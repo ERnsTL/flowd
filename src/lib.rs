@@ -75,7 +75,7 @@ impl<T: Component> RunnableComponent for T {
 
 
 
-fn run_graph(runtime: Arc<RwLock<RuntimeRuntimePayload>>, graph: Arc<RwLock<Graph>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
+fn run_graph(runtime: Arc<RwLock<Runtime>>, graph: Arc<RwLock<Graph>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
     let graph_guard = graph.read().expect("lock poisoned");
     let components_guard = components.read().expect("lock poisoned");
     runtime.write().expect("lock poisoned").start(&graph_guard, &components_guard, graph_inout, runtime.clone())?;
@@ -83,8 +83,8 @@ fn run_graph(runtime: Arc<RwLock<RuntimeRuntimePayload>>, graph: Arc<RwLock<Grap
 }
 
 /// Create a new runtime instance
-pub fn create_runtime(graph_name: String) -> Arc<RwLock<RuntimeRuntimePayload>> {
-    Arc::new(RwLock::new(RuntimeRuntimePayload::new(graph_name)))
+pub fn create_runtime(graph_name: String) -> Arc<RwLock<Runtime>> {
+    Arc::new(RwLock::new(Runtime::new(graph_name)))
 }
 
 /// Create a component library with all available components
@@ -342,33 +342,33 @@ struct RuntimeGetruntimePayload {
 }
 
 #[derive(Serialize, Debug)]
-struct RuntimeRuntimeMessage<'a> {
+struct RuntimeRuntimeMessage {
     protocol: String, // group of messages (and capabities)
     command: String,  // name of message within group
-    payload: &'a RuntimeRuntimePayload,
+    payload: RuntimeRuntimePayload,
 }
 
-impl Default for RuntimeRuntimeMessage<'_> {
+impl Default for RuntimeRuntimeMessage {
     fn default() -> Self {
         RuntimeRuntimeMessage {
             protocol: String::from("runtime"),
             command: String::from("runtime"),
-            //TODO fix - currently using recursive Default::default() because the following does not work:
-            //payload: &RuntimeRuntimePayload::default(),
-            ..Default::default()
+            payload: RuntimeRuntimePayload::default(),
         }
     }
 }
 
-impl<'a> RuntimeRuntimeMessage<'a> {
-    fn new(payload: &'a RuntimeRuntimePayload) -> Self {
+impl RuntimeRuntimeMessage {
+    fn new(payload: RuntimeRuntimePayload) -> Self {
         RuntimeRuntimeMessage {
             protocol: String::from("runtime"),
             command: String::from("runtime"),
-            payload: &payload,
+            payload,
         }
     }
 }
+
+
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -384,23 +384,45 @@ pub struct RuntimeRuntimePayload {
     namespace: String,             // spec: namespace of components for this project of top-level graph
     repository: String,            // spec: source code repository of this runtime software //TODO but it is the repo of the graph, is it?
     repository_version: String,    // spec: repository version of this software build
+}
+
+#[derive(Debug)]
+pub struct Runtime {
+    // external-facing runtime metadata
+    id: String,                        // spec: UUID of this runtime instance
+    label: String,                     // spec: human-readable description of the runtime
+    version: String,                   // spec: supported protocol version
+    all_capabilities: Vec<Capability>, // spec: capabilities supported by runtime
+    capabilities: Vec<Capability>,     // spec: capabilities granted to client
+    graph: String,                     // spec: currently active graph
+    runtime: String,                   // spec: runtime software, "flowd"
+    namespace: String,                 // spec: namespace of components for active graph
+    repository: String,                // spec: source repository URL
+    repository_version: String,        // spec: build/repository version
 
     // runtime state
-    #[serde(skip)]
     status: NetworkStartedResponsePayload,  // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
-    #[serde(skip)]
     tracing: bool,  //TODO implement
-    #[serde(skip)]
     processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
-    #[serde(skip)]
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
-    #[serde(skip)]
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
-    #[serde(skip)]
     secrets: HashMap<String, String>, // graph name -> secret token for token-based security
-    #[serde(skip)]
     graphs: multi_graph::MultiGraphManager, // multi-graph support
+}
+
+#[derive(Debug)]
+pub struct RuntimeSnapshot {
+    id: String,
+    label: String,
+    version: String,
+    all_capabilities: Vec<Capability>,
+    capabilities: Vec<Capability>,
+    graph: String,
+    runtime: String,
+    namespace: String,
+    repository: String,
+    repository_version: String,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -440,7 +462,24 @@ impl Default for RuntimeRuntimePayload {
             namespace: String::from("main"), // namespace of components TODO implement
             repository: String::from("https://github.com/ERnsTL/flowd.git"),  //TODO use this feature of building and saving the graph into a Git repo
             repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and actual version
-            // runtime values
+        }
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        let payload = RuntimeRuntimePayload::default();
+        Runtime {
+            id: payload.id,
+            label: payload.label,
+            version: payload.version,
+            all_capabilities: payload.all_capabilities,
+            capabilities: payload.capabilities,
+            graph: payload.graph,
+            runtime: payload.runtime,
+            namespace: payload.namespace,
+            repository: payload.repository,
+            repository_version: payload.repository_version,
             status: NetworkStartedResponsePayload::default(),
             tracing: false,
             processes: ProcessManager::default(),
@@ -452,7 +491,39 @@ impl Default for RuntimeRuntimePayload {
     }
 }
 
-impl RuntimeRuntimePayload {
+impl From<RuntimeSnapshot> for RuntimeRuntimePayload {
+    fn from(snapshot: RuntimeSnapshot) -> Self {
+        RuntimeRuntimePayload {
+            id: snapshot.id,
+            label: snapshot.label,
+            version: snapshot.version,
+            all_capabilities: snapshot.all_capabilities,
+            capabilities: snapshot.capabilities,
+            graph: snapshot.graph,
+            runtime: snapshot.runtime,
+            namespace: snapshot.namespace,
+            repository: snapshot.repository,
+            repository_version: snapshot.repository_version,
+        }
+    }
+}
+
+impl Runtime {
+    pub fn snapshot(&self) -> RuntimeSnapshot {
+        RuntimeSnapshot {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            version: self.version.clone(),
+            all_capabilities: self.all_capabilities.clone(),
+            capabilities: self.capabilities.clone(),
+            graph: self.graph.clone(),
+            runtime: self.runtime.clone(),
+            namespace: self.namespace.clone(),
+            repository: self.repository.clone(),
+            repository_version: self.repository_version.clone(),
+        }
+    }
+
     fn new(active_graph: String) -> Self {
         let mut graphs = multi_graph::MultiGraphManager::new();
         // Create initial graph
@@ -463,7 +534,7 @@ impl RuntimeRuntimePayload {
         )));
         graphs.add_graph(active_graph.clone(), initial_graph);
 
-        RuntimeRuntimePayload{
+        Runtime {
             graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
             status: NetworkStartedResponsePayload {
                 time_started: UtcTime(chrono::DateTime::<Utc>::MIN_UTC), // zero value - //TODO rather use None
@@ -536,7 +607,7 @@ impl RuntimeRuntimePayload {
     }
 
     //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
-    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
         if self.status.running || !self.processes.is_empty() || self.watchdog_thread.is_some() {
             return Err(std::io::Error::new(
@@ -1520,7 +1591,7 @@ impl RuntimeRuntimePayload {
         Ok(())
     }
 
-    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<RuntimeRuntimePayload>>) -> std::result::Result<(), std::io::Error> {
+    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<(), std::io::Error> {
         const INPORT_PUSH_GRACE_DUR: Duration = Duration::from_secs(2);
 
         // Implement token-based security: validate secret if provided
@@ -1739,7 +1810,7 @@ mod tests {
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 enum Capability {
     // spec: deprecated. Implies capabilities network:status, network:data, network:control. Does not imply capability network:persist.
     #[serde(rename = "protocol:network")]
@@ -2180,7 +2251,7 @@ impl Default for RuntimePortsMessage {
 }
 
 impl RuntimePortsMessage {
-    fn new(runtime: &RuntimeRuntimePayload, graph: &Graph) -> Self {
+    fn new(runtime: &Runtime, graph: &Graph) -> Self {
         RuntimePortsMessage {
             protocol: String::from("runtime"),
             command: String::from("ports"),
@@ -4849,7 +4920,7 @@ impl Graph {
         return out;
     }
 
-    fn clear(&mut self, payload: &GraphClearRequestPayload, runtime: &RuntimeRuntimePayload) -> Result<(), std::io::Error> {
+    fn clear(&mut self, payload: &GraphClearRequestPayload, runtime: &Runtime) -> Result<(), std::io::Error> {
         if runtime.status.running {
             // not allowed at the moment (TODO), theoretically graph and network could be different and the graph could be modified while the network is still running in the old config, then stop network and immediately start the network again according to the new graph structure, having only short downtime.
             return Err(std::io::Error::new(std::io::ErrorKind::ResourceBusy, String::from("network still running")));
@@ -5485,7 +5556,7 @@ pub mod bench_api {
     use std::time::{Duration, Instant};
 
     pub struct BenchRuntimeHarness {
-        runtime: Arc<RwLock<RuntimeRuntimePayload>>,
+        runtime: Arc<RwLock<Runtime>>,
         graph: Arc<RwLock<Graph>>,
         components: Arc<RwLock<ComponentLibrary>>,
         graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
@@ -5494,8 +5565,8 @@ pub mod bench_api {
 
     impl BenchRuntimeHarness {
         fn new(graph: Graph) -> Self {
-            let runtime: Arc<RwLock<RuntimeRuntimePayload>> =
-                Arc::new(RwLock::new(RuntimeRuntimePayload::new(graph.properties.name.clone())));
+            let runtime: Arc<RwLock<Runtime>> =
+                Arc::new(RwLock::new(Runtime::new(graph.properties.name.clone())));
             let components: Arc<RwLock<ComponentLibrary>> = build_component_library();
             let (packet_tx, packet_rx) = mpsc::sync_channel(65_536);
             let graph_inout = Arc::new(Mutex::new(GraphInportOutportHolder {
@@ -5543,7 +5614,7 @@ pub mod bench_api {
                 payload: Some(String::from_utf8_lossy(payload).to_string()),
                 secret: None,
             };
-            RuntimeRuntimePayload::packet(&packet, self.graph_inout.clone(), self.runtime.clone())?;
+            Runtime::packet(&packet, self.graph_inout.clone(), self.runtime.clone())?;
             Ok(())
         }
 
