@@ -25,7 +25,8 @@ use crate::{
     NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload,
     NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse, NetworkStartedResponsePayload,
     GraphEdge, GraphPort, GraphNodeSpecNetwork,
-    GraphChangenodeResponsePayload, AccessLevel, Capability
+    GraphChangenodeResponsePayload, AccessLevel, Capability,
+    RuntimeMessage, ComponentMessage, NetworkMessage, GraphMessage, TraceMessage
 };
 /* unused imports
 , RuntimePacketRequestPayload,
@@ -266,7 +267,7 @@ impl FlowdServer {
 
                     match fbpmsg {
                         // runtime base
-                        FBPMessage::RuntimeGetruntimeMessage(payload) => {
+                        FBPMessage::Runtime(RuntimeMessage::Getruntime(payload)) => {
                             log::info!("got runtime:getruntime message with secret {:?}", payload.secret);
                             if validate_secret_readonly(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&RuntimeErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize runtime:error response"))).expect("failed to write message into websocket");
@@ -301,7 +302,7 @@ impl FlowdServer {
                         }
 
                         // protocol:component
-                        FBPMessage::ComponentListRequest(_payload) => {
+                        FBPMessage::Component(ComponentMessage::List(_payload)) => {
                             log::info!("got component:list message");
                             if validate_secret_readonly(&runtime, _payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -328,7 +329,7 @@ impl FlowdServer {
                             log::info!("sent {} component:component responses", count);
                             }
 
-                        FBPMessage::NetworkGetstatusMessage(_payload) => {
+                        FBPMessage::Network(NetworkMessage::Getstatus(_payload)) => {
                             log::info!("got network:getstatus message");
                             if validate_secret_readonly(&runtime, _payload.secret.as_ref(), &_payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), _payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
@@ -371,7 +372,7 @@ impl FlowdServer {
                                 .expect("failed to write message into websocket");
                         }
 
-                        FBPMessage::NetworkPersistRequest(_payload) => {
+                        FBPMessage::Network(NetworkMessage::Persist(_payload)) => {
                             log::info!("got network:persist message");
                             if validate_secret(&runtime, _payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), runtime.read().expect("lock poisoned").graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
@@ -406,7 +407,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::ComponentGetsourceMessage(payload) => {
+                        FBPMessage::Component(ComponentMessage::Getsource(payload)) => {
                             log::info!("got component:getsource message");
                             if validate_secret_readonly(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -467,7 +468,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphClearRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Clear(payload)) => {
                             log::info!("got graph:clear message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.name).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -504,7 +505,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddnodeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addnode(payload)) => {
                             log::info!("got graph:addnode message");
                             if let Some(graph_name) = payload.graph.clone() {
                                 if validate_secret(&runtime, payload.secret.as_ref(), &graph_name).is_err() {
@@ -525,7 +526,7 @@ impl FlowdServer {
                                 };
                                 let add_node_result = {
                                     let mut graph_write = target_graph.write().expect("lock poisoned");
-                                    graph_write.add_node_from_payload(graph_name, payload.component, payload.name, payload.metadata)
+                                    graph_write.add_node_from_payload(graph_name.to_string(), payload.component, payload.name, payload.metadata)
                                 };
                                 match add_node_result {
                                 Ok(response) => {
@@ -566,7 +567,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemovenodeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removenode(payload)) => {
                             log::info!("got graph:removenode message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -623,7 +624,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRenamenodeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Renamenode(payload)) => {
                             log::info!("got graph:renamenode message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -668,7 +669,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphChangenodeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Changenode(payload)) => {
                             log::info!("got graph:changenode message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -721,7 +722,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddedgeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addedge(payload)) => {
                             log::info!("got graph:addedge message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -767,7 +768,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemoveedgeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removeedge(payload)) => {
                             log::info!("got graph:removeedge message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -812,7 +813,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphChangeedgeRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Changeedge(payload)) => {
                             log::info!("got graph:changeedge message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -857,7 +858,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddinitialRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addinitial(payload)) => {
                             log::info!("got graph:addinitial message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -902,7 +903,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemoveinitialRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removeinitial(payload)) => {
                             log::info!("got graph:removeinitial message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -947,7 +948,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddinportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addinport(payload)) => {
                             log::info!("got graph:addinport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -993,7 +994,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemoveinportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removeinport(payload)) => {
                             log::info!("got graph:removeinport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1038,7 +1039,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRenameinportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Renameinport(payload)) => {
                             log::info!("got graph:renameinport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1083,7 +1084,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddoutportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addoutport(payload)) => {
                             log::info!("got graph:addoutport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1129,7 +1130,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemoveoutportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removeoutport(payload)) => {
                             log::info!("got graph:removeoutport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1174,7 +1175,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRenameoutportRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Renameoutport(payload)) => {
                             log::info!("got graph:renameoutport message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1219,7 +1220,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphAddgroupRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Addgroup(payload)) => {
                             log::info!("got graph:addgroup message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1264,7 +1265,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRemovegroupRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Removegroup(payload)) => {
                             log::info!("got graph:removegroup message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1309,7 +1310,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphRenamegroupRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Renamegroup(payload)) => {
                             log::info!("got graph:renamegroup message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1354,7 +1355,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::GraphChangegroupRequest(payload) => {
+                        FBPMessage::Graph(GraphMessage::Changegroup(payload)) => {
                             log::info!("got graph:changegroup message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&GraphErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize graph:error response"))).expect("failed to write message into websocket");
@@ -1400,7 +1401,7 @@ impl FlowdServer {
                         }
 
                         // protocol:trace
-                        FBPMessage::TraceStartRequest(payload) => {
+                        FBPMessage::Trace(TraceMessage::Start(payload)) => {
                             log::info!("got trace:start message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&TraceErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize trace:error response"))).expect("failed to write message into websocket");
@@ -1430,7 +1431,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::TraceStopRequest(payload) => {
+                        FBPMessage::Trace(TraceMessage::Stop(payload)) => {
                             log::info!("got trace:stop message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&TraceErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize trace:error response"))).expect("failed to write message into websocket");
@@ -1460,7 +1461,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::TraceClearRequest(payload) => {
+                        FBPMessage::Trace(TraceMessage::Clear(payload)) => {
                             log::info!("got trace:clear message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&TraceErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize trace:error response"))).expect("failed to write message into websocket");
@@ -1491,7 +1492,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::TraceDumpRequest(payload) => {
+                        FBPMessage::Trace(TraceMessage::Dump(payload)) => {
                             log::info!("got trace:dump message");
                             if validate_secret_readonly(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&TraceErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize trace:error response"))).expect("failed to write message into websocket");
@@ -1522,7 +1523,7 @@ impl FlowdServer {
                         }
 
                         // protocol:runtime
-                        FBPMessage::RuntimePacketRequest(payload) => {
+                        FBPMessage::Runtime(RuntimeMessage::Packet(payload)) => {
                             log::info!("got runtime:packet message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &runtime.read().expect("lock poisoned").graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&RuntimeErrorResponse::new("invalid secret token".to_string())).expect("failed to serialize runtime:error response"))).expect("failed to write message into websocket");
@@ -1554,7 +1555,7 @@ impl FlowdServer {
 
                         // according to fbp-protocol, this is invalid to be sent from the client (there is no input/packetsent message defined) (TODO clarify with flowbased-devs)
                         //TODO maybe handle this a level higher in list of FBPMessage variants?
-                        FBPMessage::RuntimePacketsentRequest(_payload) => {
+                        FBPMessage::Runtime(RuntimeMessage::Packetsent(_payload)) => {
                             log::info!("got runtime:packetsent message");
                             log::warn!("response: sending runtime:error response (error case, unexpected from FBP network protocol client)");
                             websocket
@@ -1566,7 +1567,7 @@ impl FlowdServer {
                         }
 
                         // network:data
-                        FBPMessage::NetworkEdgesRequest(payload) => {
+                        FBPMessage::Network(NetworkMessage::Edges(payload)) => {
                             log::info!("got network:edges message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
@@ -1613,7 +1614,7 @@ impl FlowdServer {
                         }
 
                         // network:control (?)
-                        FBPMessage::NetworkStartRequest(payload) => {
+                        FBPMessage::Network(NetworkMessage::Start(payload)) => {
                             log::info!("got network:start message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
@@ -1750,7 +1751,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::NetworkStopRequest(payload) => {
+                        FBPMessage::Network(NetworkMessage::Stop(payload)) => {
                             log::info!("got network:stop message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");
@@ -1831,7 +1832,7 @@ impl FlowdServer {
                             }
                         }
 
-                        FBPMessage::NetworkDebugRequest(payload) => {
+                        FBPMessage::Network(NetworkMessage::Debug(payload)) => {
                             log::info!("got network:debug message");
                             if validate_secret(&runtime, payload.secret.as_ref(), &payload.graph).is_err() {
                                 websocket.send(Message::text(serde_json::to_string(&NetworkErrorResponse::new("invalid secret token".to_string(), String::from(""), payload.graph.clone())).expect("failed to serialize network:error response"))).expect("failed to write message into websocket");

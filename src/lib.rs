@@ -220,114 +220,18 @@ fn format_duration(duration: Duration) -> String {
 //TODO note messages which are used multiple times
 //NOTE: deny unknown fields to learn them (serde) deny_unknown_fields, but problem is that "protocol" field is still present -> panic
 #[derive(Deserialize, Debug)]
-#[serde(tag = "command", content = "payload")] //TODO multiple tags: protocol and command
+#[serde(tag = "protocol")]
 enum FBPMessage {
-    // runtime base -- no capabilities required
-    #[serde(rename = "getruntime")]
-    RuntimeGetruntimeMessage(RuntimeGetruntimePayload), //NOTE: tag+content -> tuple variant not struct variant
     #[serde(rename = "runtime")]
-    RuntimeRuntimeMessage,
-
-    // protocol:runtime
-    #[serde(rename = "ports")]
-    RuntimePortsMessage,
-    #[serde(rename = "packet")]
-    RuntimePacketRequest(RuntimePacketRequestPayload),
-    #[serde(rename = "packetsent")]
-    RuntimePacketsentRequest(RuntimePacketsentPayload),
-
-    // network:persist
-    #[serde(rename = "persist")]
-    NetworkPersistRequest(NetworkPersistRequestPayload),
-
-    // network:status
-    // used for several capabilities: protocol:network (deprecated), network:status, network:control
-    #[serde(rename = "getstatus")]
-    NetworkGetstatusMessage(NetworkGetstatusPayload),
-    #[serde(rename = "status")]
-    NetworkStatusMessage,
-
-    // network:data
-    #[serde(rename = "edges")]
-    NetworkEdgesRequest(NetworkEdgesRequestPayload),
-
-    // network:control (?)
-    #[serde(rename = "start")]
-    NetworkStartRequest(NetworkStartRequestPayload),
-    #[serde(rename = "stop")]
-    NetworkStopRequest(NetworkStopRequestPayload),
-    #[serde(rename = "debug")]
-    NetworkDebugRequest(NetworkDebugRequestPayload),
-
-    // component:getsource
-    #[serde(rename = "getsource")]
-    ComponentGetsourceMessage(ComponentGetsourcePayload),
-
-    // component:setsource
-    #[serde(rename = "source")]
-    ComponentSourceMessage,
-
-    // protocol:component
-    #[serde(rename = "list")]
-    ComponentListRequest(ComponentListRequestPayload),
-    //NOTE: used in several capabilities as response message
+    Runtime(RuntimeMessage),
+    #[serde(rename = "network")]
+    Network(NetworkMessage),
     #[serde(rename = "component")]
-    ComponentComponentMessage,
-    #[serde(rename = "componentsready")]
-    ComponentComponentsreadyMessage,
-
-    // graph:readonly
-    // protocol:graph
-    #[serde(rename = "clear")]
-    GraphClearRequest(GraphClearRequestPayload),
-    #[serde(rename = "addnode")]
-    GraphAddnodeRequest(GraphAddnodeRequestPayload),
-    #[serde(rename = "changenode")]
-    GraphChangenodeRequest(GraphChangenodeRequestPayload),
-    #[serde(rename = "renamenode")]
-    GraphRenamenodeRequest(GraphRenamenodeRequestPayload),
-    #[serde(rename = "removenode")]
-    GraphRemovenodeRequest(GraphRemovenodeRequestPayload),
-    #[serde(rename = "addedge")]
-    GraphAddedgeRequest(GraphAddedgeRequestPayload),
-    #[serde(rename = "removeedge")]
-    GraphRemoveedgeRequest(GraphRemoveedgeRequestPayload),
-    #[serde(rename = "changeedge")]
-    GraphChangeedgeRequest(GraphChangeedgeRequestPayload),
-    #[serde(rename = "addinitial")]
-    GraphAddinitialRequest(GraphAddinitialRequestPayload),
-    #[serde(rename = "removeinitial")]
-    GraphRemoveinitialRequest(GraphRemoveinitialRequestPayload),
-    #[serde(rename = "addinport")]
-    GraphAddinportRequest(GraphAddinportRequestPayload),
-    #[serde(rename = "removeinport")]
-    GraphRemoveinportRequest(GraphRemoveinportRequestPayload),
-    #[serde(rename = "renameinport")]
-    GraphRenameinportRequest(GraphRenameinportRequestPayload),
-    #[serde(rename = "addoutport")]
-    GraphAddoutportRequest(GraphAddoutportRequestPayload),
-    #[serde(rename = "removeoutport")]
-    GraphRemoveoutportRequest(GraphRemoveoutportRequestPayload),
-    #[serde(rename = "renameoutport")]
-    GraphRenameoutportRequest(GraphRenameoutportRequestPayload),
-    #[serde(rename = "addgroup")]
-    GraphAddgroupRequest(GraphAddgroupRequestPayload),
-    #[serde(rename = "removegroup")]
-    GraphRemovegroupRequest(GraphRemovegroupRequestPayload),
-    #[serde(rename = "renamegroup")]
-    GraphRenamegroupRequest(GraphRenamegroupRequestPayload),
-    #[serde(rename = "changegroup")]
-    GraphChangegroupRequest(GraphChangegroupRequestPayload),
-
-    // protocol:trace
-    #[serde(rename = "start")]
-    TraceStartRequest(TraceStartRequestPayload),
-    #[serde(rename = "stop")]
-    TraceStopRequest(TraceStopRequestPayload),
-    #[serde(rename = "clear")]
-    TraceClearRequest(TraceClearRequestPayload),
-    #[serde(rename = "dump")]
-    TraceDumpRequest(TraceDumpRequestPayload),
+    Component(ComponentMessage),
+    #[serde(rename = "graph")]
+    Graph(GraphMessage),
+    #[serde(rename = "trace")]
+    Trace(TraceMessage),
 }
 
 // ----------
@@ -4577,10 +4481,133 @@ impl Default for GraphChangegroupResponsePayload {
 }
 
 // ----------
+// protocol:runtime
+// ----------
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")]
+enum RuntimeMessage {
+    #[serde(rename = "getruntime")]
+    Getruntime(RuntimeGetruntimePayload),
+    #[serde(rename = "runtime")]
+    Runtime,
+    #[serde(rename = "ports")]
+    Ports,
+    #[serde(rename = "packet")]
+    Packet(RuntimePacketRequestPayload),
+    #[serde(rename = "packetsent")]
+    Packetsent(RuntimePacketsentPayload),
+}
+
+// ----------
+// protocol:network
+// ----------
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")]
+enum NetworkMessage {
+    #[serde(rename = "persist")]
+    Persist(NetworkPersistRequestPayload),
+    #[serde(rename = "getstatus")]
+    Getstatus(NetworkGetstatusPayload),
+    #[serde(rename = "status")]
+    Status,
+    #[serde(rename = "edges")]
+    Edges(NetworkEdgesRequestPayload),
+    #[serde(rename = "start")]
+    Start(NetworkStartRequestPayload),
+    #[serde(rename = "stop")]
+    Stop(NetworkStopRequestPayload),
+    #[serde(rename = "debug")]
+    Debug(NetworkDebugRequestPayload),
+}
+
+// ----------
+// protocol:component
+// ----------
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")]
+enum ComponentMessage {
+    #[serde(rename = "getsource")]
+    Getsource(ComponentGetsourcePayload),
+    #[serde(rename = "source")]
+    Source,
+    #[serde(rename = "list")]
+    List(ComponentListRequestPayload),
+    #[serde(rename = "component")]
+    Component,
+    #[serde(rename = "componentsready")]
+    Componentsready,
+}
+
+// ----------
+// protocol:graph
+// ----------
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")]
+enum GraphMessage {
+    #[serde(rename = "clear")]
+    Clear(GraphClearRequestPayload),
+    #[serde(rename = "addnode")]
+    Addnode(GraphAddnodeRequestPayload),
+    #[serde(rename = "changenode")]
+    Changenode(GraphChangenodeRequestPayload),
+    #[serde(rename = "renamenode")]
+    Renamenode(GraphRenamenodeRequestPayload),
+    #[serde(rename = "removenode")]
+    Removenode(GraphRemovenodeRequestPayload),
+    #[serde(rename = "addedge")]
+    Addedge(GraphAddedgeRequestPayload),
+    #[serde(rename = "removeedge")]
+    Removeedge(GraphRemoveedgeRequestPayload),
+    #[serde(rename = "changeedge")]
+    Changeedge(GraphChangeedgeRequestPayload),
+    #[serde(rename = "addinitial")]
+    Addinitial(GraphAddinitialRequestPayload),
+    #[serde(rename = "removeinitial")]
+    Removeinitial(GraphRemoveinitialRequestPayload),
+    #[serde(rename = "addinport")]
+    Addinport(GraphAddinportRequestPayload),
+    #[serde(rename = "removeinport")]
+    Removeinport(GraphRemoveinportRequestPayload),
+    #[serde(rename = "renameinport")]
+    Renameinport(GraphRenameinportRequestPayload),
+    #[serde(rename = "addoutport")]
+    Addoutport(GraphAddoutportRequestPayload),
+    #[serde(rename = "removeoutport")]
+    Removeoutport(GraphRemoveoutportRequestPayload),
+    #[serde(rename = "renameoutport")]
+    Renameoutport(GraphRenameoutportRequestPayload),
+    #[serde(rename = "addgroup")]
+    Addgroup(GraphAddgroupRequestPayload),
+    #[serde(rename = "removegroup")]
+    Removegroup(GraphRemovegroupRequestPayload),
+    #[serde(rename = "renamegroup")]
+    Renamegroup(GraphRenamegroupRequestPayload),
+    #[serde(rename = "changegroup")]
+    Changegroup(GraphChangegroupRequestPayload),
+}
+
+// ----------
 // protocol:trace
 // ----------
 
 // spec: This protocol is utilized for triggering and transmitting Flowtraces, see https://github.com/flowbased/flowtrace
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "command", content = "payload")]
+enum TraceMessage {
+    #[serde(rename = "start")]
+    Start(TraceStartRequestPayload),
+    #[serde(rename = "stop")]
+    Stop(TraceStopRequestPayload),
+    #[serde(rename = "clear")]
+    Clear(TraceClearRequestPayload),
+    #[serde(rename = "dump")]
+    Dump(TraceDumpRequestPayload),
+}
 
 // trace:start -> trace:start | trace:error
 #[derive(Deserialize, Debug)]
