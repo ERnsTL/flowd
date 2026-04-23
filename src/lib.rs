@@ -188,6 +188,7 @@ pub fn load_or_create_graph() -> std::result::Result<Arc<RwLock<Graph>>, std::io
 
 // module-based components
 mod components;
+// crate-based components
 include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
 // multi-graph support
