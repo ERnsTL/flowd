@@ -3100,14 +3100,6 @@ impl Default for ComponentSourceMessage {
 }
 
 impl ComponentSourceMessage {
-    fn default_graph() -> Self {
-        ComponentSourceMessage {
-            protocol: String::from("component"),
-            command: String::from("source"),
-            payload: ComponentSourcePayload::default_graph(),
-        }
-    }
-
     fn new(payload: ComponentSourcePayload) -> Self {
         ComponentSourceMessage {
             protocol: String::from("component"),
@@ -3138,52 +3130,7 @@ impl Default for ComponentSourcePayload {
     }
 }
 
-impl ComponentSourcePayload {
-    fn default_graph() -> Self {
-        ComponentSourcePayload {
-            name: String::from("default_graph"),
-            language: String::from("json"),
-            library: String::from("main_library"),
-            //TODO validate against schema @ https://github.com/flowbased/fbp/blob/master/schema/graph.json
-            code: String::from(
-                r#"{
-                "caseSensitive": true,
-                "properties": {
-                    "name": "default_graph",
-                    "environment": {
-                        "type": "flowd",
-                        "content": ""
-                    },
-                    "description": "description for default_graph",
-                    "icon": "usd"
-                },
-                "inports": {},
-                "outports": {},
-                "groups": [
-                    {
-                        "name": "process_group1",
-                        "nodes": ["Repeater"],
-                        "metadata": {
-                            "description": "description of process_group1"
-                        }
-                    }
-                ],
-                "processes": {
-                    "Repeater": {
-                        "component": "Repeat",
-                        "metadata": {
-                            "x": 100,
-                            "y": 100
-                        }
-                    }
-                },
-                "connections": []
-        }"#,
-            ),
-            tests: String::from("// tests for graph default_graph"),
-        }
-    }
-}
+
 
 // ----------
 // component:setsource
