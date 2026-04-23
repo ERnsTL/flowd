@@ -10,27 +10,7 @@ use signal_hook::flag;
 use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{accept_hdr, Error, Message, Result};
 
-use crate::{
-    Graph, Runtime, RuntimeRuntimePayload, ComponentLibrary, GraphInportOutportHolder,
-    FBPMessage, RuntimeRuntimeMessage, RuntimePortsMessage, ComponentComponentMessage,
-    ComponentComponentsreadyMessage, NetworkStatusMessage, NetworkStatusPayload,
-    NetworkPersistResponse, NetworkErrorResponse, ComponentSourceMessage,
-    GraphErrorResponse, GraphClearResponse, CLIENT_BROADCAST_WRITE_TIMEOUT,
-    GraphAddnodeResponse, GraphRemovenodeResponse, GraphRenamenodeResponse,
-    GraphChangenodeResponse, GraphAddedgeResponse, GraphRemoveedgeResponse,
-    GraphChangeedgeResponse, GraphAddinitialResponse, GraphRemoveinitialResponse,
-    GraphAddinportResponse, GraphRemoveinportResponse, GraphRenameinportResponse,
-    GraphAddoutportResponse, GraphRemoveoutportResponse, GraphRenameoutportResponse,
-    GraphAddgroupResponse, GraphRemovegroupResponse, GraphRenamegroupResponse,
-    GraphChangegroupResponse, TraceStartResponse, TraceStopResponse,
-    TraceClearResponse, TraceDumpResponse, TraceErrorResponse,
-    RuntimePacketsentMessage, RuntimePacketsentPayload, RuntimeErrorResponse,
-    NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload,
-    NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse, NetworkStartedResponsePayload,
-    GraphEdge, GraphPort, GraphNodeSpecNetwork,
-    GraphChangenodeResponsePayload, AccessLevel, Capability,
-    RuntimeMessage, ComponentMessage, NetworkMessage, GraphMessage, TraceMessage
-};
+use crate::{CLIENT_BROADCAST_WRITE_TIMEOUT, Graph, Runtime, RuntimeRuntimePayload, ComponentLibrary, GraphInportOutportHolder, FBPMessage, RuntimeRuntimeMessage, RuntimePortsMessage, ComponentComponentMessage, ComponentComponentsreadyMessage, NetworkStatusMessage, NetworkStatusPayload, NetworkPersistResponse, NetworkErrorResponse, ComponentSourceMessage, GraphErrorResponse, GraphClearResponse, GraphAddnodeResponse, GraphRemovenodeResponse, GraphRenamenodeResponse, GraphChangenodeResponse, GraphAddedgeResponse, GraphRemoveedgeResponse, GraphChangeedgeResponse, GraphAddinitialResponse, GraphRemoveinitialResponse, GraphAddinportResponse, GraphRemoveinportResponse, GraphRenameinportResponse, GraphAddoutportResponse, GraphRemoveoutportResponse, GraphRenameoutportResponse, GraphAddgroupResponse, GraphRemovegroupResponse, GraphRenamegroupResponse, GraphChangegroupResponse, TraceStartResponse, TraceStopResponse, TraceClearResponse, TraceDumpResponse, TraceErrorResponse, RuntimePacketsentMessage, RuntimePacketsentPayload, RuntimeErrorResponse, NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload, NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse, NetworkStartedResponsePayload, GraphEdge, GraphPort, GraphNodeSpecNetwork, GraphChangenodeResponsePayload, AccessLevel, Capability, RuntimeMessage, ComponentMessage, NetworkMessage, GraphMessage, TraceMessage, register_component_log_filters};
 /* unused imports
 , RuntimePacketRequestPayload,
     RuntimePacketEvent
@@ -1922,7 +1902,28 @@ impl FlowdServer {
 }
 
 pub fn run() -> Result<()> {
+    println!("flowd {}", env!("CARGO_PKG_VERSION"));
+
+    //NOTE: important to show the thread name = the FBP process name
+    let mut logger_config = simplelog::ConfigBuilder::default();
+    logger_config
+        .set_time_level(simplelog::LevelFilter::Off)
+        .set_thread_level(simplelog::LevelFilter::Info)
+        .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
+        .set_thread_mode(simplelog::ThreadLogMode::Names)
+        .set_thread_padding(simplelog::ThreadPadding::Right(21))    // maximum thread name length on Linux is 15 by the way
+        .set_level_padding(simplelog::LevelPadding::Right);
+    register_component_log_filters(&mut logger_config);
+    simplelog::TermLogger::init(
+        simplelog::LevelFilter::Trace,   // can locally increase this for dev, TODO make configurable via args - but better configure this in Cargo.toml
+        logger_config.build(),
+        simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
+        simplelog::ColorChoice::Auto    // depending on whether interactive or not
+    ).expect("logging init failed");
+    info!("logging initialized");
+
     log::info!("Starting flowd server...");
+
     // Create runtime, component library, and graph using public APIs
     let runtime = crate::create_runtime("main_graph".to_string());
     log::info!("runtime initialized");
