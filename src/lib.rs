@@ -4990,10 +4990,27 @@ impl Graph {
         }
     }
 
-    //TODO very lossy conversion
+    /// Converts FBP graph ports to component API port definitions.
+    ///
+    /// This conversion is inherently limited by the FBP protocol specification, which only provides
+    /// minimal port information in graph definitions. The resulting ComponentPort structs contain
+    /// only the port names, with all other fields defaulted to empty/placeholder values because:
+    ///
+    /// - FBP graph ports don't specify data types, schemas, or validation rules
+    /// - Port requirements (required/optional) aren't defined in the graph format
+    /// - Array port indicators and descriptions aren't available
+    /// - Default values and allowed value constraints aren't specified
+    ///
+    /// This design reflects the FBP philosophy of keeping graph definitions simple and delegating
+    /// detailed port specifications to the component implementations themselves. The graph serves
+    /// as a wiring diagram, while components define their interface contracts.
+    ///
+    /// Future FBP specification updates might provide richer port metadata, but for now this
+    /// conversion serves the practical need of exposing graph ports through the component API
+    /// for tooling and introspection purposes.
     fn ports_as_componentportsarray(&self, inports_or_outports: &HashMap<String,GraphPort>) -> Vec<ComponentPort> {
         let mut out = Vec::with_capacity(inports_or_outports.len());
-        for (name, info) in inports_or_outports.iter() {
+        for (name, _info) in inports_or_outports.iter() {
             out.push(ComponentPort {
                 name: name.clone(),
                 allowed_type: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port TODO what happens if we return a empty allowed type (because we dont know from Graph inport)

@@ -36,8 +36,9 @@ This file contains things that are unexpected, undocumented, in need of clarific
 - Normative examples are insufficient: add canonical conversation transcripts for common and edge-case flows.
 - Conformance tests are permissive on sequencing: add strict sequence tests and negative tests for invalid order/state transitions.
 - Determinism expectations are unclear: define which outputs are nondeterministic and which must be reproducible across runtimes.
+- Graph port to component port conversion is underspecified: the FBP protocol provides minimal port metadata in graph definitions, requiring clarification on what fields should be available when converting graph ports to component ports (see `Graph::ports_as_componentportsarray` method in `src/lib.rs` line 4994).
 - For graphs, there is no graph listing, no graph management:
-  - The FBP protocol treats graphs as: “Named mutable documents” — not managed resources
+  - The FBP protocol treats graphs as: "Named mutable documents" — not managed resources
   - Meaning: No lifecycle (create/list/delete), Only mutations on a known id
 
 ### Current quality assessment of fbp-protocol
