@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::Thread;
 
 use multimap::MultiMap;
@@ -163,6 +163,20 @@ impl ComponentPort {
 }
 
 // graph
-pub trait GraphInportOutport: Send {}
+//NOTE: this is just an alias for convenience to components so that they dont have to write out the full Arc<Mutex<InportOutportHolder>>
+pub type GraphInportOutportHandle = (
+    Arc<dyn Fn(String) + Send + Sync>,
+    Arc<dyn Fn(String) + Send + Sync>,
+);
 
-pub type GraphInportOutportHandle = Arc<Mutex<dyn GraphInportOutport>>; //TODO optimize - get rid of dyn (just have a struct with the send_runtime_packet method and implement that in the main runtime code, then we can get rid of the Arc<Mutex<>> wrapper and just pass a reference to that struct to the components. But for now, this is easier to implement and does not cause significant overhead, so let's keep it like this for now.)
+/// Convenience function for sending network output messages.
+/// This is a free function that components can call directly on their GraphInportOutportHandle.
+pub fn send_network_output_comfortable(graph_inout: &GraphInportOutportHandle, message: String) {
+    (graph_inout.0)(message);
+}
+
+/// Convenience function for sending network preview URL messages.
+/// This is a free function that components can call directly on their GraphInportOutportHandle.
+pub fn send_network_previewurl_comfortable(graph_inout: &GraphInportOutportHandle, url: String) {
+    (graph_inout.1)(url);
+}

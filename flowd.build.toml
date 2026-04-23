@@ -265,3 +265,8 @@ struct = "Demux3Component"
 name = "Delay"
 crate = "flowd-delay"
 struct = "DelayComponent"
+
+[[components.entry]]
+name = "Visualization"
+crate = "flowd-vis"
+struct = "FlowdVisComponent"

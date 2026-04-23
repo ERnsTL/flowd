@@ -40,8 +40,8 @@ use chrono::prelude::*;
 
 // flowd component API crate
 pub use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutport,
-    GraphInportOutportHandle, MessageBuf, ProcessEdge, ProcessEdgeSink,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle,
+    MessageBuf, ProcessEdge, ProcessEdgeSink,
     ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
     ProcessSignalSink, ProcessSignalSource, WakeupNotify, PROCESSEDGE_BUFSIZE,
     PROCESSEDGE_IIP_BUFSIZE, PROCESSEDGE_SIGNAL_BUFSIZE,
@@ -864,7 +864,7 @@ impl Runtime {
             let joinhandlesref = thread_wake_handles.clone();
             //let ports_this_wake_notify = ports_this.wake_notify.clone();
             let (watchdog_signalsink_clone, watchdog_signalsource_clone) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
-            let graph_inout_ref = graph_inout_arc.clone();
+            let graph_inout_ref = create_graph_inout_handle(graph_inout_arc.clone());
             let process_exited = Arc::new(AtomicBool::new(false));
             let process_exited_in_thread = process_exited.clone();
             let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
@@ -1616,9 +1616,6 @@ pub struct GraphInportOutportHolder {
     packet_tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>,
 }
 
-//TODO optimize - get rid of dyn (see component API declaration for GraphInportOutportHandle)
-impl GraphInportOutport for GraphInportOutportHolder {}
-
 impl GraphInportOutportHolder {
     fn set_packet_tap(&mut self, tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>) {
         self.packet_tap = tap;
@@ -1716,6 +1713,21 @@ fn send_network_data(
     //TODO add debug mode check for the graph (network:debug)
     //TODO add check if edge was selected for debugging (network:edges)
     broadcast_to_clients(graph_inout, packet, "network:data");
+}
+
+fn create_graph_inout_handle(graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> GraphInportOutportHandle {
+    let graph_inout_for_output = graph_inout.clone();
+    let graph_inout_for_preview = graph_inout;
+    (
+        Arc::new(move |message: String| {
+            let packet = NetworkOutputResponse::new(message);
+            send_network_output(&graph_inout_for_output, &packet);
+        }),
+        Arc::new(move |url: String| {
+            let packet = NetworkOutputResponse::new_previewurl(url);
+            send_network_output(&graph_inout_for_preview, &packet);
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -2372,7 +2384,7 @@ impl NetworkEdgesResponse {
 }
 
 // network:output response
-//NOTE spec: like STDOUT output of a Unix process, or a line of console.log in JavaScript. Can also be used for passing images from the runtime to the UI.
+//NOTE spec: like STDOUT output of a Unix process, or a line of console.log in JavaScript. Can also be used for passing images from the runtime to the UI ("peview URL").
 #[derive(Serialize, Debug)]
 struct NetworkOutputResponse {
     protocol: String,

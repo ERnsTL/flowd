@@ -7,7 +7,7 @@ pub struct CountComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: GraphInportOutportHandle,
+    graph_inout: GraphInportOutportHandle,
 }
 
 enum Mode {
@@ -17,14 +17,14 @@ enum Mode {
 }
 
 impl Component for CountComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
         CountComponent {
             conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
             inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
             out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
-            //graph_inout,
+            graph_inout,
         }
     }
 
@@ -139,12 +139,28 @@ impl Component for CountComponent {
                 let end = chrono::Utc::now();
 
                 info!("total time: {}, since 1st packet: {}", end - start, end - start_1st);
-                match mode {
+                let final_count = match mode {
                     //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
-                    Mode::Packets => { out.push(format!("{}", packets).into_bytes()).expect("could not push into OUT"); },
-                    Mode::Size => { out.push(format!("{}", packetsize).into_bytes()).expect("could not push into OUT"); },
-                    Mode::Sum => { out.push(format!("{}", sum).into_bytes()).expect("could not push into OUT"); },
+                    Mode::Packets => {
+                        let count = format!("{}", packets);
+                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
+                        count
+                    },
+                    Mode::Size => {
+                        let count = format!("{}", packetsize);
+                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
+                        count
+                    },
+                    Mode::Sum => {
+                        let count = format!("{}", sum);
+                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
+                        count
+                    },
                 };
+
+                // Send network output with the final count
+                flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count);
+
                 drop(out);
                 out_wakeup.unpark();
                 break;
