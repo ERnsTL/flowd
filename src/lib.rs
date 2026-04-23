@@ -2040,6 +2040,7 @@ impl NetworkErrorResponse {
 
 // component:error response
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct ComponentErrorResponse {
     protocol: String,
     command: String,
@@ -2077,6 +2078,7 @@ impl Default for ComponentErrorResponsePayload {
 // spec: 2018-03-21: Added packetsent response for runtime:packet input message
 // spec: use runtime as remote subgraphs when they support protocol:runtime = packet input/output
 // space: also possible as status message without request message
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 #[derive(Deserialize, Debug)]
 struct RuntimePacketRequest {
     protocol: String,
@@ -2341,6 +2343,7 @@ impl Default for RuntimePortsPayload {
 
 // network:persist -> network:persist | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkPersistRequest {
     protocol: String,
     command: String,
@@ -2390,6 +2393,7 @@ impl Default for NetworkPersistResponsePayload {
 
 // network:edges -> network:edges | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkEdgesRequest {
     protocol: String,
     command: String,
@@ -2500,8 +2504,9 @@ impl NetworkOutputResponse {
     }
 }
 
-#[skip_serializing_none]
 #[derive(Serialize, Debug)]
+#[skip_serializing_none]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkOutputResponsePayload {
     #[serde(rename = "type")]
     typ: String, // spec: either "message" or "previewurl"    //TODO convert to enum
@@ -2522,6 +2527,7 @@ impl Default for NetworkOutputResponsePayload {
 
 // network:connect response
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkConnectResponse {
     protocol: String,
     command: String,
@@ -2598,6 +2604,7 @@ impl NetworkDataResponse {
 
 // network:begingroup response
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkBegingroupResponse {
     protocol: String,
     command: String,
@@ -2616,6 +2623,7 @@ impl Default for NetworkBegingroupResponse {
 
 // network:endgroup
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkEndgroupResponse {
     protocol: String,
     command: String,
@@ -2634,6 +2642,7 @@ impl Default for NetworkEndgroupResponse {
 
 // network:disconnect
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkDisconnectResponse {
     protocol: String,
     command: String,
@@ -2652,6 +2661,7 @@ impl Default for NetworkDisconnectResponse {
 
 // network:icon response
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkIconResponse {
     protocol: String,
     command: String,
@@ -2669,6 +2679,7 @@ impl Default for NetworkIconResponse {
 }
 
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkIconResponsePayload {
     id: String, // spec: identifier of the node
     icon: String,
@@ -2688,6 +2699,7 @@ impl Default for NetworkIconResponsePayload {
 // network:processerror
 // spec: When in debug mode, a network can signal an error happening inside a process.
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkProcesserrorResponse {
     protocol: String,
     command: String,
@@ -2705,6 +2717,7 @@ impl Default for NetworkProcesserrorResponse {
 }
 
 #[derive(Serialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkProcesserrorResponsePayload {
     id: String, // spec: identifier of the node
     error: String,
@@ -2727,6 +2740,7 @@ impl Default for NetworkProcesserrorResponsePayload {
 
 // network:start -> network:started | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkStartRequest {
     protocol: String,
     command: String,
@@ -2827,6 +2841,7 @@ impl From<RuntimeStatusSnapshot> for NetworkStartedResponsePayload {
 
 // network:stop -> network:stopped | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkStopRequest {
     protocol: String,
     command: String,
@@ -2886,7 +2901,7 @@ impl NetworkStoppedResponse {
         let uptime_duration = chrono::Utc::now() - status.time_started;
         let uptime_seconds = uptime_duration.num_seconds();
         println!("graph '{}' uptime: {}", status.graph, format_duration(Duration::from_secs(uptime_seconds as u64)));
-        NetworkStoppedResponse {
+        return NetworkStoppedResponse {
             protocol: String::from("network"),
             command: String::from("stopped"),
             payload: NetworkStoppedResponsePayload {
@@ -2897,12 +2912,13 @@ impl NetworkStoppedResponse {
                 running: status.running,
                 debug: status.debug,
             },
-        }
+        };
     }
 }
 
 // network:getstatus -> network:status | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkGetstatusMessage {
     protocol: String,
     command: String,
@@ -2982,6 +2998,7 @@ impl NetworkStatusPayload {
 
 // network:debug -> TODO spec: response not specified | network:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct NetworkDebugRequest {
     protocol: String,
     command: String,
@@ -3046,6 +3063,7 @@ impl NetworkDebugResponse {
 
 // component:list -> component:component (multiple possible), then a final component:componentsready | component:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct ComponentListRequest {
     protocol: String,
     command: String,
@@ -3137,6 +3155,7 @@ impl ComponentComponentsreadyMessage {
 
 // component:getsource -> component:source | component:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct ComponentGetsourceMessage {
     protocol: String,
     command: String,
@@ -3275,6 +3294,7 @@ impl ComponentSourcePayload {
 
 // graph:clear -> graph:clear | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphClearRequest {
     protocol: String,
     command: String,
@@ -3359,6 +3379,7 @@ impl GraphClearResponse {
 
 // graph:addnode -> graph:addnode | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddnodeRequest {
     protocol: String,
     command: String,
@@ -3464,6 +3485,7 @@ impl Default for GraphAddnodeResponsePayload {
 
 // graph:removenode -> graph:removenode | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemovenodeRequest {
     protocol: String,
     command: String,
@@ -3526,6 +3548,7 @@ impl GraphRemovenodeResponse {
 
 // graph:renamenode -> graph:renamenode | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRernamenodeRequest {
     protocol: String,
     command: String,
@@ -3590,6 +3613,7 @@ impl GraphRenamenodeResponse {
 
 // graph:changenode -> graph:changenode | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphChangenodeRequest {
     protocol: String,
     command: String,
@@ -3643,6 +3667,7 @@ impl Default for GraphChangenodeResponsePayload {
 
 // graph:addedge -> graph:addedge | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddedgeRequest {
     protocol: String,
     command: String,
@@ -3759,6 +3784,7 @@ impl Default for GraphAddedgeResponsePayload {
 
 // graph:removeedge -> graph:removeedge | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemoveedgeRequest {
     protocol: String,
     command: String,
@@ -3823,6 +3849,7 @@ impl GraphRemoveedgeResponse {
 
 // graph:changeedge -> graph:changeedge | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphChangeedgeRequest {
     protocol: String,
     command: String,
@@ -3891,6 +3918,7 @@ impl GraphChangeedgeResponse {
 
 // graph:addinitial -> graph:addinitial | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddinitialRequest {
     protocol: String,
     command: String,
@@ -3968,6 +3996,7 @@ impl GraphAddinitialResponse {
 
 // graph:removeinitial -> graph:removeinitial | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemoveinitialRequest {
     protocol: String,
     command: String,
@@ -4029,6 +4058,7 @@ impl GraphRemoveinitialResponse {
 
 // graph:addinport -> graph:addinport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddinportRequest {
     protocol: String,
     command: String,
@@ -4100,6 +4130,7 @@ impl GraphAddinportResponse {
 
 // graph:removeinport -> graph:removeinport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemoveinportRequest {
     protocol: String,
     command: String,
@@ -4141,6 +4172,7 @@ impl Default for GraphRemoveinportResponsePayload {
 
 // graph:renameinport -> graph:renameinport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRenameinportRequest {
     protocol: String,
     command: String,
@@ -4183,6 +4215,7 @@ impl Default for GraphRenameinportResponsePayload {
 
 // graph:addoutport -> graph:addoutport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddoutportRequest {
     protocol: String,
     command: String,
@@ -4216,16 +4249,6 @@ struct GraphAddoutportResponsePayload {
     port: String,
 }
 
-impl Default for GraphAddoutportResponse {
-    fn default() -> Self {
-        GraphAddoutportResponse {
-            protocol: String::from("graph"),
-            command: String::from("addoutport"),
-            payload: GraphAddoutportResponsePayload::default(),
-        }
-    }
-}
-
 impl Default for GraphAddoutportResponsePayload {
     fn default() -> Self {
         GraphAddoutportResponsePayload {
@@ -4233,6 +4256,16 @@ impl Default for GraphAddoutportResponsePayload {
             public: String::new(),
             node: String::new(),
             port: String::new(),
+        }
+    }
+}
+
+impl Default for GraphAddoutportResponse {
+    fn default() -> Self {
+        GraphAddoutportResponse {
+            protocol: String::from("graph"),
+            command: String::from("addoutport"),
+            payload: GraphAddoutportResponsePayload::default(),
         }
     }
 }
@@ -4254,6 +4287,7 @@ impl GraphAddoutportResponse {
 
 // graph:removeoutport -> graph:removeoutport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemoveoutportRequest {
     protocol: String,
     command: String,
@@ -4315,6 +4349,7 @@ impl GraphRemoveoutportResponse {
 
 // graph:renameoutport -> graph:renameoutport | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRenameoutportRequest {
     protocol: String,
     command: String,
@@ -4357,6 +4392,7 @@ impl Default for GraphRenameoutportResponsePayload {
 
 // graph:addgroup -> graph:addgroup | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphAddgroupRequest {
     protocol: String,
     command: String,
@@ -4406,6 +4442,7 @@ impl Default for GraphAddgroupResponsePayload {
 
 // graph:removegroup -> graph:removegroup | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRemovegroupRequest {
     protocol: String,
     command: String,
@@ -4447,6 +4484,7 @@ impl Default for GraphRemovegroupResponsePayload {
 
 // graph:renamegroup -> graph:renamegroup | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphRenamegroupRequest {
     protocol: String,
     command: String,
@@ -4489,6 +4527,7 @@ impl Default for GraphRenamegroupResponsePayload {
 
 // graph:changegroup -> graph:changegroup | graph:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct GraphChangegroupRequest {
     protocol: String,
     command: String,
@@ -4537,6 +4576,7 @@ impl Default for GraphChangegroupResponsePayload {
 
 // trace:start -> trace:start | trace:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct TraceStartRequest {
     protocol: String,
     command: String,
@@ -4595,6 +4635,7 @@ impl TraceStartResponse {
 
 // trace:stop -> trace:stop | trace:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct TraceStopRequest {
     protocol: String,
     command: String,
@@ -4651,6 +4692,7 @@ impl TraceStopResponse {
 
 // trace:clear -> trace:clear | trace:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct TraceClearRequest {
     protocol: String,
     command: String,
@@ -4707,6 +4749,7 @@ impl TraceClearResponse {
 
 // trace:dump -> trace:dump | trace:error
 #[derive(Deserialize, Debug)]
+#[allow(dead_code)] // Never constructed, only used for serde deserialization into enum variants
 struct TraceDumpRequest {
     protocol: String,
     command: String,
