@@ -22,6 +22,85 @@ use crate::{CLIENT_BROADCAST_WRITE_TIMEOUT, Graph, Runtime, RuntimeRuntimePayloa
     send_network_stopped, send_network_output, send_network_error, send_network_data
  */
 
+pub fn run() -> Result<()> {
+    println!("flowd {}", env!("CARGO_PKG_VERSION"));
+
+    //NOTE: important to show the thread name = the FBP process name
+    let mut logger_config = simplelog::ConfigBuilder::default();
+    logger_config
+        .set_time_level(simplelog::LevelFilter::Off)
+        .set_thread_level(simplelog::LevelFilter::Info)
+        .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
+        .set_thread_mode(simplelog::ThreadLogMode::Names)
+        .set_thread_padding(simplelog::ThreadPadding::Right(21))    // maximum thread name length on Linux is 15 by the way
+        .set_level_padding(simplelog::LevelPadding::Right);
+    register_component_log_filters(&mut logger_config);
+    simplelog::TermLogger::init(
+        simplelog::LevelFilter::Trace,   // can locally increase this for dev, TODO make configurable via args - but better configure this in Cargo.toml
+        logger_config.build(),
+        simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
+        simplelog::ColorChoice::Auto    // depending on whether interactive or not
+    ).expect("logging init failed");
+    info!("logging initialized");
+
+    log::info!("Starting flowd server...");
+
+    // Create runtime, component library, and graph using public APIs
+    let runtime = crate::create_runtime("main_graph".to_string());
+    log::info!("runtime initialized");
+
+    let components = crate::create_component_library();
+    log::info!("component library initialized");
+
+    let graph_inout = crate::create_graph_inout_holder();
+    log::info!("graph inout holder created");
+
+    let (loaded_graphs, active_graph) = crate::load_or_create_graph_set().expect("failed to load or create graphs");
+    let graph = loaded_graphs
+        .get(&active_graph)
+        .cloned()
+        .expect("active graph missing from loaded graph set");
+    log::info!("graph loaded or created");
+    {
+        let mut runtime_write = runtime.write().expect("lock poisoned");
+        for (graph_name, graph_arc) in loaded_graphs.into_iter() {
+            runtime_write.graphs.add_graph(graph_name, graph_arc);
+        }
+        runtime_write
+            .graphs
+            .set_active_graph(&active_graph)
+            .expect("failed to set active graph in multi-graph manager");
+        runtime_write.graph = active_graph;
+    }
+
+    // start network
+    let bind_addr;
+    //TODO features - add better argument parsing. currently defaulting to localhost since no security checks are in place
+    // NOTE: dependencies - used by Kraftfile
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 2 {
+        bind_addr = args[1].as_str();
+    } else {
+        bind_addr = "localhost:3569";
+    }
+
+    // Create and start the server
+    let mut server = FlowdServer::new(
+        bind_addr.to_string(),
+        runtime,
+        graph,
+        components,
+        graph_inout,
+    );
+
+    if let Err(err) = server.start() {
+        log::error!("server failed to start: {}", err);
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
 fn must_not_block<Role: tungstenite::handshake::HandshakeRole>(err: tungstenite::HandshakeError<Role>) -> tungstenite::Error {
     match err {
         tungstenite::HandshakeError::Interrupted(_) => panic!("Bug: blocking socket would block"),
@@ -1909,83 +1988,4 @@ impl FlowdServer {
 
         Ok(())
     }
-}
-
-pub fn run() -> Result<()> {
-    println!("flowd {}", env!("CARGO_PKG_VERSION"));
-
-    //NOTE: important to show the thread name = the FBP process name
-    let mut logger_config = simplelog::ConfigBuilder::default();
-    logger_config
-        .set_time_level(simplelog::LevelFilter::Off)
-        .set_thread_level(simplelog::LevelFilter::Info)
-        .set_target_level(simplelog::LevelFilter::Off)  // no need to see the module path, for example flowd::components::repeat
-        .set_thread_mode(simplelog::ThreadLogMode::Names)
-        .set_thread_padding(simplelog::ThreadPadding::Right(21))    // maximum thread name length on Linux is 15 by the way
-        .set_level_padding(simplelog::LevelPadding::Right);
-    register_component_log_filters(&mut logger_config);
-    simplelog::TermLogger::init(
-        simplelog::LevelFilter::Trace,   // can locally increase this for dev, TODO make configurable via args - but better configure this in Cargo.toml
-        logger_config.build(),
-        simplelog::TerminalMode::Mixed, // level error and above to stderr, rest to stdout
-        simplelog::ColorChoice::Auto    // depending on whether interactive or not
-    ).expect("logging init failed");
-    info!("logging initialized");
-
-    log::info!("Starting flowd server...");
-
-    // Create runtime, component library, and graph using public APIs
-    let runtime = crate::create_runtime("main_graph".to_string());
-    log::info!("runtime initialized");
-
-    let components = crate::create_component_library();
-    log::info!("component library initialized");
-
-    let graph_inout = crate::create_graph_inout_holder();
-    log::info!("graph inout holder created");
-
-    let (loaded_graphs, active_graph) = crate::load_or_create_graph_set().expect("failed to load or create graphs");
-    let graph = loaded_graphs
-        .get(&active_graph)
-        .cloned()
-        .expect("active graph missing from loaded graph set");
-    log::info!("graph loaded or created");
-    {
-        let mut runtime_write = runtime.write().expect("lock poisoned");
-        for (graph_name, graph_arc) in loaded_graphs.into_iter() {
-            runtime_write.graphs.add_graph(graph_name, graph_arc);
-        }
-        runtime_write
-            .graphs
-            .set_active_graph(&active_graph)
-            .expect("failed to set active graph in multi-graph manager");
-        runtime_write.graph = active_graph;
-    }
-
-    // start network
-    let bind_addr;
-    //TODO features - add better argument parsing. currently defaulting to localhost since no security checks are in place
-    // NOTE: dependencies - used by Kraftfile
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() == 2 {
-        bind_addr = args[1].as_str();
-    } else {
-        bind_addr = "localhost:3569";
-    }
-
-    // Create and start the server
-    let mut server = FlowdServer::new(
-        bind_addr.to_string(),
-        runtime,
-        graph,
-        components,
-        graph_inout,
-    );
-
-    if let Err(err) = server.start() {
-        log::error!("server failed to start: {}", err);
-        std::process::exit(1);
-    }
-
-    Ok(())
 }
