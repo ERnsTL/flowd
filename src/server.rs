@@ -539,7 +539,12 @@ impl FlowdServer {
                                 };
                                 let add_node_result = {
                                     let mut graph_write = target_graph.write().expect("lock poisoned");
-                                    graph_write.add_node_from_payload(graph_name.to_string(), payload.component, payload.name, payload.metadata)
+                                    // Include the icon field in metadata if present
+                                    let mut metadata = payload.metadata.clone();
+                                    if let Some(icon) = &payload.icon {
+                                        metadata.insert("icon".to_string(), serde_json::Value::String(icon.clone()));
+                                    }
+                                    graph_write.add_node_from_payload(graph_name.to_string(), payload.component, payload.name, metadata)
                                 };
                                 match add_node_result {
                                 Ok(response) => {
