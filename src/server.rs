@@ -23,7 +23,7 @@ use crate::{
     TraceClearResponse, TraceDumpResponse, TraceErrorResponse,
     RuntimePacketsentMessage, RuntimePacketsentPayload, RuntimeErrorResponse,
     NetworkEdgesResponse, NetworkStartedResponse, NetworkTransmissionPayload,
-    NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse,
+    NetworkDataResponse, NetworkStoppedResponse, NetworkDebugResponse, NetworkStartedResponsePayload,
     GraphEdge, GraphPort, GraphNodeSpecNetwork,
     GraphChangenodeResponsePayload
 };
@@ -329,15 +329,16 @@ impl FlowdServer {
                             }
                             let status_payload = {
                                 let runtime_read = runtime.read().expect("lock poisoned");
-                                if runtime_read.status.graph == _payload.graph {
-                                    NetworkStatusPayload::new(&runtime_read.status)
+                                let status_snapshot = runtime_read.status_snapshot();
+                                if status_snapshot.graph == _payload.graph {
+                                    NetworkStatusPayload::new(&status_snapshot)
                                 } else {
                                     NetworkStatusPayload {
                                         graph: _payload.graph.clone(),
                                         uptime: None,
                                         started: false,
                                         running: false,
-                                        debug: runtime_read.status.debug,
+                                        debug: status_snapshot.debug,
                                     }
                                 }
                             };
@@ -1625,10 +1626,11 @@ impl FlowdServer {
                             match start_result {
                                 Ok(()) => {
                                     let runtime_status = runtime.read().expect("lock poisoned");
+                                    let status_payload = NetworkStartedResponsePayload::from(runtime_status.status_snapshot());
                                     log::info!("response: sending network:started response");
                                     websocket
                                         .send(Message::text(
-                                            serde_json::to_string(&NetworkStartedResponse::new(runtime_status.status.clone()))
+                                            serde_json::to_string(&NetworkStartedResponse::new(status_payload))
                                                 .expect("failed to serialize network:started response"),
                                         ))
                                         .expect("failed to write message into websocket");
@@ -1761,11 +1763,12 @@ impl FlowdServer {
                                 continue;
                             }
                             match runtime.write().expect("lock poisoned").stop(graph_inout.clone(), false) {   //TODO optimize avoid clone here? (but it is just an Arc clone)
-                                Ok(status) => {
+                                Ok(_status) => {
+                                    let status_snapshot = runtime.read().expect("lock poisoned").status_snapshot();
                                     log::info!("response: sending network:stop response");
                                     websocket
                                         .send(Message::text(
-                                            serde_json::to_string(&NetworkStoppedResponse::new(status))
+                                            serde_json::to_string(&NetworkStoppedResponse::new(&status_snapshot))
                                                 .expect("failed to serialize network:stopped response"),
                                         ))
                                         .expect("failed to write message into websocket");

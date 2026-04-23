@@ -401,7 +401,7 @@ pub struct Runtime {
     repository_version: String,        // spec: build/repository version
 
     // runtime state
-    status: NetworkStartedResponsePayload,  // for network:status, network:started, network:stopped
+    status: RuntimeStatus,  // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
     tracing: bool,  //TODO implement
     processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
@@ -423,6 +423,24 @@ pub struct RuntimeSnapshot {
     namespace: String,
     repository: String,
     repository_version: String,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeStatus {
+    time_started: chrono::DateTime<Utc>,
+    graph: String,
+    started: bool,
+    running: bool,
+    debug: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeStatusSnapshot {
+    time_started: chrono::DateTime<Utc>,
+    graph: String,
+    started: bool,
+    running: bool,
+    debug: Option<bool>,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -480,7 +498,7 @@ impl Default for Runtime {
             namespace: payload.namespace,
             repository: payload.repository,
             repository_version: payload.repository_version,
-            status: NetworkStartedResponsePayload::default(),
+            status: RuntimeStatus::default(),
             tracing: false,
             processes: ProcessManager::default(),
             watchdog_thread: None,
@@ -524,6 +542,10 @@ impl Runtime {
         }
     }
 
+    fn status_snapshot(&self) -> RuntimeStatusSnapshot {
+        self.status.snapshot()
+    }
+
     fn new(active_graph: String) -> Self {
         let mut graphs = multi_graph::MultiGraphManager::new();
         // Create initial graph
@@ -536,8 +558,8 @@ impl Runtime {
 
         Runtime {
             graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
-            status: NetworkStartedResponsePayload {
-                time_started: UtcTime(chrono::DateTime::<Utc>::MIN_UTC), // zero value - //TODO rather use None
+            status: RuntimeStatus {
+                time_started: chrono::DateTime::<Utc>::MIN_UTC, // zero value - //TODO rather use None
                 graph: active_graph,
                 started: false,
                 running: false,
@@ -606,8 +628,8 @@ impl Runtime {
         Ok(())
     }
 
-    //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
-    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&RuntimeStatus, std::io::Error> {
+    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<&RuntimeStatus, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
         if self.status.running || !self.processes.is_empty() || self.watchdog_thread.is_some() {
             return Err(std::io::Error::new(
@@ -1285,7 +1307,7 @@ impl Runtime {
                     // send network stop notification to all FBP protocol clients//###
                     let stopped_packet = {
                         let runtime_read = watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime");
-                        NetworkStoppedResponse::new(&runtime_read.status)
+                        NetworkStoppedResponse::new(&runtime_read.status_snapshot())
                     };
                     send_network_stopped(&watchdog_graph_inout, &stopped_packet);
                     // exit thread
@@ -1317,7 +1339,7 @@ impl Runtime {
         // return status
         self.watchdog_thread = Some(watchdog_thread);
         self.watchdog_channel = Some(watchdog_signalsink2);
-        self.status.time_started = UtcTime(chrono::Utc::now()); //TODO why convert to UtcTime?
+        self.status.time_started = chrono::Utc::now();
         self.status.graph = self.graph.clone();
         self.status.started = true;
         self.status.running = true;
@@ -1325,7 +1347,7 @@ impl Runtime {
         Ok(&self.status)
     }
 
-    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&NetworkStartedResponsePayload, std::io::Error> {
+    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&RuntimeStatus, std::io::Error> {
         //TODO implement in full detail
         const STOP_SIGNAL_MAX_RETRIES: usize = 64;
         const PROCESS_JOIN_GRACE_DUR: Duration = Duration::from_secs(5);
@@ -1639,6 +1661,30 @@ impl Runtime {
     //TODO return path: process that sends to an outport -> send to client. TODO clarify spec: which client should receive it?
 
     //TODO runtime: command to connect an outport to a remote runtime as remote subgraph.
+}
+
+impl Default for RuntimeStatus {
+    fn default() -> Self {
+        RuntimeStatus {
+            time_started: chrono::Utc::now(),
+            graph: String::from("main_graph"),
+            started: false,
+            running: false,
+            debug: None,
+        }
+    }
+}
+
+impl RuntimeStatus {
+    fn snapshot(&self) -> RuntimeStatusSnapshot {
+        RuntimeStatusSnapshot {
+            time_started: self.time_started,
+            graph: self.graph.clone(),
+            started: self.started,
+            running: self.running,
+            debug: self.debug,
+        }
+    }
 }
 
 // runtime state of graph inports and outports
@@ -2767,6 +2813,18 @@ impl NetworkStartedResponse {
     }
 }
 
+impl From<RuntimeStatusSnapshot> for NetworkStartedResponsePayload {
+    fn from(status: RuntimeStatusSnapshot) -> Self {
+        NetworkStartedResponsePayload {
+            time_started: UtcTime(status.time_started),
+            graph: status.graph,
+            started: status.started,
+            running: status.running,
+            debug: status.debug,
+        }
+    }
+}
+
 // network:stop -> network:stopped | network:error
 #[derive(Deserialize, Debug)]
 struct NetworkStopRequest {
@@ -2824,8 +2882,8 @@ impl Default for NetworkStoppedResponsePayload {
 }
 
 impl NetworkStoppedResponse {
-    fn new(status: &NetworkStartedResponsePayload) -> Self {
-        let uptime_duration = chrono::Utc::now() - status.time_started.0;
+    fn new(status: &RuntimeStatusSnapshot) -> Self {
+        let uptime_duration = chrono::Utc::now() - status.time_started;
         let uptime_seconds = uptime_duration.num_seconds();
         println!("graph '{}' uptime: {}", status.graph, format_duration(Duration::from_secs(uptime_seconds as u64)));
         NetworkStoppedResponse {
@@ -2837,7 +2895,7 @@ impl NetworkStoppedResponse {
                 graph: status.graph.clone(),
                 started: status.started,
                 running: status.running,
-                debug: None,
+                debug: status.debug,
             },
         }
     }
@@ -2911,13 +2969,13 @@ impl Default for NetworkStatusPayload {
 }
 
 impl NetworkStatusPayload {
-    fn new(status: &NetworkStartedResponsePayload) -> Self {
+    fn new(status: &RuntimeStatusSnapshot) -> Self {
         NetworkStatusPayload {
             graph: status.graph.clone(),
             uptime: None,
             started: status.started,
             running: status.running,
-            debug: None,
+            debug: status.debug,
         }
     }
 }
