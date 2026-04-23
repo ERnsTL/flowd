@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock, Mutex};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use signal_hook::consts::signal::*;
 use signal_hook::flag;
@@ -23,6 +23,7 @@ use crate::{CLIENT_BROADCAST_WRITE_TIMEOUT, Graph, Runtime, RuntimeRuntimePayloa
  */
 
 pub fn run() -> Result<()> {
+    let flowd_start_time = Instant::now();
     println!("flowd {}", env!("CARGO_PKG_VERSION"));
 
     //NOTE: important to show the thread name = the FBP process name
@@ -91,6 +92,7 @@ pub fn run() -> Result<()> {
         graph,
         components,
         graph_inout,
+        flowd_start_time,
     );
 
     if let Err(err) = server.start() {
@@ -116,6 +118,7 @@ pub struct FlowdServer {
     graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
     sigterm_received: Arc<AtomicBool>,
     sigint_received: Arc<AtomicBool>,
+    flowd_start_time: Instant,
 }
 
 impl FlowdServer {
@@ -125,6 +128,7 @@ impl FlowdServer {
         graph: Arc<RwLock<Graph>>,
         components: Arc<RwLock<ComponentLibrary>>,
         graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+        flowd_start_time: Instant,
     ) -> Self {
         FlowdServer {
             bind_addr,
@@ -134,6 +138,7 @@ impl FlowdServer {
             graph_inout,
             sigterm_received: Arc::new(AtomicBool::new(false)),
             sigint_received: Arc::new(AtomicBool::new(false)),
+            flowd_start_time,
         }
     }
 
@@ -203,6 +208,10 @@ impl FlowdServer {
                 Err(e) => log::warn!("Network stop failed: {}", e),
             }
         }
+
+        // output flowd uptime on exit
+        let flowd_uptime = self.flowd_start_time.elapsed();
+        println!("flowd uptime: {}", crate::format_duration(flowd_uptime));
 
         Ok(())
     }
