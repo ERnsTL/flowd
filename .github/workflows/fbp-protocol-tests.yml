@@ -38,4 +38,4 @@ jobs:
           sed -i 's/"port": 8080/"port": 3569/' fbp-config.json
 
       - name: Run FBP protocol tests
-        run: ../run_fbp-tests.sh
+        run: ./run_fbp-tests.sh
