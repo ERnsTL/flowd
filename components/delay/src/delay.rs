@@ -1,13 +1,13 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
-    PushError,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 
 // component-specific
-use std::thread;
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 fn parse_delay(s: &str) -> Result<Duration, String> {
     let s = s.trim();
@@ -35,7 +35,7 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
             unit.push(c);
         }
     }
-    let num: f64 = num_str.parse().map_err(|_| "invalid number")?;
+    let num: f64 = num_str.parse().map_err(|_| "invalid number".to_string())?;
     let multiplier = match unit.as_str() {
         "us" => 1.0,
         "ms" => 1000.0,
@@ -45,12 +45,20 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
     Ok(Duration::from_micros((num * multiplier) as u64))
 }
 
+#[derive(Clone)]
+struct DelayedPacket {
+    data: Vec<u8>,
+    ready_time: Instant,
+}
+
 pub struct DelayComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    delay: Option<Duration>,
+    pending_packets: VecDeque<DelayedPacket>,
 }
 
 impl Component for DelayComponent {
@@ -79,76 +87,120 @@ impl Component for DelayComponent {
                 .unwrap(),
             signals_in,
             signals_out,
+            delay: None,
+            pending_packets: VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("Delay is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let wake = self.out.wakeup.expect("delay OUT wake missing");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Delay is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read config
-        let delay = match conf.pop() {
-            Ok(ip) => {
-                let config_str = std::str::from_utf8(&ip).expect("invalid utf-8 config");
+        // Read config if not already read
+        if self.delay.is_none() {
+            if let Ok(config_data) = self.conf.pop() {
+                let config_str = std::str::from_utf8(&config_data).expect("invalid utf-8 config");
                 match parse_delay(config_str) {
-                    Ok(d) => d,
+                    Ok(d) => {
+                        self.delay = Some(d);
+                        info!("using delay {:?}", d);
+                    }
                     Err(e) => {
                         info!(
                             "invalid delay config '{}': {}, using default 50us",
                             config_str, e
                         );
-                        Duration::from_micros(50)
+                        self.delay = Some(Duration::from_micros(50));
                     }
                 }
+            } else {
+                // No config yet, use default
+                self.delay = Some(Duration::from_micros(50));
             }
-            Err(_) => {
-                info!("no config received, using default 50us");
-                Duration::from_micros(50)
-            }
-        };
-        info!("using delay {:?}", delay);
+        }
 
-        loop {
-            if let Ok(signal) = self.signals_in.try_recv() {
+        let delay = self.delay.unwrap();
+
+        // Check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            }
+        }
+
+        // Process within budget
+        while context.remaining_budget > 0 {
+            // Check for stop signals during processing
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&signal).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                if signal == b"stop" {
-                    info!("got stop signal, exiting");
-                    break;
-                }
-                if signal == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
+                    trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
 
-            let mut stop_requested = false;
-            while let Ok(ip) = inn.pop() {
-                thread::sleep(delay);
-                if push_blocking(&mut out, &wake, ip, &self.signals_in, &self.signals_out) {
-                    stop_requested = true;
-                    break;
+            // First, check if any pending packets are ready to be sent
+            let now = Instant::now();
+            while !self.pending_packets.is_empty() {
+                let front_ready_time = self.pending_packets.front().unwrap().ready_time;
+                if front_ready_time <= now {
+                    let packet = self.pending_packets.pop_front().unwrap();
+                    if let Err(PushError::Full(returned_packet)) = self.out.push(packet.data) {
+                        // If output is full, put it back at the front
+                        self.pending_packets.push_front(DelayedPacket {
+                            data: returned_packet,
+                            ready_time: front_ready_time,
+                        });
+                        break; // Can't send more until output is free
+                    }
+                    work_units += 1;
+                    context.remaining_budget -= 1;
+                } else {
+                    break; // Next packet not ready yet
                 }
             }
-            if stop_requested {
-                info!("stop requested while waiting on full outport, exiting");
-                break;
-            }
 
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                wake.unpark();
-                break;
+            // Then, accept new input packets
+            if let Ok(ip) = self.inn.pop() {
+                let ready_time = Instant::now() + delay;
+                self.pending_packets.push_back(DelayedPacket {
+                    data: ip,
+                    ready_time,
+                });
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
+                break; // No more input
             }
-
-            thread::park();
         }
-        info!("exiting");
+
+        // Check if we're done
+        if self.inn.is_abandoned() && self.pending_packets.is_empty() {
+            // Input closed and no pending packets, nothing more to do
+            info!("EOF on inport and no pending packets, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload {
@@ -180,44 +232,6 @@ impl Component for DelayComponent {
                 ..ComponentPort::default_out()
             }],
             ..Default::default()
-        }
-    }
-}
-
-fn push_blocking(
-    sink: &mut flowd_component_api::ProcessEdgeSinkConnection,
-    wake: &thread::Thread,
-    mut packet: Vec<u8>,
-    signals_in: &ProcessSignalSource,
-    signals_out: &ProcessSignalSink,
-) -> bool {
-    loop {
-        match sink.push(packet) {
-            Ok(()) => {
-                wake.unpark();
-                return false;
-            }
-            Err(PushError::Full(returned)) => {
-                packet = returned;
-                wake.unpark();
-                if let Ok(signal) = signals_in.try_recv() {
-                    trace!(
-                        "received signal ip while waiting for outport: {}",
-                        std::str::from_utf8(&signal).expect("invalid utf-8")
-                    );
-                    if signal == b"stop" {
-                        return true;
-                    } else if signal == b"ping" {
-                        let _ = signals_out.try_send(b"pong".to_vec());
-                    } else {
-                        warn!(
-                            "received unknown signal ip: {}",
-                            std::str::from_utf8(&signal).expect("invalid utf-8")
-                        );
-                    }
-                }
-                thread::yield_now();
-            }
         }
     }
 }
