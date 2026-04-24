@@ -352,3 +352,204 @@ Rejected for core runtime; async allowed only at boundaries
 * Should scheduler support priority classes?
 * How to expose scheduling metrics externally?
 * Should subgraph-level schedulers be introduced explicitly?
+
+
+## Resolved Questions
+
+OK die Resolved Decisions ad ADR-002 Scheduler finde ich gut, aber ich brauche auch eine Begründung je Punkt (1 bis 6) zu den Entscheidungen und was die verworfenen gefahrvollen Alternativen gewesen wären.
+
+
+## Resolved Decisions
+
+1. Scheduler is single-threaded per subgraph
+2. Budget exhaustion yields after completing current work unit
+3. Default budgets are static and simple (small set of classes)
+4. No separate priority classes beyond budgets
+5. Real-time nodes are restricted and must not block the scheduler
+6. Each subgraph has its own scheduler
+
+### 1. Scheduler is single-threaded per subgraph
+
+#### Rationale
+
+A single-threaded scheduler ensures:
+
+* deterministic execution order
+* no internal locking within the scheduler
+* predictable behavior for debugging and observability
+* clear ownership of scheduling decisions
+
+The scheduler acts as a coordination loop, not a worker pool.
+Parallelism is achieved via:
+
+* multiple subgraphs
+* internal concurrency within nodes
+* asynchronous IO
+
+> The scheduler must remain simple, predictable, and fully observable.
+
+#### Rejected Alternatives
+
+Thread pool–based scheduler:
+
+* introduces locking and contention
+* leads to non-deterministic execution order
+* makes debugging and reasoning about fairness difficult
+* risks race conditions inside the scheduler itself
+
+Fully parallel scheduler:
+
+* complex coordination required
+* unclear execution ordering
+* difficult to maintain fairness guarantees
+
+### 2. Budget exhaustion yields after completing current work unit
+
+#### Rationale
+
+Execution is cooperative:
+
+* a node completes its current unit of work (e.g. processing a message)
+* then yields control back to the scheduler
+
+This ensures:
+
+* no partial or inconsistent processing
+* predictable state transitions
+* safe interaction with message passing and buffers
+
+> Work units are atomic from the scheduler’s perspective.
+
+#### Rejected Alternatives
+
+Preemptive interruption (mid-processing):
+
+* risks inconsistent internal state
+* requires complex rollback or checkpointing
+* significantly increases implementation complexity
+
+Ignoring budget until batch completion:
+
+* allows nodes to dominate execution
+* breaks fairness guarantees
+* enables runaway behavior (e.g. fan-out explosions)
+
+### 3. Default budgets are static and simple (small set of classes)
+
+#### Rationale
+
+A small set of static defaults provides:
+
+* predictable behavior
+* easy reasoning and tuning
+* minimal configuration overhead
+
+Typical classes:
+
+* normal processing nodes
+* heavy or expensive nodes
+* fan-out / burst nodes
+
+> Simplicity is preferred over premature optimization.
+
+#### Rejected Alternatives
+
+Fully dynamic / adaptive budgeting:
+
+* requires runtime feedback loops
+* introduces complexity and instability
+* hard to debug and reason about
+
+Per-component fine-grained configuration:
+
+* configuration overhead grows quickly
+* difficult for users to understand and maintain
+* risk of inconsistent tuning across graphs
+
+### 4. No separate priority classes beyond budgets
+
+#### Rationale
+
+Budgets already provide implicit prioritization:
+
+* small budget → less execution time
+* large budget → more throughput
+
+Adding priority classes would:
+
+* duplicate functionality
+* increase system complexity
+* introduce additional scheduling policies
+
+> A single mechanism (budget) is preferred over multiple overlapping mechanisms.
+
+#### Rejected Alternatives
+
+Explicit priority queues (high / medium / low):
+
+* increases scheduler complexity
+* creates interaction issues with budgets
+* risks starvation of lower-priority nodes
+
+Weighted scheduling with multiple dimensions:
+
+* difficult to reason about
+* hard to tune correctly
+* unnecessary for current system scope
+
+### 5. Real-time nodes are restricted and must not block the scheduler
+
+#### Rationale
+
+Some nodes may require high responsiveness (e.g. control, IO).
+These nodes may use:
+
+* higher budgets
+* special handling
+
+However:
+
+* they must not block the scheduler
+* they must not monopolize execution
+
+> No node is allowed to compromise global system stability.
+
+#### Rejected Alternatives
+
+Unbounded execution (`budget = -1` as true infinite):
+
+* allows a single node to block the system
+* breaks fairness guarantees
+* can lead to starvation of other nodes
+
+Blocking operations inside scheduler-controlled execution:
+
+* stalls entire system
+* violates non-blocking scheduler design
+
+### 6. Each subgraph has its own scheduler
+
+#### Rationale
+
+A scheduler per subgraph provides:
+
+* isolation between independent graph sections
+* improved scalability
+* simpler lifecycle management (start/stop/restart)
+* better fault containment
+
+> Subgraphs act as natural scheduling domains.
+
+#### Rejected Alternatives
+
+Single global scheduler:
+
+* becomes a bottleneck
+* increases contention
+* complicates reasoning about large graphs
+
+Per-node schedulers:
+
+* excessive overhead
+* no global fairness within a graph
+* reintroduces problems of thread-per-node model
