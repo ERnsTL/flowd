@@ -1,7 +1,8 @@
 #![feature(addr_parse_ascii)] // for TCPClientComponent -> SocketAddr::parse_ascii()
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -21,6 +22,10 @@ pub struct TCPClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    socket_addr: Option<SocketAddr>,
+    stream: Option<TcpStream>,
+    pending_data: std::collections::VecDeque<Vec<u8>>, // data to send, buffered for backpressure
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
@@ -72,181 +77,217 @@ impl Component for TCPClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            socket_addr: None,
+            stream: None,
+            pending_data: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("TCPClient is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("TCPClient is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read configuration
-        trace!("read config IP...");
-        while conf.is_empty() {
-            if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
-                    info!("got stop signal while waiting for TCP config, exiting");
-                    return;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                    );
-                }
-            }
-            thread::yield_now();
-        }
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        trace!("got config IP");
-
-        // prepare connection arguments
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        // socket address
-        let addr = SocketAddr::parse_ascii(
-            format!(
-                "{}:{}",
-                url.host_str().expect("failed to parse host from URL"),
-                url.port().expect("failed to parse port from URL")
-            )
-            .as_bytes(),
-        )
-        .expect("failed to parse socket address from URL");
-        // NOTE: currently no options implemented - following code remains for future use
-        //let mut query_pairs = url.query_pairs();
-        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
-        // get buffer size from URL
-        /*
-        let _read_buffer_size;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
-            _read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
-        } else {
-            _read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
-        }
-        */
-
-        // configure
-        let mut client = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
-            .expect("failed to connect to TCP server");
-        client
-            .set_read_timeout(READ_TIMEOUT)
-            .expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
-        client
-            .set_write_timeout(WRITE_TIMEOUT)
-            .expect("failed to set write timeout on TCP client");
-        debug!("connected to {}", addr);
-
-        // main loop
-        //let mut bytes_in;
-        let mut buf = [0; READ_BUFFER]; //TODO make configurable    //TODO optimize - change to BufReader, which can read all available bytes at once and we can send 1 consolidated IP with all bytes availble on the socket
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
+        // Read configuration if not yet configured
+        if self.socket_addr.is_none() {
+            if let Ok(url_vec) = self.conf.pop() {
+                let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                let url = url::Url::parse(&url_str).expect("failed to parse URL");
+                let addr = SocketAddr::parse_ascii(
+                    format!(
+                        "{}:{}",
+                        url.host_str().expect("failed to parse host from URL"),
+                        url.port().expect("failed to parse port from URL")
                     )
-                }
-            }
+                    .as_bytes(),
+                )
+                .expect("failed to parse socket address from URL");
 
-            // send
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                debug!("got {} packets, sending into socket...", inn.slots());
-                let chunk = inn
-                    .read_chunk(inn.slots())
-                    .expect("receive as chunk failed");
+                self.socket_addr = Some(addr);
+                trace!("got config IP, parsed address: {}", addr);
 
-                for ip in chunk.into_iter() {
-                    //TODO handle WouldBlock error, which is not an actual error
-                    client.write(&ip).expect("failed to write into TCP client");
-                }
-
-                client.flush().expect("failed to flush TCP client");
-                debug!("done");
-            }
-
-            // receive
-            //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
-            //TODO optimize read or read_buf()? what is this BorrowedCursor, does it allow to use one big buffer and fill that one up as far as possible = read more using one read syscall?
-            match client.read(&mut buf) {
-                Ok(bytes_in) => {
-                    //TODO optimize allocation of bytes_in - because of this match, we cannot assign to a re-used mut bytes_in directly, but use the returned variable from read()
-                    if bytes_in > 0 {
-                        debug!("got bytes from socket, repeating...");
-                        out.push(Vec::from(&buf[0..bytes_in]))
-                            .expect("could not push into OUT");
-                        out_wakeup.unpark();
-                        debug!("done");
+                // Try to connect
+                match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+                    Ok(mut stream) => {
+                        stream
+                            .set_read_timeout(READ_TIMEOUT)
+                            .expect("failed to set read timeout on TCP client");
+                        stream
+                            .set_write_timeout(WRITE_TIMEOUT)
+                            .expect("failed to set write timeout on TCP client");
+                        self.stream = Some(stream);
+                        debug!("connected to {}", addr);
+                    }
+                    Err(e) => {
+                        warn!("failed to connect to {}: {}", addr, e);
+                        return ProcessResult::NoWork; // Can't proceed without connection
                     }
                 }
-                Err(e) => {
-                    match e.kind() {
-                        std::io::ErrorKind::WouldBlock => {
-                            // nothing to be done - this is OK and prevents busy-waiting
+            } else {
+                trace!("no config IP available yet");
+                return ProcessResult::NoWork;
+            }
+        }
+
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // Send pending data first
+        while context.remaining_budget > 0 && !self.pending_data.is_empty() {
+            if let Some(stream) = &mut self.stream {
+                if let Some(pending_data) = self.pending_data.front() {
+                    match stream.write(pending_data) {
+                        Ok(_) => {
+                            stream.flush().expect("failed to flush TCP stream");
+                            self.pending_data.pop_front();
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                            debug!("sent pending data to TCP server");
                         }
-                        _ => {
-                            //TODO handle disconnection etc. - initiate reconnection
-                            error!("failed to read from TCP client: {} - exiting", e);
+                        Err(e) => {
+                            if e.kind() == ErrorKind::WouldBlock {
+                                // Would block, try again later
+                                break;
+                            } else {
+                                warn!("failed to write to TCP stream: {}", e);
+                                // Connection error, clear stream to force reconnection
+                                self.stream = None;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                // No connection, can't send
+                break;
+            }
+        }
+
+        // Send new data within remaining budget
+        while context.remaining_budget > 0 {
+            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
+                if chunk.is_empty() {
+                    break; // No more data
+                }
+
+                debug!("got {} packets to send", chunk.len());
+
+                for ip in chunk.into_iter() {
+                    if let Some(stream) = &mut self.stream {
+                        match stream.write(&ip) {
+                            Ok(_) => {
+                                stream.flush().expect("failed to flush TCP stream");
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                                debug!("sent data to TCP server");
+                            }
+                            Err(e) => {
+                                if e.kind() == ErrorKind::WouldBlock {
+                                    // Buffer for later
+                                    self.pending_data.push_back(ip);
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                    debug!("buffered data for later send");
+                                } else {
+                                    warn!("failed to write to TCP stream: {}", e);
+                                    // Connection error, clear stream to force reconnection
+                                    self.stream = None;
+                                    self.pending_data.push_back(ip); // Keep for retry
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        // No connection, buffer data
+                        self.pending_data.push_back(ip);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("buffered data (no connection)");
+                    }
+                }
+            } else {
+                break; // No more data
+            }
+        }
+
+        // Receive data within remaining budget
+        while context.remaining_budget > 0 {
+            if let Some(stream) = &mut self.stream {
+                let mut buf = [0; READ_BUFFER];
+                match stream.read(&mut buf) {
+                    Ok(bytes_in) => {
+                        if bytes_in > 0 {
+                            debug!("got {} bytes from TCP server", bytes_in);
+                            let data = Vec::from(&buf[0..bytes_in]);
+                            match self.out.push(data) {
+                                Ok(()) => {
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                    debug!("sent received data to output");
+                                }
+                                Err(PushError::Full(returned_data)) => {
+                                    // Output buffer full - for TCP, we might want to buffer or drop
+                                    // For now, we'll drop since TCP is streaming
+                                    debug!("output buffer full, dropping received data");
+                                    work_units += 1; // Count as work even if dropped
+                                    context.remaining_budget -= 1;
+                                }
+                            }
+                        } else {
+                            // Connection closed by server
+                            debug!("TCP connection closed by server");
+                            self.stream = None;
                             break;
                         }
                     }
+                    Err(e) => {
+                        match e.kind() {
+                            ErrorKind::WouldBlock => {
+                                // No data available, normal
+                                break;
+                            }
+                            _ => {
+                                warn!("failed to read from TCP stream: {}", e);
+                                self.stream = None;
+                                break;
+                            }
+                        }
+                    }
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                //TODO close socket
-                drop(out);
-                out_wakeup.unpark();
+            } else {
+                // No connection, can't receive
                 break;
             }
-
-            trace!("-- end of iteration");
-            // NOTE: not needed, because the loop is blocking on the socket read() with timeout
-            //std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() && self.pending_data.is_empty() {
+            info!("EOF on inport IN and no pending data, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
