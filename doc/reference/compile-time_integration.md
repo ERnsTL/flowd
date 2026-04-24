@@ -31,8 +31,17 @@ Build-time validation fails for:
   [package.metadata.flowd]
   compatible = "0.4"
   ```
-  Build-time compatibility check matches major and minor version between flowd and this value. This field is required for crate-based components.
-  Module-based components (`crate = "components::..."`) are legacy/dev-only: disabled by default and only allowed with `--features allow-module-components`.
+   Build-time compatibility check matches major and minor version between flowd and this value. This field is required for crate-based components.
+   Module-based components (`crate = "components::..."`) are legacy/dev-only: disabled by default and only allowed with `--features allow-module-components`.
+
+**Component Version Field Requirements:**
+
+* The `[package]` `version` field MUST follow [Semantic Versioning](https://semver.org/) format: `MAJOR.MINOR.PATCH[-PRERELEASE]`
+* The version field MUST contain only the component's own version number
+* Flowd compatibility MUST NOT be encoded in the version field's build metadata (no `+flowd_version` format)
+* Flowd compatibility MUST be declared exclusively in `[package.metadata.flowd].compatible`
+* Both `version` and `compatible` fields are REQUIRED for crate-based components
+
 * Minimal crate-based component setup example:
   ```toml
   # in flowd Cargo.toml
