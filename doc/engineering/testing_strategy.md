@@ -527,49 +527,60 @@ While the previous sections define **what must be tested**, this section defines
 
 > how tests are structured, executed, and validated in a flowd system.
 
----
+### Core Principle
 
-## Core Principle
+> Tests are active participants in the system, but remain external to the graph.
 
-> Tests are active participants in the system, not passive observers.
 
----
+## Active Test Model
 
-## Active Test Driver Model
+### Corrected Concept
 
-### Concept
-
-Tests are implemented as **active drivers inside the runtime**, not as external assertions over static outputs.
+Tests are implemented as **active drivers interacting with the runtime**, not as components embedded inside the graph.
 
 A test:
 
-* injects messages into the system
-* observes outputs
+* injects messages into the system via the runtime API
+* observes outputs via runtime subscriptions
 * evaluates behavior
 * determines completion
 
----
+### Corrected Architecture
 
-### Architecture
-
-```text id="active_test_model"
-Test Harness
+```text id="active_test_model_corrected"
+Test Code (Driver)
+    ↓
+Test Harness / Runtime API
     ↓
 Runtime (Scheduler)
     ↓
-Graph (Components + Test Driver)
+Graph (Production Components Only)
 ```
 
----
+### Corrected Flow
 
-### Flow
-
-```text id="test_flow"
-Test Driver → sends input → graph executes → outputs produced
-           → observes outputs → performs assertions → completes test
+```text id="test_flow_corrected"
+Test → inject input → graph executes → outputs produced
+     → observe outputs → perform assertions → complete test
 ```
 
----
+
+## Important Clarification
+
+Previous interpretations of this model as:
+
+> “Test Driver as a component inside the graph”
+
+are explicitly rejected.
+
+Tests MUST NOT:
+
+* be implemented as FBP components
+* be embedded into production graphs
+* participate as nodes in the dataflow graph
+
+> Tests are active in behavior, but external in structure.
+
 
 ## Test Harness Responsibilities
 
