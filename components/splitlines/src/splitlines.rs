@@ -15,7 +15,6 @@ pub struct SplitLinesComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // State for partial processing
-    current_input: Option<Vec<u8>>,
     line_iter: Option<std::vec::IntoIter<Vec<u8>>>,
 }
 
@@ -44,7 +43,6 @@ impl Component for SplitLinesComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
-            current_input: None,
             line_iter: None,
         }
     }
