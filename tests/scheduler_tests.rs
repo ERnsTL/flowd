@@ -58,10 +58,6 @@ impl MockComponent {
             should_work,
         }
     }
-
-    fn process_count(&self) -> u32 {
-        *self.process_count.lock().unwrap()
-    }
 }
 
 impl flowd_component_api::Component for MockComponent {

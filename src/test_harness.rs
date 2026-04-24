@@ -354,8 +354,8 @@ impl TestHarness {
         F: Fn(&Self) -> std::result::Result<(), std::io::Error>,
     {
         // Run test twice and compare outputs
-        let mut outputs1 = Vec::new();
-        let mut outputs2 = Vec::new();
+        let outputs1;
+        let outputs2;
 
         // First run
         self.clear_outputs();
