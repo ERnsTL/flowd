@@ -1,0 +1,19 @@
+name: Rust Tests
+
+on:
+  push:
+  pull_request:
+    types: [opened, reopened, edited, synchronize]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Run Tests
+        run: cargo test
