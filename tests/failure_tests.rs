@@ -213,6 +213,33 @@ mod tests {
     }
 
     #[test]
+    fn test_component_panic_is_stable() {
+        // Panic branch intentionally fails; healthy branch must still make progress.
+        let mut harness = TestHarness::new("component_panic_stability_test");
+        harness
+            .add_component_under_test("Panic", "panic")
+            .add_component_under_test("Repeat", "healthy")
+            .add_component_under_test("Repeat", "downstream")
+            .connect("panic", "OUT", "downstream", "IN")
+            .add_graph_inport("PANIC_IN", "panic", "IN")
+            .add_graph_inport("HEALTH_IN", "healthy", "IN")
+            .add_graph_outport("PANIC_OUT", "downstream", "OUT")
+            .add_graph_outport("HEALTH_OUT", "healthy", "OUT");
+
+        harness
+            .run_test_scenario(|h| {
+                h.send_input("PANIC_IN", b"trigger_panic")?;
+                h.send_input("HEALTH_IN", b"still_alive")?;
+
+                h.wait_for_output("HEALTH_OUT", 1, MEDIUM_TIMEOUT)?;
+                h.assert_outputs_sequence_equal("HEALTH_OUT", &[b"still_alive"]);
+                h.assert_no_output_within_window("PANIC_OUT", 200)?;
+                Ok(())
+            })
+            .expect("component panic stability test failed");
+    }
+
+    #[test]
     fn test_state_consistency_after_restart_recovery() {
         // Verify state consistency across explicit restart/recovery cycles.
         let harness_phase1 = new_repeat_harness("state_consistency_restart_test_phase1");

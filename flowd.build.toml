@@ -270,3 +270,8 @@ struct = "DelayComponent"
 name = "Visualization"
 crate = "flowd-vis"
 struct = "FlowdVisComponent"
+
+[[components.entry]]
+name = "Panic"
+crate = "flowd-panic"
+struct = "PanicComponent"

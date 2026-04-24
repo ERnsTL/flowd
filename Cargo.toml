@@ -84,6 +84,7 @@ flowd-matrix = { path = "components/matrix" }
 flowd-sexp = { path = "components/sexp" }
 flowd-delay = { path = "components/delay" }
 flowd-vis = { path = "components/flowd-vis" }
+flowd-panic = { path = "components/panic" }
 
 # for build.rs
 [build-dependencies]
