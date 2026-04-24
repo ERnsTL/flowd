@@ -337,6 +337,9 @@ pub mod scheduler;
 // server module
 pub mod server;
 
+// test harness for testing strategy implementation
+pub mod test_harness;
+
 fn format_duration(duration: Duration) -> String {
     let total_seconds = duration.as_secs();
     let hours = total_seconds / 3600;
@@ -6578,14 +6581,15 @@ pub mod bench_api {
 
     pub struct BenchRuntimeHarness {
         runtime: Arc<RwLock<Runtime>>,
-        graph: Arc<RwLock<Graph>>,
+        pub graph: Arc<RwLock<Graph>>,
         components: Arc<RwLock<ComponentLibrary>>,
         graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
         packet_rx: Receiver<RuntimePacketResponsePayload>,
+        collected_outputs: Arc<Mutex<HashMap<String, Vec<MessageBuf>>>>,
     }
 
     impl BenchRuntimeHarness {
-        fn new(graph: Graph) -> Self {
+        pub fn new(graph: Graph) -> Self {
             let runtime: Arc<RwLock<Runtime>> =
                 Arc::new(RwLock::new(Runtime::new(graph.properties.name.clone())));
             let components: Arc<RwLock<ComponentLibrary>> = build_component_library();
@@ -6604,6 +6608,7 @@ pub mod bench_api {
                 components,
                 graph_inout,
                 packet_rx,
+                collected_outputs: Arc::new(Mutex::new(HashMap::new())),
             }
         }
 
@@ -6667,10 +6672,52 @@ pub mod bench_api {
                     )
                 })?;
                 if pkt.port == outport && matches!(pkt.event, RuntimePacketEvent::Data) {
+                    // Collect output for testing
+                    if let Some(payload) = &pkt.payload {
+                        let mut outputs = self.collected_outputs.lock().expect("lock poisoned");
+                        outputs.entry(outport.to_string()).or_insert_with(Vec::new).push(payload.clone().into_bytes());
+                    }
                     count += 1;
                 }
             }
             Ok(())
+        }
+
+        /// Collect all outputs from a specific outport
+        pub fn collect_outputs(&self, outport: &str) -> Vec<MessageBuf> {
+            let outputs = self.collected_outputs.lock().expect("lock poisoned");
+            outputs.get(outport).cloned().unwrap_or_default()
+        }
+
+        /// Assert that outputs match expected values (set-based comparison)
+        pub fn assert_outputs_set_equal(&self, outport: &str, expected: &[&[u8]]) {
+            let outputs = self.collect_outputs(outport);
+            let actual_set: std::collections::HashSet<&[u8]> = outputs.iter().map(|v| v.as_slice()).collect();
+            let expected_set: std::collections::HashSet<&[u8]> = expected.iter().cloned().collect();
+
+            assert_eq!(actual_set, expected_set, "Output sets do not match for port {}", outport);
+        }
+
+        /// Assert that outputs match expected values in sequence
+        pub fn assert_outputs_sequence_equal(&self, outport: &str, expected: &[&[u8]]) {
+            let outputs = self.collect_outputs(outport);
+            assert_eq!(outputs.len(), expected.len(), "Output count mismatch for port {}", outport);
+
+            for (i, (actual, &expected)) in outputs.iter().zip(expected.iter()).enumerate() {
+                assert_eq!(actual.as_slice(), expected, "Output {} does not match for port {}", i, outport);
+            }
+        }
+
+        /// Assert no message loss (all inputs should produce outputs)
+        pub fn assert_no_message_loss(&self, input_count: usize, outport: &str) {
+            let outputs = self.collect_outputs(outport);
+            assert_eq!(outputs.len(), input_count, "Message loss detected: expected {} outputs, got {} for port {}", input_count, outputs.len(), outport);
+        }
+
+        /// Clear collected outputs
+        pub fn clear_outputs(&self) {
+            let mut outputs = self.collected_outputs.lock().expect("lock poisoned");
+            outputs.clear();
         }
     }
 
