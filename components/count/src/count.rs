@@ -21,10 +21,31 @@ pub struct CountComponent {
     start_1st: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Clone, Copy)]
 enum Mode {
     Packets,
     Size,
     Sum,
+}
+
+impl CountComponent {
+    fn emit_final_count(&mut self, mode: Mode) -> String {
+        let final_count = match mode {
+            //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
+            Mode::Packets => format!("{}", self.packets),
+            Mode::Size => format!("{}", self.packetsize),
+            Mode::Sum => format!("{}", self.sum),
+        };
+
+        self.out
+            .push(final_count.clone().into_bytes())
+            .expect("could not push into OUT");
+
+        // Send network output with the final count
+        flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count.clone());
+
+        final_count
+    }
 }
 
 impl Component for CountComponent {
@@ -69,12 +90,13 @@ impl Component for CountComponent {
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("Count is now process()ing!");
 
-        // Initialize configuration on first call
+        // Try to read configuration if not yet configured
         if self.mode.is_none() {
             trace!("reading config IP");
             if let Ok(url_vec) = self.conf.pop() {
-                let url_str = "https://makeurlhappy/?".to_owned()
-                    + std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                let raw_conf = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                let query = raw_conf.strip_prefix('?').unwrap_or(raw_conf);
+                let url_str = "https://makeurlhappy/?".to_owned() + query;
                 let url =
                     url::Url::parse(url_str.as_str()).expect("failed to parse configuration URL");
 
@@ -93,13 +115,14 @@ impl Component for CountComponent {
                     error!("no mode found in configuration URL - finishing");
                     return ProcessResult::Finished;
                 }
-            } else {
-                trace!("no config IP received yet - no work");
-                return ProcessResult::NoWork;
             }
         }
 
-        let mode = self.mode.as_ref().unwrap();
+        // If not configured yet, can't process
+        let Some(mode) = self.mode else {
+            trace!("not configured yet - no work");
+            return ProcessResult::NoWork;
+        };
         let mut work_units = 0u32;
 
         // check signals
@@ -110,6 +133,9 @@ impl Component for CountComponent {
             );
             // stop signal
             if ip == b"stop" {
+                if let Some(mode) = self.mode {
+                    let _ = self.emit_final_count(mode);
+                }
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
             } else if ip == b"ping" {
@@ -136,6 +162,9 @@ impl Component for CountComponent {
                     std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
                 if sig == b"stop" {
+                    if let Some(mode) = self.mode {
+                        let _ = self.emit_final_count(mode);
+                    }
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
                 } else if sig == b"ping" {
@@ -180,6 +209,12 @@ impl Component for CountComponent {
             }
         }
 
+        // Emit current totals when input goes idle so downstream observers can
+        // see progress without requiring an EOF/stop race to flush.
+        if work_units > 0 && self.inn.is_empty() && !self.inn.is_abandoned() {
+            let _ = self.emit_final_count(mode);
+        }
+
         // check for EOF on input
         if self.inn.is_abandoned() {
             // send final report
@@ -193,33 +228,7 @@ impl Component for CountComponent {
                 end - start,
                 end - start_1st
             );
-            let final_count = match mode {
-                //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
-                Mode::Packets => {
-                    let count = format!("{}", self.packets);
-                    self.out
-                        .push(count.clone().into_bytes())
-                        .expect("could not push into OUT");
-                    count
-                }
-                Mode::Size => {
-                    let count = format!("{}", self.packetsize);
-                    self.out
-                        .push(count.clone().into_bytes())
-                        .expect("could not push into OUT");
-                    count
-                }
-                Mode::Sum => {
-                    let count = format!("{}", self.sum);
-                    self.out
-                        .push(count.clone().into_bytes())
-                        .expect("could not push into OUT");
-                    count
-                }
-            };
-
-            // Send network output with the final count
-            flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count);
+            let _ = self.emit_final_count(mode);
 
             return ProcessResult::Finished;
         }

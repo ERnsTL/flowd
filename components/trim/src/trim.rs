@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace, warn};
 
@@ -40,72 +41,80 @@ impl Component for TrimComponent {
         }
     }
 
-    fn run(self) {
-        debug!("Trim is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Trim is now process()ing!");
+        let mut work_units = 0u32;
+
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // check in port within budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // read packet - expecting UTF-8 string
-                    let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
-                    debug!("got a text to trim: {}", &text);
-
-                    // trim string
-                    debug!("len before trim: {}", text.len());
-                    text = text.trim();
-                    debug!("len after trim: {}", text.len());
-
-                    // send it
-                    debug!("forwarding trimmed string...");
-                    //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(Vec::from(text)).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
                 }
             }
 
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            if let Ok(ip) = self.inn.pop() {
+                // read packet - expecting UTF-8 string
+                let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
+                debug!("got a text to trim: {}", &text);
+
+                // trim string
+                debug!("len before trim: {}", text.len());
+                text = text.trim();
+                debug!("len after trim: {}", text.len());
+
+                // send it
+                debug!("forwarding trimmed string...");
+                self.out.push(Vec::from(text)).expect("could not push into OUT");
+                debug!("done");
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload

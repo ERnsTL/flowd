@@ -16,4 +16,4 @@ redis = { version = "*", default-features = false }
 url = "2"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

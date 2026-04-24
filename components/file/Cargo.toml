@@ -21,4 +21,4 @@ log = "0.4"
 staart = "0.7"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

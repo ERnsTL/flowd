@@ -6589,6 +6589,20 @@ pub mod bench_api {
     }
 
     impl BenchRuntimeHarness {
+        fn drain_runtime_packets(&self) {
+            while let Ok(pkt) = self.packet_rx.try_recv() {
+                if matches!(pkt.event, RuntimePacketEvent::Data) {
+                    if let Some(payload) = &pkt.payload {
+                        let mut outputs = self.collected_outputs.lock().expect("lock poisoned");
+                        outputs
+                            .entry(pkt.port.clone())
+                            .or_insert_with(Vec::new)
+                            .push(payload.clone().into_bytes());
+                    }
+                }
+            }
+        }
+
         pub fn new(graph: Graph) -> Self {
             let runtime: Arc<RwLock<Runtime>> =
                 Arc::new(RwLock::new(Runtime::new(graph.properties.name.clone())));
@@ -6685,6 +6699,7 @@ pub mod bench_api {
 
         /// Collect all outputs from a specific outport
         pub fn collect_outputs(&self, outport: &str) -> Vec<MessageBuf> {
+            self.drain_runtime_packets();
             let outputs = self.collected_outputs.lock().expect("lock poisoned");
             outputs.get(outport).cloned().unwrap_or_default()
         }

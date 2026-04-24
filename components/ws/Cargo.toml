@@ -15,4 +15,4 @@ log = "0.4"
 tungstenite = "0.20"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

@@ -1,6 +1,6 @@
 [package]
 name = "flowd-cmd"
-version = "0.1.0+0.4"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
@@ -15,4 +15,4 @@ shell-words = "1.1.0"
 lexopt = "0.3.0"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

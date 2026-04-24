@@ -15,4 +15,4 @@ url = "2"
 uds = "0.4.2"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

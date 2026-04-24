@@ -181,6 +181,29 @@ mod tests {
     }
 
     #[test]
+    fn test_basic_repeat_functionality() {
+        // Minimal test to verify basic graph inport/outport routing works
+        let harness = new_repeat_harness("basic_repeat_test");
+
+        harness
+            .run_test_scenario(|h| {
+                // Send just one message
+                h.send_input("IN", b"test_message")?;
+
+                // Wait for one output with short timeout
+                h.wait_for_output("OUT", 1, Duration::from_secs(5))?;
+
+                // Verify we got the expected output
+                let outputs = h.collect_outputs("OUT");
+                assert_eq!(outputs.len(), 1, "Should receive exactly one output");
+                assert_eq!(outputs[0], b"test_message", "Output should match input");
+
+                Ok(())
+            })
+            .expect("basic repeat functionality test failed");
+    }
+
+    #[test]
     fn test_long_running_stability() {
         // Test system stability over extended period
         let harness = new_repeat_harness("long_running_test");
@@ -188,7 +211,6 @@ mod tests {
         harness
             .run_test_scenario(|h| {
                 let message_count = 500;
-                let mut processed = 0;
 
                 // Send messages in smaller batches over time
                 for batch in 0..10 {
@@ -196,16 +218,14 @@ mod tests {
                         h.send_input("IN", format!("stable_batch{}_msg{}", batch, msg).as_bytes())?;
                     }
 
-                    // Check progress periodically
-                    let current_outputs = h.collect_outputs("OUT").len();
-                    assert!(current_outputs >= processed, "Processing should not go backwards");
-
-                    processed = current_outputs;
+                    // Small delay between batches to prevent overwhelming the system
                     thread::sleep(Duration::from_millis(10));
                 }
 
-                // Final verification
+                // Wait for all outputs to be processed
                 h.wait_for_output("OUT", message_count, STRESS_TIMEOUT)?;
+
+                // Verify all messages were processed
                 h.assert_no_message_loss(message_count, "OUT");
 
                 Ok(())

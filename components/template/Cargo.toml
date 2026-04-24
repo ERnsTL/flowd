@@ -14,4 +14,4 @@ log = "0.4"
 tera = "1.0"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

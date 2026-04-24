@@ -17,4 +17,4 @@ lexopt = "0.3.0"
 ssh-rs = "0.5.0"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

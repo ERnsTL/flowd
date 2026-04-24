@@ -1,19 +1,32 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace, warn};
 
 //component-specific
 use lexopt::prelude::*;
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+enum SubprocessState {
+    Idle,
+    Running {
+        child: std::process::Child,
+        stdin_thread: Option<std::thread::JoinHandle<()>>,
+        stdout_rx: mpsc::Receiver<Vec<u8>>,
+        stdout_thread: Option<std::thread::JoinHandle<()>>,
+        start_time: Instant,
+    },
+    Completed,
+}
 
 pub struct CmdComponent {
-    //TODO differentiate between trigger inport and STDIN inport?
+    // Ports
     inn: ProcessEdgeSource,
     cmd: ProcessEdgeSource,
     conf: ProcessEdgeSource,
@@ -21,8 +34,19 @@ pub struct CmdComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Configuration (lazy-loaded)
+    cmd_program: Option<OsString>,
+    cmd_args: Vec<OsString>,
+    mode: Mode,
+    retry: bool,
+    config_loaded: bool,
+
+    // Runtime state
+    state: SubprocessState,
 }
 
+#[derive(Debug)]
 enum Mode {
     One,
     Each,
@@ -76,300 +100,198 @@ impl Component for CmdComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            cmd_program: None,
+            cmd_args: Vec::new(),
+            mode: Mode::Each,
+            retry: false,
+            config_loaded: false,
+            state: SubprocessState::Idle,
         }
     }
 
-    fn run(self) {
-        debug!("Cmd is now run()ning!");
-        let mut inn = self.inn;
-        let mut cmd = self.cmd;
-        let mut conf = self.conf;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Cmd is now process()ing!");
 
-        // read sub-process program and args
-        let cmd_ip = cmd
-            .pop()
-            .expect("could not read IP from CMD configuration inport");
-        let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
-        let mut cmd_words =
-            shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
-        let mut cmd_args: Vec<OsString> = vec![];
-        if cmd_words.len() > 0 {
-            let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
-            cmd_args = cmd_args1.iter().map(|x| OsString::from(x)).collect();
-        }
-        let cmd_program1 = cmd_words.pop().expect("could not pop program name");
-        let cmd_program = OsStr::new(cmd_program1.as_str());
-        debug!(
-            "got program {} with arguments {:?}",
-            cmd_program
-                .to_str()
-                .expect("could not convert OsStr to &str"),
-            cmd_args
-        );
-
-        // read configuration
-        let mut mode = Mode::Each;
-        let mut retry = false;
-        //TODO must split the configuration into words with shell_words::split() and then parse the arguments with lexopt, like already done in SSH client component
-        let mut parser = lexopt::Parser::from_args(vec![OsString::from(
-            std::str::from_utf8(
-                &conf
-                    .pop()
-                    .expect("could not read IP from CONF configuration inport"),
-            )
-            .expect("invalid utf-8"),
-        )]);
-        while let Some(arg) = parser.next().expect("could not call next()") {
-            match arg {
-                Long("retry") => {
-                    retry = parser
-                        .value()
-                        .expect("could not get parser value")
-                        .parse()
-                        .expect("could not parse value");
+        // Load configuration if not loaded
+        if !self.config_loaded {
+            if let Ok(cmd_ip) = self.cmd.pop() {
+                let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
+                let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line");
+                if cmd_words.len() > 0 {
+                    let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
+                    self.cmd_args = cmd_args1.iter().map(|x| OsString::from(x)).collect();
                 }
-                Long("mode") => {
-                    let mode_str: OsString = parser
-                        .value()
-                        .expect("could not get parser value")
-                        .parse::<OsString>()
-                        .expect("could not parse value");
-                    match mode_str
-                        .to_str()
-                        .expect("could not convert mode_str to str")
-                    {
-                        "one" => {
-                            mode = Mode::One;
+                let cmd_program1 = cmd_words.pop().expect("could not pop program name");
+                self.cmd_program = Some(OsStr::new(&cmd_program1).to_os_string());
+                debug!("loaded program {:?} with args {:?}", self.cmd_program, self.cmd_args);
+            } else {
+                trace!("no CMD config yet");
+                return ProcessResult::NoWork;
+            }
+
+            if let Ok(conf_ip) = self.conf.pop() {
+                let mut parser = lexopt::Parser::from_args(vec![OsString::from(
+                    std::str::from_utf8(&conf_ip).expect("invalid utf-8"),
+                )]);
+                while let Some(arg) = parser.next().expect("could not call next()") {
+                    match arg {
+                        Long("retry") => {
+                            self.retry = parser.value().expect("could not get parser value").parse().expect("could not parse value");
                         }
-                        "each" => {
-                            mode = Mode::Each;
+                        Long("mode") => {
+                            let mode_str: OsString = parser.value().expect("could not get parser value").parse::<OsString>().expect("could not parse value");
+                            match mode_str.to_str().expect("could not convert mode_str to str") {
+                                "one" => self.mode = Mode::One,
+                                "each" => self.mode = Mode::Each,
+                                _ => unreachable!(),
+                            }
                         }
-                        _ => {
-                            unreachable!();
+                        _ => unreachable!(),
+                    }
+                }
+                self.config_loaded = true;
+                debug!("loaded config: mode={:?}, retry={}", self.mode, self.retry);
+            } else {
+                trace!("no CONF config yet");
+                return ProcessResult::NoWork;
+            }
+        }
+
+        // Check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                // Cleanup any running subprocess
+                if let SubprocessState::Running { child, stdin_thread, stdout_thread, .. } = &mut self.state {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    if let Some(thread) = stdin_thread.take() {
+                        handoff_join(thread, "CmdComponent-stdin-stop");
+                    }
+                    if let Some(thread) = stdout_thread.take() {
+                        handoff_join(thread, "CmdComponent-stdout-stop");
+                    }
+                }
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            }
+        }
+
+        // Process based on state
+        match &mut self.state {
+            SubprocessState::Idle => {
+                if context.remaining_budget > 0 {
+                    if let Ok(ip) = self.inn.pop() {
+                        debug!("got input packet, starting subprocess");
+                        match self.mode {
+                            Mode::Each => {
+                                let mut child = Command::new(self.cmd_program.as_ref().unwrap())
+                                    .args(&self.cmd_args)
+                                    .stdin(Stdio::piped())
+                                    .stdout(Stdio::piped())
+                                    .spawn()
+                                    .expect("could not start sub-process");
+
+                                let child_stdout = child.stdout.take().expect("could not get stdout");
+                                let writer = child.stdin.take().expect("could not get stdin");
+
+                                // Start stdin thread
+                                let stdin_thread = std::thread::spawn(move || {
+                                    let mut writer = writer;
+                                    writer.write_all(ip.as_slice()).expect("could not write to stdin");
+                                    drop(writer);
+                                });
+
+                                // Start stdout thread
+                                let (stdout_tx, stdout_rx) = mpsc::channel();
+                                let stdout_thread = std::thread::spawn(move || {
+                                    let reader = BufReader::new(child_stdout);
+                                    for line in reader.lines().map_while(Result::ok) {
+                                        if stdout_tx.send(line.into_bytes()).is_err() {
+                                            break;
+                                        }
+                                    }
+                                });
+
+                                self.state = SubprocessState::Running {
+                                    child,
+                                    stdin_thread: Some(stdin_thread),
+                                    stdout_rx,
+                                    stdout_thread: Some(stdout_thread),
+                                    start_time: Instant::now(),
+                                };
+                                context.remaining_budget -= 1;
+                                return ProcessResult::DidWork(1);
+                            }
+                            Mode::One => unimplemented!(),
                         }
                     }
                 }
-                _ => {
-                    unreachable!();
-                }
             }
-        }
+            SubprocessState::Running { child, stdin_thread, stdout_rx, stdout_thread, start_time: _ } => {
+                let mut work_done = 0u32;
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // output the packet data with newline
-                    debug!("got a packet, starting sub-process:");
-                    //println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
-
-                    //TODO this runs the sub-process but for longer-running or hanging processes the Cmd component is unresponsive for signals
-                    //FIXME be responsive during longer-running sub-processes or for server sub-processes
-                    //TODO add ability to send signal to sub-process (HUP, KILL, TERM etc.)
-                    // NOTE: Alternative to IFS for reading all of STDIN:
-                    //   input=$(cat)
-                    //let mut child = Command::new("bash")
-                    //    .args(["-c", "IFS= read -r -d '' input ; echo stdin is \"$input\" ; a=1 ; while [ true ] ; do echo bla$a; sleep 2s ; ((a=a+1)) ; done"])
-                    //let mut child = Command::new("recsel")
-                    //    .args(["-p","name", "/dev/shm/test.rec"])
-                    //let mut child = Command::new("bash")
-                    //    .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
-                    match mode {
-                        Mode::Each => {
-                            let mut child = Command::new(cmd_program) //TODO optimize pre-construct Command once
-                                .args(&cmd_args) // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
-                                .stdin(Stdio::piped())
-                                .stdout(Stdio::piped())
-                                .spawn()
-                                .expect("could not start sub-process");
-                            if retry {
-                                //TODO implement
-                                unimplemented!();
-                            }
-
-                            // set up reader from child STDOUT
-                            let child_stdout = child
-                                .stdout
-                                .take()
-                                .ok_or_else(|| {
-                                    Error::new(
-                                        ErrorKind::Other,
-                                        "Could not capture standard output.",
-                                    )
-                                })
-                                .expect("could not get standard output"); //TODO optimize looks like duplication from above line
-                                                                          // set up writer into child STDIN
-                            let writer = child
-                                .stdin
-                                //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
-                                //.expect("could not get standard input")    //TODO optimize looks like duplication from above line
-                                .take()
-                                .expect("could not get standard input");
-
-                            // deliver the trigger IP contents into child STDIN on a helper thread,
-                            // so stop/ping handling remains responsive even if stdin write blocks.
-                            let stdin_thread = std::thread::spawn(move || {
-                                let mut writer = writer;
-                                writer
-                                    .write_all(ip.as_slice())
-                                    .expect("could not write into child STDIN");
-                                drop(writer); // close STDIN
-                            });
-
-                            // read child STDOUT in a dedicated thread so this component can keep handling stop/ping.
-                            let (stdout_tx, stdout_rx) = mpsc::channel::<Vec<u8>>();
-                            let stdout_thread = std::thread::spawn(move || {
-                                let reader = BufReader::new(child_stdout);
-                                for line in reader.lines().map_while(Result::ok) {
-                                    if stdout_tx.send(line.into_bytes()).is_err() {
-                                        break;
-                                    }
-                                }
-                            });
-
-                            let mut stop_component = false;
-                            let mut stdout_closed = false;
-                            while !stop_component {
-                                // child output
-                                match stdout_rx.recv_timeout(Duration::from_millis(50)) {
-                                    Ok(line) => {
-                                        out.push(line).expect("could not push into OUT");
-                                        out_wakeup.unpark();
-                                    }
-                                    Err(mpsc::RecvTimeoutError::Timeout) => {}
-                                    Err(mpsc::RecvTimeoutError::Disconnected) => {
-                                        stdout_closed = true;
-                                    }
-                                }
-
-                                // process signals while child may still be running
-                                if let Ok(sig) = self.signals_in.try_recv() {
-                                    trace!(
-                                        "received signal ip: {}",
-                                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                                    );
-                                    if sig == b"stop" {
-                                        info!("got stop signal while child process is running, terminating child");
-                                        let _ = child.kill();
-                                        let _ = child.wait();
-                                        stop_component = true;
-                                        break;
-                                    } else if sig == b"ping" {
-                                        trace!("got ping signal, responding");
-                                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                                    } else {
-                                        warn!(
-                                            "received unknown signal ip: {}",
-                                            std::str::from_utf8(&sig).expect("invalid utf-8")
-                                        )
-                                    }
-                                }
-
-                                // child exit
-                                if let Some(_status) = child
-                                    .try_wait()
-                                    .expect("failed to query child process status")
-                                {
-                                    if stdout_closed {
-                                        break;
-                                    }
-                                }
-                            }
-
-                            let stdout_join_started = std::time::Instant::now();
-                            while !stdout_thread.is_finished()
-                                && stdout_join_started.elapsed() < STDOUT_THREAD_JOIN_GRACE
-                            {
-                                std::thread::sleep(Duration::from_millis(10));
-                            }
-                            if stdout_thread.is_finished() {
-                                if let Err(err) = stdout_thread.join() {
-                                    warn!("failed to join child stdout reader thread: {:?}", err);
-                                }
-                            } else {
-                                warn!(
-                                    "child stdout reader thread did not exit within {:?}, handing off to join reaper",
-                                    STDOUT_THREAD_JOIN_GRACE
-                                );
-                                handoff_join(stdout_thread, "CmdComponent-stdout");
-                            }
-
-                            let stdin_join_started = std::time::Instant::now();
-                            while !stdin_thread.is_finished()
-                                && stdin_join_started.elapsed() < STDIN_THREAD_JOIN_GRACE
-                            {
-                                std::thread::sleep(Duration::from_millis(10));
-                            }
-                            if stdin_thread.is_finished() {
-                                if let Err(err) = stdin_thread.join() {
-                                    warn!("failed to join child stdin writer thread: {:?}", err);
-                                }
-                            } else {
-                                warn!(
-                                    "child stdin writer thread did not exit within {:?}, handing off to join reaper",
-                                    STDIN_THREAD_JOIN_GRACE
-                                );
-                                handoff_join(stdin_thread, "CmdComponent-stdin");
-                            }
-
-                            if stop_component {
-                                drop(out);
-                                out_wakeup.unpark();
-                                info!("exiting");
-                                return;
-                            }
+                // Check for output
+                if context.remaining_budget > 0 {
+                    match stdout_rx.try_recv() {
+                        Ok(line) => {
+                            self.out.push(line).expect("could not push to OUT");
+                            work_done += 1;
+                            context.remaining_budget -= 1;
                         }
-                        Mode::One => {
-                            unimplemented!();
-                        } //TODO implement
+                        Err(mpsc::TryRecvError::Empty) => {}
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            // stdout closed
+                        }
                     }
+                }
 
-                    debug!("done");
-                } else {
-                    break;
+                // Check if child exited
+                if let Some(_status) = child.try_wait().expect("failed to query child status") {
+                    // Child finished, cleanup threads
+                    if let Some(thread) = stdin_thread.take() {
+                        if thread.is_finished() {
+                            if let Err(err) = thread.join() {
+                                warn!("failed to join stdin thread: {:?}", err);
+                            }
+                        } else {
+                            handoff_join(thread, "CmdComponent-stdin");
+                        }
+                    }
+                    if let Some(thread) = stdout_thread.take() {
+                        if thread.is_finished() {
+                            if let Err(err) = thread.join() {
+                                warn!("failed to join stdout thread: {:?}", err);
+                            }
+                        } else {
+                            handoff_join(thread, "CmdComponent-stdout");
+                        }
+                    }
+                    self.state = SubprocessState::Completed;
+                }
+
+                if work_done > 0 {
+                    return ProcessResult::DidWork(work_done);
                 }
             }
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
+            SubprocessState::Completed => {
+                // Reset to idle for next input
+                self.state = SubprocessState::Idle;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check for EOF
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        ProcessResult::NoWork
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -433,3 +355,81 @@ impl Component for CmdComponent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Component-level unit tests for cmd component logic
+    // These tests focus on isolated logic testing without the full runtime
+
+    #[test]
+    fn test_mode_enum_debug() {
+        // Test that Mode enum implements Debug
+        assert_eq!(format!("{:?}", Mode::One), "One");
+        assert_eq!(format!("{:?}", Mode::Each), "Each");
+    }
+
+    #[test]
+    fn test_subprocess_state_enum() {
+        // Test that SubprocessState enum variants exist
+        let _idle = SubprocessState::Idle;
+        let _completed = SubprocessState::Completed;
+        // Running variant requires complex setup, just verify it compiles
+    }
+
+    #[test]
+    fn test_get_metadata() {
+        // Test component metadata
+        let metadata = CmdComponent::get_metadata();
+        assert_eq!(metadata.name, "Cmd");
+        assert!(metadata.description.contains("external program"));
+        assert_eq!(metadata.icon, "terminal");
+        assert!(!metadata.subgraph);
+
+        // Check ports
+        assert_eq!(metadata.in_ports.len(), 3);
+        assert_eq!(metadata.out_ports.len(), 1);
+
+        let in_port_names: Vec<&str> = metadata.in_ports.iter().map(|p| p.name.as_str()).collect();
+        assert!(in_port_names.contains(&"IN"));
+        assert!(in_port_names.contains(&"CMD"));
+        assert!(in_port_names.contains(&"CONF"));
+
+        let out_port_names: Vec<&str> = metadata.out_ports.iter().map(|p| p.name.as_str()).collect();
+        assert!(out_port_names.contains(&"OUT"));
+    }
+
+    #[test]
+    fn test_constants() {
+        // Test that constants are defined and reasonable
+        assert!(STDOUT_THREAD_JOIN_GRACE.as_secs() > 0);
+        assert!(STDIN_THREAD_JOIN_GRACE.as_secs() > 0);
+    }
+
+    #[test]
+    fn test_shell_words_parsing_logic() {
+        // Test the shell parsing logic that the component uses
+        // This tests the logic without requiring full component setup
+
+        let test_cases = vec![
+            ("echo hello", vec!["echo", "hello"]),
+            ("ls -la", vec!["ls", "-la"]),
+            ("cmd", vec!["cmd"]),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = shell_words::split(input).unwrap();
+            assert_eq!(result, expected, "Failed to parse: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_invalid_shell_words() {
+        // Test error handling in shell parsing
+        // Unclosed quotes should fail
+        assert!(shell_words::split("echo 'unclosed").is_err());
+    }
+}
+
+

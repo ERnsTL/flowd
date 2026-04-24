@@ -18,4 +18,4 @@ log = "0.4"
 mdns-sd = "0.10.4"
 url = "2"
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

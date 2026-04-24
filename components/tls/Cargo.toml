@@ -21,4 +21,4 @@ webpki-roots = "0.26"
 rustls-pemfile = "2"
 
 [package.metadata.flowd]
-compatible = "0.4"
+compatible = "0.5"

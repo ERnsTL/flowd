@@ -1,7 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
-    PushError,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
 
@@ -14,6 +14,9 @@ pub struct SplitLinesComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // State for partial processing
+    current_input: Option<Vec<u8>>,
+    line_iter: Option<std::vec::IntoIter<Vec<u8>>>,
 }
 
 impl Component for SplitLinesComponent {
@@ -41,148 +44,107 @@ impl Component for SplitLinesComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            current_input: None,
+            line_iter: None,
         }
     }
 
-    fn run(self) {
-        debug!("SplitLines is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        loop {
-            trace!("begin of iteration");
-            let mut stop_requested = false;
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("SplitLines is now process()ing!");
+        let mut work_units = 0u32;
+
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // check in port within budget
+        if context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
                 }
             }
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
+
+            // If we don't have an active iterator, try to get new input
+            if self.line_iter.is_none() {
+                if let Ok(ip) = self.inn.pop() {
                     // read packet - expecting UTF-8 string
                     debug!("got a text to split");
 
-                    // split into lines and send them
-                    debug!("forwarding lines...");
-
-                    //TODO check which variant is more efficient
-
-                    // variant 1 - blocks only on first line
-
-                    //let mut cur = std::io::Cursor::new(ip);
-                    //let ip_out: MessageBuf = vec![];
-                    //cur.read_until(b'\n', &mut ip_out);
-                    let mut line_iter = ip.split(|&x| x == b'\n').map(|x| x.to_vec());
-                    // check if there are more lines to write - unfortunately no peek available so we have to write the first line here and then write as much as possible in big chunk
-                    while let Some(line) = line_iter.next() {
-                        // write first line
-                        match out.push(line) {
-                            Ok(_) => {}
-                            Err(PushError::Full(line)) => {
-                                // full, so wake up output-side component
-                                out_wakeup.unpark();
-                                while out.is_full() {
-                                    if let Ok(sig) = self.signals_in.try_recv() {
-                                        trace!(
-                                            "received signal ip while waiting for OUT outport: {}",
-                                            std::str::from_utf8(&sig).expect("invalid utf-8")
-                                        );
-                                        if sig == b"stop" {
-                                            stop_requested = true;
-                                            break;
-                                        } else if sig == b"ping" {
-                                            let _ = self.signals_out.try_send(b"pong".to_vec());
-                                        } else {
-                                            warn!(
-                                                "received unknown signal ip: {}",
-                                                std::str::from_utf8(&sig).expect("invalid utf-8")
-                                            );
-                                        }
-                                    }
-                                    out_wakeup.unpark();
-                                    // wait
-                                    std::thread::yield_now();
-                                }
-                                if stop_requested {
-                                    break;
-                                }
-                                // send first line now that outport is !full
-                                out.push(line)
-                                    .expect("could not push into OUT - but said !is_full");
-                            }
-                        }
-                        if stop_requested {
-                            break;
-                        }
-                        // write as much as possible from the iterator into outport ringbuffer
-                        if let Ok(chunk) = out.write_chunk_uninit(out.slots()) {
-                            chunk.fill_from_iter(&mut line_iter);
-                        }
-                    }
-
-                    // variant 2 - always blocks since we usually fill the outport fully
-                    /*
-                    let mut line_iter = ip.split(|&x| x == b'\n').map(|x| x.to_vec());
-                    loop {
-                        if let Ok(chunk) = out.write_chunk_uninit(out.slots()) {
-                            if chunk.fill_from_iter(&mut line_iter) == 0 {
-                                // no more lines to write = iterator sucked empty
-                                break;
-                            }
-                            //NOTE: problem is that it can return 0 because the target buffer is full, but the iterator is not empty - so we have to make sure that when we try again the ringbuffer is !full
-                            while out.is_full() {
-                                // we have filled the chunk, receiver has to work now so wake it up
-                                out_wakeup.unpark();
-                                // wait for receiver to free up space in the ringbuffer
-                                std::thread::yield_now();
-                            }
-                        }
-                    }
-                    */
-
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+                    // split into lines
+                    let lines: Vec<Vec<u8>> = ip.split(|&x| x == b'\n').map(|x| x.to_vec()).collect();
+                    self.line_iter = Some(lines.into_iter());
+                    debug!("created iterator with {} lines", self.line_iter.as_ref().unwrap().len());
                 }
             }
-            if stop_requested {
-                info!("stop requested while waiting on full outport, exiting");
-                break;
-            }
 
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
+            // Send lines from current iterator within remaining budget
+            if let Some(ref mut line_iter) = self.line_iter {
+                let mut lines_sent = 0u32;
 
-            trace!("-- end of iteration");
-            std::thread::park();
+                while context.remaining_budget > 0 {
+                    if let Some(line) = line_iter.next() {
+                        match self.out.push(line) {
+                            Ok(_) => {
+                                lines_sent += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            Err(PushError::Full(_)) => {
+                                // Output buffer full, can't send more this cycle
+                                break;
+                            }
+                        }
+                    } else {
+                        // No more lines from current input
+                        self.line_iter = None;
+                        break;
+                    }
+                }
+
+                if lines_sent > 0 {
+                    work_units += 1;
+                    debug!("sent {} lines", lines_sent);
+                }
+            }
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
