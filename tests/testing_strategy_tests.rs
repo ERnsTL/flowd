@@ -157,6 +157,8 @@ fn test_set_based_validation() {
 
     #[test]
     fn test_backpressure_behavior() {
+        // For now, use Repeat component and test that the assertion method works
+        // The assertion now measures timing and verifies backpressure behavior
         let harness = new_repeat_harness("backpressure_test");
 
         harness
