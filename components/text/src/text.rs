@@ -1,11 +1,9 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
-
-// component-specific
-use std::thread;
 
 pub struct TextReplaceComponent {
     conf: ProcessEdgeSource,
@@ -14,6 +12,10 @@ pub struct TextReplaceComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    replacements: Vec<(String, String)>,
+    config_complete: bool,
+    pending_packets: std::collections::VecDeque<Vec<u8>>,
 }
 
 impl Component for TextReplaceComponent {
@@ -46,129 +48,141 @@ impl Component for TextReplaceComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            replacements: Vec::new(),
+            config_complete: false,
+            pending_packets: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("TextReplace is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("TextReplace is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read configuration
-        trace!("read config IPs");
-        let mut replacements: Vec<(String, String)> = Vec::new();
-        // NOTE: this condition ensures that when the inport is abandoned, we still process the remaining replacements
-        // and any remaining single one is ignored, eg. the usual last line in a text file on Unix-like systems
-        while !conf.is_abandoned() || conf.slots() >= 2 {
-            // wait for packet
-            while conf.is_empty() {
-                if let Ok(sig) = self.signals_in.try_recv() {
-                    trace!(
-                        "received signal ip: {}",
-                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                    );
-                    if sig == b"stop" {
-                        info!("got stop signal while waiting for replacement config, exiting");
-                        return;
-                    } else if sig == b"ping" {
-                        trace!("got ping signal, responding");
-                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                    } else {
-                        warn!(
-                            "received unknown signal ip: {}",
-                            std::str::from_utf8(&sig).expect("invalid utf-8")
-                        );
-                    }
+        // Read configuration incrementally if not complete
+        if !self.config_complete {
+            // Read replacement pairs from CONF port
+            while self.conf.slots() >= 2 {
+                if let (Ok(from), Ok(to)) = (self.conf.pop(), self.conf.pop()) {
+                    let from_str = String::from_utf8(from).expect("invalid utf-8 in replacement from");
+                    let to_str = String::from_utf8(to).expect("invalid utf-8 in replacement to");
+                    trace!("got replacement pair: from={} to={}", from_str, to_str);
+                    self.replacements.push((from_str, to_str));
+                } else {
+                    break;
                 }
-                thread::yield_now();
             }
-            // read pairs
-            while conf.slots() >= 2 {
-                let from = conf.pop().expect("failed to pop CONF replacement from IP");
-                let to = conf.pop().expect("failed to pop CONF replacement to IP");
-                let entry = (
-                    String::from_utf8(from).unwrap(),
-                    String::from_utf8(to).unwrap(),
-                );
-                trace!("got replacement pair: from={} to={}", entry.0, entry.1);
-                replacements.push(entry);
+
+            // Check if configuration is complete (CONF port abandoned)
+            if self.conf.is_abandoned() {
+                self.config_complete = true;
+                trace!("configuration complete, got {} replacements", self.replacements.len());
+            } else if self.replacements.is_empty() {
+                // No configuration available yet
+                trace!("no configuration available yet");
+                return ProcessResult::NoWork;
             }
         }
-        trace!("got text replacements: {}", replacements.len());
 
-        // configure
-        // NOTE: nothing to be done here
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
+        // First, try to send any pending packets that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_packets.is_empty() {
+            if let Some(pending_ip) = self.pending_packets.front() {
+                match self.out.push(pending_ip.clone()) {
+                    Ok(()) => {
+                        self.pending_packets.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        trace!("sent pending packet");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Then, check in port within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
                 }
             }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // read packet - expecting UTF-8 string
-                    //TODO optimize - go through these lines and check for clones
-                    let mut text = String::from_utf8(ip).expect("non utf-8 data");
-                    debug!("got a text to process: {}", text);
+            if let Ok(ip) = self.inn.pop() {
+                // read packet - expecting UTF-8 string
+                let mut text = String::from_utf8(ip).expect("non utf-8 data");
+                debug!("got a text to process: {}", text);
 
-                    // apply text replacements
-                    //TODO feature - add version using regular expressions
-                    //TODO feature - add search and replacement of \r, \n, \t etc. as well
-                    for replacement in &replacements {
-                        text = text.replace(replacement.0.as_str(), replacement.1.as_str());
-                        //TODO optimize - better &String or String.as_str() ?
+                // apply text replacements
+                for replacement in &self.replacements {
+                    text = text.replace(replacement.0.as_str(), replacement.1.as_str());
+                }
+
+                // Try to send the processed packet
+                debug!("forwarding...");
+                let processed_bytes = text.into_bytes();
+                match self.out.push(processed_bytes.clone()) {
+                    Ok(()) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("done");
                     }
-
-                    // send it
-                    debug!("forwarding...");
-                    //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(text.into_bytes())
-                        .expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+                    Err(PushError::Full(returned_ip)) => {
+                        // Output buffer full, buffer internally for later retry
+                        debug!("output buffer full, buffering packet internally");
+                        self.pending_packets.push_back(returned_ip);
+                        work_units += 1; // We did process the packet, just couldn't forward
+                        context.remaining_budget -= 1;
+                        // Continue processing more packets that might fit
+                    }
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
