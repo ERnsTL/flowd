@@ -1,17 +1,20 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 //use std::net::SocketAddr;
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::net::ToSocketAddrs;
-use std::time::{Duration, Instant};
 use rustls::{RootCertStore, ServerConnection};
-use std::thread::{self};
-use std::io::{BufReader, Read, Write};
 use std::collections::HashMap;
+use std::io::{BufReader, Read, Write};
+use std::net::ToSocketAddrs;
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::thread::{self};
+use std::time::{Duration, Instant};
 
 pub struct TLSClientComponent {
     conf: ProcessEdgeSource,
@@ -25,7 +28,7 @@ pub struct TLSClientComponent {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
-const READ_BUFFER: usize = 65536;   // is allocated once and re-used for each read() call
+const READ_BUFFER: usize = 65536; // is allocated once and re-used for each read() call
 const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
 const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
 const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
@@ -42,11 +45,32 @@ fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
 }
 
 impl Component for TLSClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TLSClientComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -58,7 +82,10 @@ impl Component for TLSClientComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -67,7 +94,10 @@ impl Component for TLSClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
 
         // prepare connection arguments
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
@@ -86,7 +116,7 @@ impl Component for TLSClientComponent {
             "{}:{}",
             url.host_str().expect("failed to parse host from URL"),
             url.port().expect("failed to parse port from URL")
-            );
+        );
         // NOTE: currently no options implemented - following code remains for future use
         //let mut query_pairs = url.query_pairs();
         //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
@@ -102,46 +132,61 @@ impl Component for TLSClientComponent {
 
         // configure
         // certificates
-        let root_store = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.into() };
+        let root_store = RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.into(),
+        };
         let mut config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
             .with_no_client_auth();
         // allow using SSLKEYLOGFILE - TODO what is this?
         config.key_log = Arc::new(rustls::KeyLogFile::new());
         // create connection
-        let server_name2 = url.host_str().expect("failed to parse host from URL").to_owned().try_into().unwrap();
+        let server_name2 = url
+            .host_str()
+            .expect("failed to parse host from URL")
+            .to_owned()
+            .try_into()
+            .unwrap();
         let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name2).unwrap();
         let socket_addr = addr
             .to_socket_addrs()
             .expect("failed to resolve TLS server host")
             .next()
             .expect("TLS server host resolved to no address");
-        let mut sock =
-            TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server - timeout");
-        sock.set_read_timeout(READ_TIMEOUT).expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
-        sock.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on TCP client");
+        let mut sock = TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT)
+            .expect("failed to connect to TCP server - timeout");
+        sock.set_read_timeout(READ_TIMEOUT)
+            .expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
+        sock.set_write_timeout(WRITE_TIMEOUT)
+            .expect("failed to set write timeout on TCP client");
         let mut client = rustls::Stream::new(&mut conn, &mut sock);
 
         // main loop
         //let mut bytes_in;
         let mut buf = [0; READ_BUFFER]; //TODO make configurable    //TODO optimize - change to BufReader, which can read all available bytes at once and we can send 1 consolidated IP with all bytes availble on the socket
-        'mainloop:
-        loop {
+        'mainloop: loop {
             trace!("begin of iteration");
 
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -157,7 +202,9 @@ impl Component for TLSClientComponent {
             */
             while !inn.is_empty() {
                 debug!("got {} packets, sending into socket...", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
 
                 for ip in chunk.into_iter() {
                     //TODO handle WouldBlock error, which is not an actual error
@@ -171,27 +218,29 @@ impl Component for TLSClientComponent {
             // receive = read until no more bytes are available
             //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
             //TODO optimize read or read_buf()? what is this BorrowedCursor, does it allow to use one big buffer and fill that one up as far as possible = read more using one read syscall?
-            loop {  //TODO do as a while loop with a break on WouldBlock
+            loop {
+                //TODO do as a while loop with a break on WouldBlock
                 match client.read(&mut buf) {
                     Ok(bytes_in) => {
                         //TODO optimize allocation of bytes_in - because of this match, we cannot assign to a re-used mut bytes_in directly, but use the returned variable from read()
                         if bytes_in > 0 {
                             debug!("got bytes from socket, repeating...");
                             //TODO optimize - write chunk?
-                            out.push(Vec::from(&buf[0..bytes_in])).expect("could not push into OUT");
+                            out.push(Vec::from(&buf[0..bytes_in]))
+                                .expect("could not push into OUT");
                             out_wakeup.unpark();
                             debug!("done");
                         } else {
                             // nothing to be done here - this is OK and we have read all available bytes for now
                             break;
                         }
-                    },
+                    }
                     Err(e) => {
                         match e.kind() {
                             std::io::ErrorKind::WouldBlock => {
                                 // nothing to be done - this is OK and prevents busy-waiting
                                 break;
-                            },
+                            }
                             _ => {
                                 //TODO handle disconnection etc. - initiate reconnection
                                 error!("failed to read from TCP client: {} - exiting", e);
@@ -218,7 +267,10 @@ impl Component for TLSClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TLSClient"),
             description: String::from("Sends and receives bytes, transformed into IPs, via a TLS+TCP connection."),
@@ -275,13 +327,42 @@ pub struct TLSServerComponent {
 }
 
 impl Component for TLSServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TLSServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            cert: inports.remove("CERT").expect("found no CERT inport").pop().unwrap(),
-            key: inports.remove("KEY").expect("found no KEY inport").pop().unwrap(),
-            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            cert: inports
+                .remove("CERT")
+                .expect("found no CERT inport")
+                .pop()
+                .unwrap(),
+            key: inports
+                .remove("KEY")
+                .expect("found no KEY inport")
+                .pop()
+                .unwrap(),
+            resp: inports
+                .remove("RESP")
+                .expect("found no RESP inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -303,7 +384,10 @@ impl Component for TLSServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CONF, exiting");
                     return;
@@ -311,14 +395,18 @@ impl Component for TLSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
         //TODO optimize string conversions to on an address
         let config = conf.pop().expect("not empty but still got an error on pop");
-        let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
+        let listen_addr =
+            std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
         trace!("got listen address {}", listen_addr);
 
         // get certificate
@@ -328,7 +416,10 @@ impl Component for TLSServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CERT, exiting");
                     return;
@@ -336,12 +427,17 @@ impl Component for TLSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
-        let cert_vec = cert_in.pop().expect("not empty but still got an error on pop");
+        let cert_vec = cert_in
+            .pop()
+            .expect("not empty but still got an error on pop");
         //let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
         //trace!("got listen address {}", listen_addr);
 
@@ -352,7 +448,10 @@ impl Component for TLSServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for KEY, exiting");
                     return;
@@ -360,42 +459,60 @@ impl Component for TLSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
-        let key_vec = key_in.pop().expect("not empty but still got an error on pop");
+        let key_vec = key_in
+            .pop()
+            .expect("not empty but still got an error on pop");
         //let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
         //trace!("got listen address {}", listen_addr);
 
         // set configuration
         // parse certificates
-        let certs = rustls_pemfile::certs(&mut BufReader::new(&cert_vec[..])).collect::<Result<Vec<_>, _>>().expect("failed to parse certificate");
+        let certs = rustls_pemfile::certs(&mut BufReader::new(&cert_vec[..]))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("failed to parse certificate");
         // parse private key
-        let private_key = rustls_pemfile::private_key(&mut BufReader::new(&key_vec[..])).unwrap().expect("failed to parse private key");
+        let private_key = rustls_pemfile::private_key(&mut BufReader::new(&key_vec[..]))
+            .unwrap()
+            .expect("failed to parse private key");
         // put both into configuration
-        let config = Arc::new(rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, private_key)
-            .expect("failed to build server config"));
+        let config = Arc::new(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, private_key)
+                .expect("failed to build server config"),
+        );
         // repare listener
         let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
-        listener.set_nonblocking(true).expect("failed to set non-blocking on tcp listener socket");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set non-blocking on tcp listener socket");
         // prepare FBP ports
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // prepare variables for listen thread
-        let sockets: Arc<Mutex<HashMap<u32, (TcpStream, Arc<Mutex<ServerConnection>>)>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sockets: Arc<Mutex<HashMap<u32, (TcpStream, Arc<Mutex<ServerConnection>>)>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let sockets_ref = Arc::clone(&sockets);
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = out_wakeup.clone();
         let config_ref = config.clone();
         let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let connection_threads_ref = connection_threads.clone();
         let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             // listener loop
@@ -509,7 +626,10 @@ impl Component for TLSServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
                 if ip == b"stop" {
                     info!("got stop signal, exiting");
@@ -518,7 +638,10 @@ impl Component for TLSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -536,11 +659,13 @@ impl Component for TLSServerComponent {
                     //TODO optimize - due to the locking, we are not able to send while the the connection handler thread above is blocking on its read() and until the read timeout has passed
                     {
                         let mut sockets_locked = sockets.lock().expect("lock poisoned");
-                        if let Some((_, (first_socket, conn2client_arc))) = sockets_locked.iter_mut().next() {
+                        if let Some((_, (first_socket, conn2client_arc))) =
+                            sockets_locked.iter_mut().next()
+                        {
                             let conn2client = conn2client_arc.clone();
                             let mut conn_locked = conn2client.lock().expect("lock poisoned");
                             let mut conn_writer = conn_locked.writer();
-                            conn_writer.write(&ip).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
+                            conn_writer.write(&ip).expect("could not send data from FBP network into client socket connection"); //TODO harden write_timeout() //TODO optimize
                             conn_locked.complete_io(first_socket).expect("could not complete IO on client socket connection = send data via TLS and underlying TCP connection to client");
                         } else {
                             debug!("no connected clients, dropping response packet");
@@ -605,7 +730,10 @@ impl Component for TLSServerComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TLSServer"),
             description: String::from("TLS over TCP server"),

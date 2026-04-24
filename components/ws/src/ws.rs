@@ -1,16 +1,19 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 //use tungstenite::client::connect;
-use tungstenite::protocol::Message;
-use tungstenite::util::NonBlockingError;
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread::{self};
-use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use tungstenite::protocol::Message;
+use tungstenite::util::NonBlockingError;
 use tungstenite::WebSocket;
 
 pub struct WSClientComponent {
@@ -41,11 +44,32 @@ fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
 }
 
 impl Component for WSClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         WSClientComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -57,7 +81,10 @@ impl Component for WSClientComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -66,7 +93,10 @@ impl Component for WSClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
 
         // prepare connection arguments
         // NOTE: currently no options implemented
@@ -126,16 +156,23 @@ impl Component for WSClientComponent {
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -151,7 +188,9 @@ impl Component for WSClientComponent {
             */
             while !inn.is_empty() {
                 debug!("got {} packets, sending into WebSocket...", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
 
                 for ip in chunk.into_iter() {
                     //TODO add support for Text messages
@@ -217,7 +256,10 @@ impl Component for WSClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("WSClient"),
             description: String::from("Sends and receives messages, transformed into IPs, via a WebSocket connection."),
@@ -284,13 +326,33 @@ pub struct WSServerComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-
 impl Component for WSServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         WSServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            resp: inports
+                .remove("RESP")
+                .expect("found no RESP inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -308,7 +370,10 @@ impl Component for WSServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CONF, exiting");
                     return;
@@ -316,31 +381,42 @@ impl Component for WSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
         //TODO optimize string conversions to on an address
         let config = conf.pop().expect("not empty but still got an error on pop");
-        let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
+        let listen_addr =
+            std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
         trace!("got listen address {}", listen_addr);
 
         // set configuration
         let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
-        listener.set_nonblocking(true).expect("failed to set non-blocking on tcp listener socket");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set non-blocking on tcp listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // prepare variables for listen thread
-        let sockets: Arc<Mutex<HashMap<u32, WebSocket<TcpStream>>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sockets: Arc<Mutex<HashMap<u32, WebSocket<TcpStream>>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let sockets_ref = sockets.clone();
         let out_ref = out.clone();
         let out_wakeup_ref = out_wakeup.clone();
         let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let connection_threads_ref = connection_threads.clone();
         let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             // listener loop
@@ -442,7 +518,10 @@ impl Component for WSServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
                 if ip == b"stop" {
                     info!("got stop signal, exiting");
@@ -451,7 +530,10 @@ impl Component for WSServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -465,9 +547,11 @@ impl Component for WSServerComponent {
                     {
                         //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
                         //TODO optimize - lots of locking and indirection here
-                        if let Some((_, socket)) = sockets.lock().expect("lock poisoned").iter_mut().next() {
-                            socket.write(Message::binary(ip)).expect("could not send data from FBP network into client socket connection");   //TODO harden write_timeout() //TODO optimize
-                            //TODO optimize - flush only when necessary. read chunks from FBP network and flush when all IPs in the chunk are sent
+                        if let Some((_, socket)) =
+                            sockets.lock().expect("lock poisoned").iter_mut().next()
+                        {
+                            socket.write(Message::binary(ip)).expect("could not send data from FBP network into client socket connection"); //TODO harden write_timeout() //TODO optimize
+                                                                                                                                            //TODO optimize - flush only when necessary. read chunks from FBP network and flush when all IPs in the chunk are sent
                             socket.flush().expect("failed to flush WebSocket to client");
                         } else {
                             debug!("no connected clients, dropping response packet");
@@ -519,7 +603,10 @@ impl Component for WSServerComponent {
             }
             if handle.is_finished() {
                 if let Err(err) = handle.join() {
-                    warn!("failed to join websocket connection handler thread: {:?}", err);
+                    warn!(
+                        "failed to join websocket connection handler thread: {:?}",
+                        err
+                    );
                 }
             } else {
                 warn!(
@@ -532,7 +619,10 @@ impl Component for WSServerComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("WSServer"),
             description: String::from("WebSocket server"),
@@ -545,9 +635,11 @@ impl Component for WSServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("configuration value, currently the IP and port to listen on"),
+                    description: String::from(
+                        "configuration value, currently the IP and port to listen on",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("localhost:1234")
+                    value_default: String::from("localhost:1234"),
                 },
                 ComponentPort {
                     name: String::from("RESP"),
@@ -555,23 +647,23 @@ impl Component for WSServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("response data from downstream process for each connection"),
+                    description: String::from(
+                        "response data from downstream process for each connection",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("signal and content data from the client connections"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("signal and content data from the client connections"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }

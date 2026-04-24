@@ -1,15 +1,18 @@
-#![feature(addr_parse_ascii)]   // for TCPClientComponent -> SocketAddr::parse_ascii()
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+#![feature(addr_parse_ascii)] // for TCPClientComponent -> SocketAddr::parse_ascii()
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self};
-use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 pub struct TCPClientComponent {
     conf: ProcessEdgeSource,
@@ -40,11 +43,32 @@ fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
 }
 
 impl Component for TCPClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TCPClientComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -56,13 +80,19 @@ impl Component for TCPClientComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IP...");
         while conf.is_empty() {
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
+                );
                 if sig == b"stop" {
                     info!("got stop signal while waiting for TCP config, exiting");
                     return;
@@ -70,23 +100,33 @@ impl Component for TCPClientComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                    );
                 }
             }
             thread::yield_now();
         }
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         trace!("got config IP");
 
         // prepare connection arguments
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         // socket address
-        let addr = SocketAddr::parse_ascii(format!("{}:{}",
-            url.host_str().expect("failed to parse host from URL"),
-            url.port().expect("failed to parse port from URL"))
-            .as_bytes()
-            ).expect("failed to parse socket address from URL");
+        let addr = SocketAddr::parse_ascii(
+            format!(
+                "{}:{}",
+                url.host_str().expect("failed to parse host from URL"),
+                url.port().expect("failed to parse port from URL")
+            )
+            .as_bytes(),
+        )
+        .expect("failed to parse socket address from URL");
         // NOTE: currently no options implemented - following code remains for future use
         //let mut query_pairs = url.query_pairs();
         //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
@@ -101,9 +141,14 @@ impl Component for TCPClientComponent {
         */
 
         // configure
-        let mut client = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).expect("failed to connect to TCP server");
-        client.set_read_timeout(READ_TIMEOUT).expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
-        client.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on TCP client");
+        let mut client = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+            .expect("failed to connect to TCP server");
+        client
+            .set_read_timeout(READ_TIMEOUT)
+            .expect("failed to set read timeout on TCP client"); //TODO optimize this Some() wrapping
+        client
+            .set_write_timeout(WRITE_TIMEOUT)
+            .expect("failed to set write timeout on TCP client");
         debug!("connected to {}", addr);
 
         // main loop
@@ -115,16 +160,23 @@ impl Component for TCPClientComponent {
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -140,7 +192,9 @@ impl Component for TCPClientComponent {
             */
             while !inn.is_empty() {
                 debug!("got {} packets, sending into socket...", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
 
                 for ip in chunk.into_iter() {
                     //TODO handle WouldBlock error, which is not an actual error
@@ -159,16 +213,17 @@ impl Component for TCPClientComponent {
                     //TODO optimize allocation of bytes_in - because of this match, we cannot assign to a re-used mut bytes_in directly, but use the returned variable from read()
                     if bytes_in > 0 {
                         debug!("got bytes from socket, repeating...");
-                        out.push(Vec::from(&buf[0..bytes_in])).expect("could not push into OUT");
+                        out.push(Vec::from(&buf[0..bytes_in]))
+                            .expect("could not push into OUT");
                         out_wakeup.unpark();
                         debug!("done");
                     }
-                },
+                }
                 Err(e) => {
                     match e.kind() {
                         std::io::ErrorKind::WouldBlock => {
                             // nothing to be done - this is OK and prevents busy-waiting
-                        },
+                        }
                         _ => {
                             //TODO handle disconnection etc. - initiate reconnection
                             error!("failed to read from TCP client: {} - exiting", e);
@@ -194,7 +249,10 @@ impl Component for TCPClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TCPClient"),
             description: String::from("Sends and receives bytes, transformed into IPs, via a TCP connection."),
@@ -249,11 +307,32 @@ pub struct TCPServerComponent {
 }
 
 impl Component for TCPServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TCPServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            resp: inports
+                .remove("RESP")
+                .expect("found no RESP inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -271,7 +350,10 @@ impl Component for TCPServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CONF, exiting");
                     return;
@@ -279,22 +361,31 @@ impl Component for TCPServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
         //TODO optimize string conversions to on an address
         let config = conf.pop().expect("not empty but still got an error on pop");
-        let listen_addr = std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
+        let listen_addr =
+            std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
         trace!("got listen address {}", listen_addr);
 
         // set configuration
         let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
-        listener.set_nonblocking(true).expect("failed to set non-blocking on tcp listener socket");
+        listener
+            .set_nonblocking(true)
+            .expect("failed to set non-blocking on tcp listener socket");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         let shutdown = Arc::new(AtomicBool::new(false));
 
         // prepare variables for listen thread
@@ -303,7 +394,8 @@ impl Component for TCPServerComponent {
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = out_wakeup.clone();
         let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let connection_threads_ref = connection_threads.clone();
         let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             // listener loop
@@ -392,7 +484,10 @@ impl Component for TCPServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
                 if ip == b"stop" {
                     info!("got stop signal, exiting");
@@ -401,14 +496,18 @@ impl Component for TCPServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
             // check in port
             //TODO while !inn.is_empty() {
             loop {
-                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                if let Ok(ip) = resp.pop() {
+                    //TODO normally the IP should be immutable and forwarded as-is into the component library
                     // output the packet data with newline
                     debug!("got a packet, writing into client socket...");
 
@@ -427,7 +526,9 @@ impl Component for TCPServerComponent {
                                     ErrorKind::WouldBlock | ErrorKind::TimedOut => {
                                         warn!("tcpserver: timed out writing response to client {}, dropping packet", socket_id);
                                     }
-                                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
+                                    ErrorKind::BrokenPipe
+                                    | ErrorKind::ConnectionReset
+                                    | ErrorKind::NotConnected => {
                                         warn!("tcpserver: dropping disconnected client {} after write error: {}", socket_id, err);
                                         let _ = sockets_locked.remove(&socket_id);
                                     }
@@ -500,7 +601,10 @@ impl Component for TCPServerComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TCPServer"),
             description: String::from("TCP server"),
@@ -513,9 +617,11 @@ impl Component for TCPServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("configuration value, currently the IP and port to listen on"),
+                    description: String::from(
+                        "configuration value, currently the IP and port to listen on",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("localhost:1234")
+                    value_default: String::from("localhost:1234"),
                 },
                 ComponentPort {
                     name: String::from("RESP"),
@@ -523,23 +629,23 @@ impl Component for TCPServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("response data from downstream process for each connection"),
+                    description: String::from(
+                        "response data from downstream process for each connection",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("signal and content data from the client connections"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("signal and content data from the client connections"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }

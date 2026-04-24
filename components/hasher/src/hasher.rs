@@ -1,4 +1,7 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, info, trace};
 
 // component-specific
@@ -14,10 +17,27 @@ pub struct HasherComponent {
 }
 
 impl Component for HasherComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         HasherComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -28,7 +48,10 @@ impl Component for HasherComponent {
         debug!("Hasher is now run()ning!");
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         //TODO support for multiple hashing algorithms, needs OPTS inport
         //  fnv = good for small inputs (a few bytes) otherwise xx is better for large inputs, siphash (default Rust) is mediocrebust stable overall
         //  comparison:  https://cglab.ca/~abeinges/blah/hash-rs/ resp. https://github.com/Gankra/hash-rs
@@ -42,9 +65,13 @@ impl Component for HasherComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -85,36 +112,37 @@ impl Component for HasherComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("Hasher"),
-            description: String::from("Hashes each IP from IN port, sendig the hash value to the OUT port."),
+            description: String::from(
+                "Hashes each IP from IN port, sendig the hash value to the OUT port.",
+            ),
             icon: String::from("check"),
             subgraph: false,
-            in_ports: vec![
-                ComponentPort {
-                    name: String::from("IN"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("data to be hashed"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("hash value of the input data"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            in_ports: vec![ComponentPort {
+                name: String::from("IN"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("data to be hashed"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("hash value of the input data"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }

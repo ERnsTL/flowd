@@ -62,7 +62,9 @@ fn run_fan_in_inputs(
 
 fn run_linear_direct(message_count: usize, payload_size: usize) {
     let harness = linear_harness_direct("bench_graph_linear_direct");
-    harness.start().expect("runtime start failed (linear direct)");
+    harness
+        .start()
+        .expect("runtime start failed (linear direct)");
     run_single_inport(&harness, "IN", message_count, payload_size);
     harness.stop().expect("runtime stop failed (linear direct)");
 }
@@ -81,9 +83,13 @@ fn run_linear_persistence(message_count: usize, payload_size: usize) {
 
 fn run_fan_out_direct(message_count: usize, payload_size: usize) {
     let harness = fan_out_harness_direct("bench_graph_fan_out_direct");
-    harness.start().expect("runtime start failed (fan-out direct)");
+    harness
+        .start()
+        .expect("runtime start failed (fan-out direct)");
     run_single_inport(&harness, "IN", message_count, payload_size);
-    harness.stop().expect("runtime stop failed (fan-out direct)");
+    harness
+        .stop()
+        .expect("runtime stop failed (fan-out direct)");
 }
 
 fn run_fan_out_persistence(message_count: usize, payload_size: usize) {
@@ -100,7 +106,9 @@ fn run_fan_out_persistence(message_count: usize, payload_size: usize) {
 
 fn run_fan_in_direct(message_count: usize, payload_size: usize) {
     let harness = fan_in_harness_direct("bench_graph_fan_in_direct");
-    harness.start().expect("runtime start failed (fan-in direct)");
+    harness
+        .start()
+        .expect("runtime start failed (fan-in direct)");
     run_fan_in_inputs(&harness, message_count, payload_size);
     harness.stop().expect("runtime stop failed (fan-in direct)");
 }
@@ -119,7 +127,9 @@ fn run_fan_in_persistence(message_count: usize, payload_size: usize) {
 
 fn run_io_sim_direct(message_count: usize, payload_size: usize) {
     let harness = io_sim_harness_direct("bench_graph_io_sim_direct");
-    harness.start().expect("runtime start failed (io-sim direct)");
+    harness
+        .start()
+        .expect("runtime start failed (io-sim direct)");
     run_single_inport(&harness, "IN", message_count, payload_size);
     harness.stop().expect("runtime stop failed (io-sim direct)");
 }
@@ -141,9 +151,12 @@ fn benchmark_runtime_pipeline_throughput(c: &mut Criterion) {
     group.sample_size(20);
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
-    group.bench_function(BenchmarkId::new("linear_persistence", STANDARD_MESSAGES), |b| {
-        b.iter(|| run_linear_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
-    });
+    group.bench_function(
+        BenchmarkId::new("linear_persistence", STANDARD_MESSAGES),
+        |b| {
+            b.iter(|| run_linear_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
+        },
+    );
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
     group.bench_function(BenchmarkId::new("linear_direct", STANDARD_MESSAGES), |b| {
@@ -151,9 +164,12 @@ fn benchmark_runtime_pipeline_throughput(c: &mut Criterion) {
     });
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
-    group.bench_function(BenchmarkId::new("fan_out_persistence", STANDARD_MESSAGES), |b| {
-        b.iter(|| run_fan_out_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
-    });
+    group.bench_function(
+        BenchmarkId::new("fan_out_persistence", STANDARD_MESSAGES),
+        |b| {
+            b.iter(|| run_fan_out_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
+        },
+    );
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
     group.bench_function(BenchmarkId::new("fan_out_direct", STANDARD_MESSAGES), |b| {
@@ -161,9 +177,12 @@ fn benchmark_runtime_pipeline_throughput(c: &mut Criterion) {
     });
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
-    group.bench_function(BenchmarkId::new("fan_in_persistence", STANDARD_MESSAGES), |b| {
-        b.iter(|| run_fan_in_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
-    });
+    group.bench_function(
+        BenchmarkId::new("fan_in_persistence", STANDARD_MESSAGES),
+        |b| {
+            b.iter(|| run_fan_in_persistence(STANDARD_MESSAGES, PAYLOAD_SIZE_BYTES));
+        },
+    );
 
     group.throughput(Throughput::Elements(STANDARD_MESSAGES as u64));
     group.bench_function(BenchmarkId::new("fan_in_direct", STANDARD_MESSAGES), |b| {
@@ -171,9 +190,12 @@ fn benchmark_runtime_pipeline_throughput(c: &mut Criterion) {
     });
 
     group.throughput(Throughput::Elements(IO_SIM_MESSAGES as u64));
-    group.bench_function(BenchmarkId::new("io_sim_persistence", IO_SIM_MESSAGES), |b| {
-        b.iter(|| run_io_sim_persistence(IO_SIM_MESSAGES, PAYLOAD_SIZE_BYTES));
-    });
+    group.bench_function(
+        BenchmarkId::new("io_sim_persistence", IO_SIM_MESSAGES),
+        |b| {
+            b.iter(|| run_io_sim_persistence(IO_SIM_MESSAGES, PAYLOAD_SIZE_BYTES));
+        },
+    );
 
     group.throughput(Throughput::Elements(IO_SIM_MESSAGES as u64));
     group.bench_function(BenchmarkId::new("io_sim_direct", IO_SIM_MESSAGES), |b| {

@@ -1,9 +1,12 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
-use std::io::prelude::*;
 use brotli::{CompressorWriter, DecompressorWriter};
+use std::io::prelude::*;
 
 pub struct BrotliCompressComponent {
     //conf: ProcessEdgeSource,
@@ -15,15 +18,32 @@ pub struct BrotliCompressComponent {
 }
 
 const BROTLI_BUFFER_SIZE: usize = 4096;
-const BROTLI_QUALITY: u32 = 9;   // 0 to 11 for Rust implementation, C implementation has 0 to 9
-const BROTLI_LG_WINDOW_SIZE: u32 = 22;   // 20 to 22
+const BROTLI_QUALITY: u32 = 9; // 0 to 11 for Rust implementation, C implementation has 0 to 9
+const BROTLI_LG_WINDOW_SIZE: u32 = 22; // 20 to 22
 
 impl Component for BrotliCompressComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         BrotliCompressComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -35,7 +55,10 @@ impl Component for BrotliCompressComponent {
         //let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         //trace!("read config IPs");
@@ -54,16 +77,23 @@ impl Component for BrotliCompressComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -78,16 +108,18 @@ impl Component for BrotliCompressComponent {
                     //TODO optimize - currently, every packet is processed with a new Encoder instance
                     //TODO support for chunks via open bracket, closing bracket
                     let mut vec_out = Vec::new();
-                    let mut writer = CompressorWriter::new
-                        (&mut vec_out,
+                    let mut writer = CompressorWriter::new(
+                        &mut vec_out,
                         BROTLI_BUFFER_SIZE,
                         BROTLI_QUALITY,
-                        BROTLI_LG_WINDOW_SIZE
+                        BROTLI_LG_WINDOW_SIZE,
                     );
                     writer.write(&ip).expect("failed to write into compressor");
                     // TODO optimize - is the flush necessary or does it do that automatically on drop?
-                    writer.flush().expect("failed to flush compressor into output buffer");
-                    drop(writer);   // so that the vec_out becomes borrow-free
+                    writer
+                        .flush()
+                        .expect("failed to flush compressor into output buffer");
+                    drop(writer); // so that the vec_out becomes borrow-free
 
                     // send it
                     debug!("sending...");
@@ -113,7 +145,10 @@ impl Component for BrotliCompressComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("BrotliCompress"),
             description: String::from("Reads data IPs, compresses each using Brotli and sends the compressed data to the OUT port."),
@@ -170,11 +205,28 @@ pub struct BrotliDecompressComponent {
 }
 
 impl Component for BrotliDecompressComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         BrotliDecompressComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -186,7 +238,10 @@ impl Component for BrotliDecompressComponent {
         //let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         //trace!("read config IPs");
@@ -205,16 +260,23 @@ impl Component for BrotliDecompressComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -229,14 +291,15 @@ impl Component for BrotliDecompressComponent {
                     //TODO optimize - currently, every packet is processed with a new Decoder instance
                     //TODO support for chunks via open bracket, closing bracket
                     let mut vec_out = Vec::new();
-                    let mut writer = DecompressorWriter::new(
-                        &mut vec_out,
-                        BROTLI_BUFFER_SIZE
-                        );
-                    writer.write(&ip).expect("failed to write into decompressor");
+                    let mut writer = DecompressorWriter::new(&mut vec_out, BROTLI_BUFFER_SIZE);
+                    writer
+                        .write(&ip)
+                        .expect("failed to write into decompressor");
                     //TODO is that flush necessary or will it do that automatically during drop?
-                    writer.flush().expect("failed to flush decompressor into output buffer");
-                    drop(writer);   // so that vec_out output buffer becomes un-borrowed and can be sent
+                    writer
+                        .flush()
+                        .expect("failed to flush decompressor into output buffer");
+                    drop(writer); // so that vec_out output buffer becomes un-borrowed and can be sent
 
                     // send it
                     debug!("sending...");
@@ -262,7 +325,10 @@ impl Component for BrotliDecompressComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("BrotliDecompress"),
             description: String::from("Reads IPs, applies Brotli decompression and forwards the decompressed data to OUT port."),

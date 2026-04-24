@@ -1,15 +1,21 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{
+    Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer,
+    StatusCode,
+};
 use std::convert::Infallible;
 use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self};
 use std::time::{Duration, Instant};
-use hyper::{Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer, StatusCode};
-use hyper::service::{make_service_fn, service_fn};
 use tokio::sync::oneshot;
 
 const SERVER_JOIN_GRACE: Duration = Duration::from_secs(5);
@@ -37,11 +43,32 @@ pub struct HTTPClientComponent {
 }
 
 impl Component for HTTPClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         HTTPClientComponent {
-            req: inports.remove("REQ").expect("found no REQ inport").pop().unwrap(),
-            out_resp: outports.remove("RESP").expect("found no RESP outport").pop().unwrap(),
-            out_err: outports.remove("ERR").expect("found no ERR outport").pop().unwrap(),
+            req: inports
+                .remove("REQ")
+                .expect("found no REQ inport")
+                .pop()
+                .unwrap(),
+            out_resp: outports
+                .remove("RESP")
+                .expect("found no RESP outport")
+                .pop()
+                .unwrap(),
+            out_err: outports
+                .remove("ERR")
+                .expect("found no ERR outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -52,9 +79,15 @@ impl Component for HTTPClientComponent {
         debug!("HTTPClient is now run()ning!");
         let mut requests = self.req;
         let mut out_resp = self.out_resp.sink;
-        let out_resp_wakeup = self.out_resp.wakeup.expect("got no wakeup handle for outport RESP");
+        let out_resp_wakeup = self
+            .out_resp
+            .wakeup
+            .expect("got no wakeup handle for outport RESP");
         let mut out_err = self.out_err.sink;
-        let out_err_wakeup = self.out_err.wakeup.expect("got no wakeup handle for outport ERR");
+        let out_err_wakeup = self
+            .out_err
+            .wakeup
+            .expect("got no wakeup handle for outport ERR");
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(HTTP_CONNECT_TIMEOUT)
             .timeout(HTTP_REQUEST_TIMEOUT)
@@ -66,16 +99,23 @@ impl Component for HTTPClientComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             // check in port
@@ -98,14 +138,20 @@ impl Component for HTTPClientComponent {
                             // send it
                             //TODO forward response headers? useful?
                             debug!("forwarding HTTP results...");
-                            let body = resp.bytes().expect("should have been able to read the HTTP response");
-                            out_resp.push(body.to_vec()).expect("could not push into RESP");  //TODO optimize conversion
+                            let body = resp
+                                .bytes()
+                                .expect("should have been able to read the HTTP response");
+                            out_resp
+                                .push(body.to_vec())
+                                .expect("could not push into RESP"); //TODO optimize conversion
                             out_resp_wakeup.unpark();
-                        },
+                        }
                         Err(err) => {
                             // send error
                             debug!("got HTTP error, sending...");
-                            out_err.push(err.to_string().into()).expect("could not push into RESP");   //TODO optimize conversion
+                            out_err
+                                .push(err.to_string().into())
+                                .expect("could not push into RESP"); //TODO optimize conversion
                             out_err_wakeup.unpark();
                         }
                     };
@@ -131,24 +177,25 @@ impl Component for HTTPClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("HTTPClient"),
-            description: String::from("Reads URLs and sends the response body out via RESP or ERR"),   //TODO change according to new features
+            description: String::from("Reads URLs and sends the response body out via RESP or ERR"), //TODO change according to new features
             icon: String::from("web"),
             subgraph: false,
-            in_ports: vec![
-                ComponentPort {
-                    name: String::from("REQ"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("URLs, one per IP"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            in_ports: vec![ComponentPort {
+                name: String::from("REQ"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("URLs, one per IP"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             out_ports: vec![
                 ComponentPort {
                     name: String::from("RESP"),
@@ -158,7 +205,7 @@ impl Component for HTTPClientComponent {
                     is_arrayport: false,
                     description: String::from("response body if response is non-error"),
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from(""),
                 },
                 ComponentPort {
                     name: String::from("ERR"),
@@ -166,9 +213,9 @@ impl Component for HTTPClientComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("error responses in human-readable error format"),    //TODO some machine-readable format better?
+                    description: String::from("error responses in human-readable error format"), //TODO some machine-readable format better?
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from(""),
                 },
             ],
             ..Default::default()
@@ -187,11 +234,32 @@ pub struct HTTPServerComponent {
 }
 
 impl Component for HTTPServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         HTTPServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            routes: inports.remove("ROUTES").expect("found no ROUTES inport").pop().unwrap(),
-            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            routes: inports
+                .remove("ROUTES")
+                .expect("found no ROUTES inport")
+                .pop()
+                .unwrap(),
+            resp: inports
+                .remove("RESP")
+                .expect("found no RESP inport")
+                .pop()
+                .unwrap(),
             req: outports.remove("REQ").expect("found no OUT outport"),
             signals_in: signals_in,
             signals_out: signals_out,
@@ -209,7 +277,10 @@ impl Component for HTTPServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CONF, exiting");
                     return;
@@ -217,7 +288,10 @@ impl Component for HTTPServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
@@ -228,7 +302,10 @@ impl Component for HTTPServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for ROUTES, exiting");
                     return;
@@ -236,17 +313,31 @@ impl Component for HTTPServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
         }
         //TODO optimize string conversions to listen on a path
-        let config = self.conf.pop().expect("not empty but still got an error on pop");
-        let listenaddress = std::str::from_utf8(&config).expect("could not parse listenpath as utf8").to_owned();   //TODO optimize
+        let config = self
+            .conf
+            .pop()
+            .expect("not empty but still got an error on pop");
+        let listenaddress = std::str::from_utf8(&config)
+            .expect("could not parse listenpath as utf8")
+            .to_owned(); //TODO optimize
         trace!("got listen address {}", listenaddress);
-        let routes_bytes = self.routes.pop().expect("not empty but still got an error on pop");
-        let routes_str = std::str::from_utf8(&routes_bytes).expect("could not parse routes as utf8").split(",").collect::<Vec<_>>();   //TODO optimize
+        let routes_bytes = self
+            .routes
+            .pop()
+            .expect("not empty but still got an error on pop");
+        let routes_str = std::str::from_utf8(&routes_bytes)
+            .expect("could not parse routes as utf8")
+            .split(",")
+            .collect::<Vec<_>>(); //TODO optimize
         let routes = routes_str.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 
         // set up work inports and outports
@@ -262,7 +353,12 @@ impl Component for HTTPServerComponent {
         let routes_for_server = routes.clone();
         let shutdown_for_server = server_shutdown.clone();
         let server_thread = thread::Builder::new()
-            .name(format!("{}_handler", thread::current().name().expect("could not get component thread name")))
+            .name(format!(
+                "{}_handler",
+                thread::current()
+                    .name()
+                    .expect("could not get component thread name")
+            ))
             .spawn(move || {
                 let bind_addr = listenaddress
                     .to_socket_addrs()
@@ -281,79 +377,108 @@ impl Component for HTTPServerComponent {
                         let resp = resp_for_server.clone();
                         let shutdown = shutdown_for_server.clone();
                         async move {
-                            Ok::<_, Infallible>(service_fn(move |mut req: HyperRequest<HyperBody>| {
-                                let routes = routes.clone();
-                                let out_req = out_req.clone();
-                                let resp = resp.clone();
-                                let shutdown = shutdown.clone();
-                                async move {
-                                    if shutdown.load(Ordering::Relaxed) {
-                                        let mut response = HyperResponse::new(HyperBody::from("server shutting down"));
-                                        *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
-                                        return Ok::<_, Infallible>(response);
-                                    }
-
-                                    let route_req = req.uri().path().to_owned();
-                                    let mut route_index = usize::MAX;
-                                    for (i, route) in routes.iter().enumerate() {
-                                        if route_req.starts_with(route) {
-                                            route_index = i;
-                                            break;
-                                        }
-                                    }
-                                    if route_index == usize::MAX {
-                                        let mut response = HyperResponse::new(HyperBody::from("no route matched"));
-                                        *response.status_mut() = StatusCode::NOT_FOUND;
-                                        return Ok::<_, Infallible>(response);
-                                    }
-
-                                    let body = match hyper::body::to_bytes(req.body_mut()).await {
-                                        Ok(bytes) => bytes,
-                                        Err(err) => {
-                                            warn!("HTTPServer: failed to read request body: {}", err);
-                                            let mut response = HyperResponse::new(HyperBody::from("failed to read request body"));
-                                            *response.status_mut() = StatusCode::BAD_REQUEST;
-                                            return Ok::<_, Infallible>(response);
-                                        }
-                                    };
-
-                                    let pushed_ok = {
-                                        let mut out_req_locked = out_req.lock().expect("poisoned lock on REQ outport");
-                                        if let Some(out_req_one) = out_req_locked.get_mut(route_index) {
-                                            out_req_one
-                                                .sink
-                                                .push(body.to_vec())
-                                                .expect("could not push IP into FBP network");
-                                            out_req_one
-                                                .wakeup
-                                                .as_ref()
-                                                .expect("got no wakeup handle on REQ outport")
-                                                .unpark();
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    };
-                                    if !pushed_ok {
-                                        let mut response = HyperResponse::new(HyperBody::from("internal route mismatch"));
-                                        *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                                        return Ok::<_, Infallible>(response);
-                                    }
-
-                                    // wait for response from FBP network
-                                    loop {
+                            Ok::<_, Infallible>(service_fn(
+                                move |mut req: HyperRequest<HyperBody>| {
+                                    let routes = routes.clone();
+                                    let out_req = out_req.clone();
+                                    let resp = resp.clone();
+                                    let shutdown = shutdown.clone();
+                                    async move {
                                         if shutdown.load(Ordering::Relaxed) {
-                                            let mut response = HyperResponse::new(HyperBody::from("server shutting down"));
-                                            *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                                            let mut response = HyperResponse::new(HyperBody::from(
+                                                "server shutting down",
+                                            ));
+                                            *response.status_mut() =
+                                                StatusCode::SERVICE_UNAVAILABLE;
                                             return Ok::<_, Infallible>(response);
                                         }
-                                        if let Ok(ip) = resp.lock().expect("poisoned lock on RESP inport").pop() {
-                                            return Ok::<_, Infallible>(HyperResponse::new(HyperBody::from(ip)));
+
+                                        let route_req = req.uri().path().to_owned();
+                                        let mut route_index = usize::MAX;
+                                        for (i, route) in routes.iter().enumerate() {
+                                            if route_req.starts_with(route) {
+                                                route_index = i;
+                                                break;
+                                            }
                                         }
-                                        tokio::task::yield_now().await;
+                                        if route_index == usize::MAX {
+                                            let mut response = HyperResponse::new(HyperBody::from(
+                                                "no route matched",
+                                            ));
+                                            *response.status_mut() = StatusCode::NOT_FOUND;
+                                            return Ok::<_, Infallible>(response);
+                                        }
+
+                                        let body = match hyper::body::to_bytes(req.body_mut()).await
+                                        {
+                                            Ok(bytes) => bytes,
+                                            Err(err) => {
+                                                warn!(
+                                                    "HTTPServer: failed to read request body: {}",
+                                                    err
+                                                );
+                                                let mut response = HyperResponse::new(
+                                                    HyperBody::from("failed to read request body"),
+                                                );
+                                                *response.status_mut() = StatusCode::BAD_REQUEST;
+                                                return Ok::<_, Infallible>(response);
+                                            }
+                                        };
+
+                                        let pushed_ok = {
+                                            let mut out_req_locked = out_req
+                                                .lock()
+                                                .expect("poisoned lock on REQ outport");
+                                            if let Some(out_req_one) =
+                                                out_req_locked.get_mut(route_index)
+                                            {
+                                                out_req_one
+                                                    .sink
+                                                    .push(body.to_vec())
+                                                    .expect("could not push IP into FBP network");
+                                                out_req_one
+                                                    .wakeup
+                                                    .as_ref()
+                                                    .expect("got no wakeup handle on REQ outport")
+                                                    .unpark();
+                                                true
+                                            } else {
+                                                false
+                                            }
+                                        };
+                                        if !pushed_ok {
+                                            let mut response = HyperResponse::new(HyperBody::from(
+                                                "internal route mismatch",
+                                            ));
+                                            *response.status_mut() =
+                                                StatusCode::INTERNAL_SERVER_ERROR;
+                                            return Ok::<_, Infallible>(response);
+                                        }
+
+                                        // wait for response from FBP network
+                                        loop {
+                                            if shutdown.load(Ordering::Relaxed) {
+                                                let mut response = HyperResponse::new(
+                                                    HyperBody::from("server shutting down"),
+                                                );
+                                                *response.status_mut() =
+                                                    StatusCode::SERVICE_UNAVAILABLE;
+                                                return Ok::<_, Infallible>(response);
+                                            }
+                                            if let Ok(ip) = resp
+                                                .lock()
+                                                .expect("poisoned lock on RESP inport")
+                                                .pop()
+                                            {
+                                                return Ok::<_, Infallible>(HyperResponse::new(
+                                                    HyperBody::from(ip),
+                                                ));
+                                            }
+                                            tokio::task::yield_now().await;
+                                        }
                                     }
-                                }
-                            }))
+                                },
+                            ))
                         }
                     });
 
@@ -376,7 +501,10 @@ impl Component for HTTPServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
                 if ip == b"stop" {
                     info!("got stop signal, exiting");
@@ -385,7 +513,10 @@ impl Component for HTTPServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             trace!("end of iteration");
@@ -414,7 +545,10 @@ impl Component for HTTPServerComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("HTTPServer"),
             description: String::from("HTTP server"),

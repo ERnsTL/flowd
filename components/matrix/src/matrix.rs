@@ -1,16 +1,22 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
+    ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
-use std::{thread, thread::Thread};
-use std::future::IntoFuture;
-use std::time::Duration;
 use matrix_sdk::config::SyncSettings;
-use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent};
-use matrix_sdk::{Client, Room, RoomState};
-use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
 use matrix_sdk::event_handler::Ctx;
+use matrix_sdk::ruma::events::room::message::{
+    MessageType, OriginalSyncRoomMessageEvent, RoomMessageEventContent,
+};
+use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomId};
+use matrix_sdk::{Client, Room, RoomState};
+use std::future::IntoFuture;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use std::{thread, thread::Thread};
 
 /*
 TODO add one more filter - some other module is sending debug logging lines
@@ -50,11 +56,32 @@ const MATRIX_CLIENT_INIT_TIMEOUT: Duration = Duration::from_secs(15);
 const MATRIX_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Component for MatrixClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         MatrixClientComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -66,7 +93,10 @@ impl Component for MatrixClientComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -75,7 +105,10 @@ impl Component for MatrixClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
 
         // prepare connection arguments
         // NOTE: the matrix user ID format like "@alice:example.org" does not map well to an URL and it also does not include the password, so we use URL format
@@ -83,12 +116,22 @@ impl Component for MatrixClientComponent {
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         // get configuration values from URL
-        let homeserver = url.host_str().expect("failed to get homeserver from URL hostname");
-        let username = url.username().to_string();  //TODO optimize - using to_string() in order to easily move into spawn closure
-        let password = url.password().expect("failed to get password from URL").to_string();    //TODO optimize - using to_string() in order to easily move into spawn closure
+        let homeserver = url
+            .host_str()
+            .expect("failed to get homeserver from URL hostname");
+        let username = url.username().to_string(); //TODO optimize - using to_string() in order to easily move into spawn closure
+        let password = url
+            .password()
+            .expect("failed to get password from URL")
+            .to_string(); //TODO optimize - using to_string() in order to easily move into spawn closure
         let room_name: Option<String>;
         if !url.path().is_empty() {
-            room_name = Some(url.path().strip_prefix('/').expect("failed to get room name from URL path").to_string());
+            room_name = Some(
+                url.path()
+                    .strip_prefix('/')
+                    .expect("failed to get room name from URL path")
+                    .to_string(),
+            );
         } else {
             room_name = None;
         }
@@ -96,22 +139,30 @@ impl Component for MatrixClientComponent {
         // configure
         // tokio runtime
         let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)  //TODO optimize - still starts additional thread for rt.spawn() thus 2 threads for tokio, seems useless
+            .worker_threads(1) //TODO optimize - still starts additional thread for rt.spawn() thus 2 threads for tokio, seems useless
             .enable_all()
-            .thread_name(format!("{}/EV", thread::current().name().expect("failed to get current thread name")))
+            .thread_name(format!(
+                "{}/EV",
+                thread::current()
+                    .name()
+                    .expect("failed to get current thread name")
+            ))
             .build()
             .expect("failed to build tokio runtime");
         // prepare client
-        let homeserver_url = format!("https://{}/", homeserver);    //TODO optimize - use URL struct? remove username, password and query paramaters?
-        // NOTE: when encryption is enabled, you should use a persistent store to be able to restore the session with a working encryption setup. TODO See the `persist_session` example in the matrix-rust-sdk repo.
-        let client_fut = Client::builder().homeserver_url(homeserver_url).build().into_future();
+        let homeserver_url = format!("https://{}/", homeserver); //TODO optimize - use URL struct? remove username, password and query paramaters?
+                                                                 // NOTE: when encryption is enabled, you should use a persistent store to be able to restore the session with a working encryption setup. TODO See the `persist_session` example in the matrix-rust-sdk repo.
+        let client_fut = Client::builder()
+            .homeserver_url(homeserver_url)
+            .build()
+            .into_future();
         let client = rt
             .block_on(async { tokio::time::timeout(MATRIX_CLIENT_INIT_TIMEOUT, client_fut).await })
             .expect("matrix client init timed out")
             .expect("failed to create client");
         // variables for the client
         let client_ref = client.clone();
-        let out_ref = Arc::new(Mutex::new(out));    //TODO optimize
+        let out_ref = Arc::new(Mutex::new(out)); //TODO optimize
         let out_wakeup_ref = out_wakeup.clone();
         let room_id: Arc<Mutex<Option<OwnedRoomId>>> = Arc::new(Mutex::new(None));
         let room_id_ref = room_id.clone();
@@ -127,7 +178,8 @@ impl Component for MatrixClientComponent {
                 .matrix_auth()
                 .login_username(username.as_str(), password.as_str())
                 .initial_device_display_name("flowd") //TODO add feature to make configurable or use component name
-                .await.expect("failed to login");
+                .await
+                .expect("failed to login");
             debug!("logged in as username={}", username);
 
             // get own user ID to filter out own messages
@@ -137,8 +189,17 @@ impl Component for MatrixClientComponent {
 
             // join given room
             if let Some(room_name) = room_name {
-                let room = client.join_room_by_id(&RoomId::parse(room_name).expect("failed to parse room ID given in config URL path")).await.expect("failed to join given room");
-                debug!("joined given room={}", room.display_name().await.expect("failed to get room name"));
+                let room = client
+                    .join_room_by_id(
+                        &RoomId::parse(room_name)
+                            .expect("failed to parse room ID given in config URL path"),
+                    )
+                    .await
+                    .expect("failed to join given room");
+                debug!(
+                    "joined given room={}",
+                    room.display_name().await.expect("failed to get room name")
+                );
             }
 
             // an initial sync to set up state and so our bot does not respond to old messages
@@ -146,39 +207,51 @@ impl Component for MatrixClientComponent {
 
             // add the bot to be notified of incoming messages
             // NOTE: we do this after the initial sync to avoid responding to messages before the bot was running
-            client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, room: Room, context: Ctx<(Arc<Mutex<ProcessEdgeSinkConnection>>, Thread, Arc<Mutex<Option<OwnedRoomId>>>, Arc<Mutex<Option<OwnedUserId>>>)>| async move {
-                // prepare variables
-                let (out, out_wakeup, room_id, user_id) = context.0;
-                let mut room_id = room_id.lock().expect("lock poisoned");
-                let user_id = user_id.lock().expect("lock poisoned");
-                let user_id = user_id.as_ref().unwrap();  // TODO optimize - unwrap is safe here, but I dont like the unwrap
+            client.add_event_handler(
+                move |event: OriginalSyncRoomMessageEvent,
+                      room: Room,
+                      context: Ctx<(
+                    Arc<Mutex<ProcessEdgeSinkConnection>>,
+                    Thread,
+                    Arc<Mutex<Option<OwnedRoomId>>>,
+                    Arc<Mutex<Option<OwnedUserId>>>,
+                )>| async move {
+                    // prepare variables
+                    let (out, out_wakeup, room_id, user_id) = context.0;
+                    let mut room_id = room_id.lock().expect("lock poisoned");
+                    let user_id = user_id.lock().expect("lock poisoned");
+                    let user_id = user_id.as_ref().unwrap(); // TODO optimize - unwrap is safe here, but I dont like the unwrap
 
-                // check if we are ready
-                if room.state() != RoomState::Joined {
-                    return;
-                }
-                //TODO add support for verification request message type - this is sent when clicking on the "verify session" button in the Element client seems like it just has to be confirmed
-                let MessageType::Text(text_content) = event.content.msgtype else {
-                    debug!("got a message that is not text - discarding");
-                    return;
-                };
-                // check for our own message coming back
-                if event.sender == *user_id {
-                    debug!("got our own message back - discarding");
-                    return;
-                }
+                    // check if we are ready
+                    if room.state() != RoomState::Joined {
+                        return;
+                    }
+                    //TODO add support for verification request message type - this is sent when clicking on the "verify session" button in the Element client seems like it just has to be confirmed
+                    let MessageType::Text(text_content) = event.content.msgtype else {
+                        debug!("got a message that is not text - discarding");
+                        return;
+                    };
+                    // check for our own message coming back
+                    if event.sender == *user_id {
+                        debug!("got our own message back - discarding");
+                        return;
+                    }
 
-                // store room ID for being able to respond in main loop
-                if room_id.is_none() {
-                    *room_id = Some(room.room_id().to_owned());   //TODO optimize conversion
-                }
+                    // store room ID for being able to respond in main loop
+                    if room_id.is_none() {
+                        *room_id = Some(room.room_id().to_owned()); //TODO optimize conversion
+                    }
 
-                // send it
-                debug!("sending...");
-                out.lock().expect("lock poisoned").push(text_content.body.as_bytes().to_vec()).expect("could not push into OUT");
-                out_wakeup.unpark();
-                debug!("done");
-            });
+                    // send it
+                    debug!("sending...");
+                    out.lock()
+                        .expect("lock poisoned")
+                        .push(text_content.body.as_bytes().to_vec())
+                        .expect("could not push into OUT");
+                    out_wakeup.unpark();
+                    debug!("done");
+                },
+            );
 
             // since we called sync_once() before we entered our sync loop we must pass that sync token to sync()
             let settings = SyncSettings::default().token(response.next_batch);
@@ -194,9 +267,13 @@ impl Component for MatrixClientComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     stop_requested = true;
                     break;
@@ -204,7 +281,10 @@ impl Component for MatrixClientComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -214,17 +294,24 @@ impl Component for MatrixClientComponent {
                 if let Ok(ip) = inn.pop() {
                     // prepare packet
                     debug!("got a packet, sending to room...");
-                    let content = RoomMessageEventContent::text_plain(std::str::from_utf8(&ip).expect("failed to convert IP to UTF-8"));
+                    let content = RoomMessageEventContent::text_plain(
+                        std::str::from_utf8(&ip).expect("failed to convert IP to UTF-8"),
+                    );
 
                     // process
                     // nothing to be done
 
                     // send it
                     if let Some(room_id_inner) = room_id.lock().expect("lock poisoned").as_ref() {
-                        let room = client_ref.get_room(&room_id_inner).expect("failed to get room");
+                        let room = client_ref
+                            .get_room(&room_id_inner)
+                            .expect("failed to get room");
                         let send_result = rt.block_on(async {
-                            tokio::time::timeout(MATRIX_SEND_TIMEOUT, room.send(content).into_future())
-                                .await
+                            tokio::time::timeout(
+                                MATRIX_SEND_TIMEOUT,
+                                room.send(content).into_future(),
+                            )
+                            .await
                         });
                         match send_result {
                             Ok(Ok(_)) => debug!("done"),
@@ -259,7 +346,10 @@ impl Component for MatrixClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("MatrixClient"),
             description: String::from("Reads messages from the Telegram Bot API, sends these into the OUT port and sends responses on IN port into the Telegram chats."),

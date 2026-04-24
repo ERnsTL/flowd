@@ -1,5 +1,9 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn, error};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 pub struct CountComponent {
     conf: ProcessEdgeSource,
@@ -8,6 +12,13 @@ pub struct CountComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    mode: Option<Mode>,
+    packets: usize,
+    packetsize: usize,
+    sum: u64,
+    start: Option<chrono::DateTime<chrono::Utc>>,
+    start_1st: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 enum Mode {
@@ -17,162 +28,213 @@ enum Mode {
 }
 
 impl Component for CountComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         CountComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             graph_inout,
+            mode: None,
+            packets: 0,
+            packetsize: 0,
+            sum: 0,
+            start: None,
+            start_1st: None,
         }
     }
 
-    fn run(self) {
-        debug!("Count is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Count is now process()ing!");
 
-        // read configuration
-        trace!("read config IP");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(url_vec) = conf.pop() else { trace!("no config IP received - exiting"); return; };
-        let url_str = "https://makeurlhappy/?".to_owned() + std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        let url = url::Url::parse(url_str.as_str()).expect("failed to parse configuration URL");
-        //let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
-        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
-        // get API key
-        let mode: Mode;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "mode") {
-            match value.to_string().as_str() {   //TODO optimize
-                "packets" => { mode = Mode::Packets; }
-                "size" => { mode = Mode::Size; }
-                "sum" => { mode = Mode::Sum; }
-                _ => { error!("unexpected mode, expected packets|size|sum - exiting"); return; }
+        // Initialize configuration on first call
+        if self.mode.is_none() {
+            trace!("reading config IP");
+            if let Ok(url_vec) = self.conf.pop() {
+                let url_str = "https://makeurlhappy/?".to_owned()
+                    + std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                let url =
+                    url::Url::parse(url_str.as_str()).expect("failed to parse configuration URL");
+
+                if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "mode") {
+                    self.mode = match value.to_string().as_str() {
+                        "packets" => Some(Mode::Packets),
+                        "size" => Some(Mode::Size),
+                        "sum" => Some(Mode::Sum),
+                        _ => {
+                            error!("unexpected mode, expected packets|size|sum - finishing");
+                            return ProcessResult::Finished;
+                        }
+                    };
+                    self.start = Some(chrono::Utc::now());
+                } else {
+                    error!("no mode found in configuration URL - finishing");
+                    return ProcessResult::Finished;
+                }
+            } else {
+                trace!("no config IP received yet - no work");
+                return ProcessResult::NoWork;
             }
-        } else {
-            error!("no mode found in configuration URL - exiting");
-            return;
         }
 
-        // configure
-        // mode already configured
+        let mode = self.mode.as_ref().unwrap();
+        let mut work_units = 0u32;
 
-        // main loop
-        let mut packets: usize = 0;
-        let mut packetsize: usize = 0;
-        let mut sum: u64 = 0; //TODO count u64 or f64?
-        let start = chrono::Utc::now();
-        let mut start_1st = chrono::Utc::now();
-        loop {
-            trace!("begin of iteration");
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
 
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
-                // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+        // check in port within budget
+        if self.packets == 0 && !self.inn.is_empty() {
+            self.start_1st = Some(chrono::Utc::now());
+        }
+
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
+                );
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
 
-            // check in port
-            //TODO add reset port
-            //TODO add triggered report by sending something into REPORT port
-            //TODO add ability to forward as well (output count on separate port?)
-            //TODO add counting of packet sizes, certain metadata etc.
-            if packets == 0 {
-                start_1st = chrono::Utc::now();
-            }
-            while !inn.is_empty() {
-                // drop IP and count it
-                if let Ok(chunk) = inn.read_chunk(inn.slots()) {
-                    //debug!("got {} packets", chunk.len());
-                    //TODO optimize - instead of if on every IP, prepare Fn and apply it without branching
-                    match mode {
-                        Mode::Packets => {
-                            packets += chunk.len();
-                            chunk.commit_all();
-                        }
-                        Mode::Size => {
-                            for ip in chunk.into_iter() {
-                                packetsize += ip.len();
-                            }
-                            // NOTE: no need for commit_all(), because into_iter() does that automatically
-                        },
-                        Mode::Sum => {
-                            for ip in chunk {  //TODO optimize - is into_iter() optimal?
-                                // convert ip value to numeric type and add it
-                                //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse-number-from-u8/104487/8
-                                //TODO optimize - atoi_simd crate
-                                if let Some(value) = atoi::atoi::<u64>(&ip) {
-                                    sum += value;
-                                } else {
-                                    error!("value if IP cannot be summed up: {:?} - skipping", ip);
-                                }
-                            }
-                            // NOTE: no need for commit_all(), because into_iter() does that automatically
-                        },
-                    }
-                    // TODO optimize, when we got a full buffer, we could assume there is more coming and wait a bit longer
-                } else {
-                    break;
-                }
-            }
-
-            // check for EOF on input
-            if inn.is_abandoned() {
-                // send final report
-                info!("EOF on inport, shutting down");
-                let end = chrono::Utc::now();
-
-                info!("total time: {}, since 1st packet: {}", end - start, end - start_1st);
-                let final_count = match mode {
-                    //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
+            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
+                //debug!("got {} packets", chunk.len());
+                //TODO optimize - instead of if on every IP, prepare Fn and apply it without branching
+                match mode {
                     Mode::Packets => {
-                        let count = format!("{}", packets);
-                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
-                        count
-                    },
+                        self.packets += chunk.len();
+                        chunk.commit_all();
+                    }
                     Mode::Size => {
-                        let count = format!("{}", packetsize);
-                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
-                        count
-                    },
+                        for ip in chunk.into_iter() {
+                            self.packetsize += ip.len();
+                        }
+                        // NOTE: no need for commit_all(), because into_iter() does that automatically
+                    }
                     Mode::Sum => {
-                        let count = format!("{}", sum);
-                        out.push(count.clone().into_bytes()).expect("could not push into OUT");
-                        count
-                    },
-                };
-
-                // Send network output with the final count
-                flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count);
-
-                drop(out);
-                out_wakeup.unpark();
+                        for ip in chunk {
+                            //TODO optimize - is into_iter() optimal?
+                            // convert ip value to numeric type and add it
+                            //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse-number-from-u8/104487/8
+                            //TODO optimize - atoi_simd crate
+                            if let Some(value) = atoi::atoi::<u64>(&ip) {
+                                self.sum += value;
+                            } else {
+                                error!("value if IP cannot be summed up: {:?} - skipping", ip);
+                            }
+                        }
+                        // NOTE: no need for commit_all(), because into_iter() does that automatically
+                    }
+                }
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // check for EOF on input
+        if self.inn.is_abandoned() {
+            // send final report
+            info!("EOF on inport, finishing");
+            let end = chrono::Utc::now();
+            let start = self.start.unwrap();
+            let start_1st = self.start_1st.unwrap_or(start);
+
+            info!(
+                "total time: {}, since 1st packet: {}",
+                end - start,
+                end - start_1st
+            );
+            let final_count = match mode {
+                //TODO optimize - instead of format try https://docs.rs/itoa/latest/itoa/
+                Mode::Packets => {
+                    let count = format!("{}", self.packets);
+                    self.out
+                        .push(count.clone().into_bytes())
+                        .expect("could not push into OUT");
+                    count
+                }
+                Mode::Size => {
+                    let count = format!("{}", self.packetsize);
+                    self.out
+                        .push(count.clone().into_bytes())
+                        .expect("could not push into OUT");
+                    count
+                }
+                Mode::Sum => {
+                    let count = format!("{}", self.sum);
+                    self.out
+                        .push(count.clone().into_bytes())
+                        .expect("could not push into OUT");
+                    count
+                }
+            };
+
+            // Send network output with the final count
+            flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count);
+
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("Count"),
             description: String::from("Counts the number of packets, total size of IPs or sums the amounts contained in IPs, discards them and sends the count every 1M packets."), //TODO make configurable

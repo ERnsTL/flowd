@@ -1,13 +1,17 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
+    ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
-use teloxide::prelude::*;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::{thread, thread::Thread};
 use std::future::IntoFuture;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::{thread, thread::Thread};
+use teloxide::prelude::*;
 
 /*
 TODO harden - the bot's Telegram username associated with the bot token is a global identifier for the bot, making it possible for anybody to open a chat to the bot and thus send data into your flowd network
@@ -27,11 +31,32 @@ pub struct TelegramBotComponent {
 const TELEGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Component for TelegramBotComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TelegramBotComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -43,7 +68,10 @@ impl Component for TelegramBotComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -52,29 +80,42 @@ impl Component for TelegramBotComponent {
             thread::yield_now();
         }
         */
-        let Ok(token) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let Ok(token) = conf.pop() else {
+            trace!("no config IP received - exiting");
+            return;
+        };
         let token_str = std::str::from_utf8(&token).expect("failed to parse token as utf-8");
 
         // configure
         // tokio runtime
         let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)  //TODO optimize - still starts additional thread for rt.spawn() thus 2 threads for tokio, seems useless
+            .worker_threads(1) //TODO optimize - still starts additional thread for rt.spawn() thus 2 threads for tokio, seems useless
             .enable_all()
-            .thread_name(format!("{}/EV", thread::current().name().expect("failed to get current thread name")))
+            .thread_name(format!(
+                "{}/EV",
+                thread::current()
+                    .name()
+                    .expect("failed to get current thread name")
+            ))
             .build()
             .expect("failed to build tokio runtime");
         // configure bot
-        let bot = Bot::new(token_str);    //TODO harden - this can panic
-        // variables for the bot
+        let bot = Bot::new(token_str); //TODO harden - this can panic
+                                       // variables for the bot
         let bot_ref = bot.clone();
         let messages_total = Arc::new(AtomicU64::new(0));
         let chat_id: Arc<AtomicI64> = Arc::new(AtomicI64::new(0));
         let chat_id_ref = chat_id.clone();
-        let out_ref = Arc::new(Mutex::new(out));    //TODO optimize
+        let out_ref = Arc::new(Mutex::new(out)); //TODO optimize
         let out_wakeup_ref = out_wakeup.clone();
         // handler for incoming messages - which can be text, images, etc.
         let handler = Update::filter_message().endpoint(
-            |_bot: Bot, msg: Message, out: Arc<Mutex<ProcessEdgeSinkConnection>>, out_wakeup: Thread, chat_id: Arc<AtomicI64>, messages_total: Arc<AtomicU64>| async move {
+            |_bot: Bot,
+             msg: Message,
+             out: Arc<Mutex<ProcessEdgeSinkConnection>>,
+             out_wakeup: Thread,
+             chat_id: Arc<AtomicI64>,
+             messages_total: Arc<AtomicU64>| async move {
                 // increase message counter
                 let _previous = messages_total.fetch_add(1, Ordering::Relaxed);
 
@@ -83,7 +124,15 @@ impl Component for TelegramBotComponent {
 
                 // send it
                 debug!("sending...");
-                out.lock().expect("lock poisoned").push(msg.text().expect("failed to get text from Telegram message").as_bytes().to_vec()).expect("could not push into OUT");
+                out.lock()
+                    .expect("lock poisoned")
+                    .push(
+                        msg.text()
+                            .expect("failed to get text from Telegram message")
+                            .as_bytes()
+                            .to_vec(),
+                    )
+                    .expect("could not push into OUT");
                 out_wakeup.unpark();
                 debug!("done");
 
@@ -94,8 +143,13 @@ impl Component for TelegramBotComponent {
         debug!("starting bot message dispatcher...");
         rt.spawn(async move {
             let mut builder = Dispatcher::builder(bot, handler)
-            .dependencies(dptree::deps![out_ref, out_wakeup_ref, chat_id_ref, messages_total])   // pass the shared state to the handler as a dependency
-            .build();
+                .dependencies(dptree::deps![
+                    out_ref,
+                    out_wakeup_ref,
+                    chat_id_ref,
+                    messages_total
+                ]) // pass the shared state to the handler as a dependency
+                .build();
             let bot_dispatcher = builder.dispatch();
             bot_dispatcher.await;
         });
@@ -107,9 +161,13 @@ impl Component for TelegramBotComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     stop_requested = true;
                     break;
@@ -117,7 +175,10 @@ impl Component for TelegramBotComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -137,7 +198,10 @@ impl Component for TelegramBotComponent {
                         let send_result = rt.block_on(async {
                             tokio::time::timeout(
                                 TELEGRAM_SEND_TIMEOUT,
-                                bot_ref.send_message(ChatId(chat_id), text).send().into_future(),
+                                bot_ref
+                                    .send_message(ChatId(chat_id), text)
+                                    .send()
+                                    .into_future(),
                             )
                             .await
                         });
@@ -176,7 +240,10 @@ impl Component for TelegramBotComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TelegramBot"),
             description: String::from("Reads messages from the Telegram Bot API, sends these into the OUT port and sends responses on IN port into the Telegram chats."),

@@ -1,16 +1,16 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphMetadata {
-    name: String,                    // human-readable name
-    library: String,                 // component library identifier
-    main: bool,                      // whether this is a main graph (not a subgraph component)
-    icon: Option<String>,            // icon for graph-as-component
-    description: Option<String>,     // description for graph-as-component
-    created_at: crate::UtcTime, // creation timestamp
+    name: String,                  // human-readable name
+    library: String,               // component library identifier
+    main: bool,                    // whether this is a main graph (not a subgraph component)
+    icon: Option<String>,          // icon for graph-as-component
+    description: Option<String>,   // description for graph-as-component
+    created_at: crate::UtcTime,    // creation timestamp
     last_modified: crate::UtcTime, // last modification timestamp
 }
 
@@ -41,8 +41,10 @@ impl MultiGraphManager {
             self.active_graph = graph_id.to_string();
             Ok(())
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound,
-                format!("Graph '{}' not found", graph_id)))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Graph '{}' not found", graph_id),
+            ))
         }
     }
 

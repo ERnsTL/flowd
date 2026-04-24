@@ -1,13 +1,16 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, info, warn, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 //component-specific
-use std::ffi::{OsStr,OsString};
-use std::process::{Command, Stdio};
+use lexopt::prelude::*;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
-use lexopt::prelude::*;
 
 pub struct CmdComponent {
     //TODO differentiate between trigger inport and STDIN inport?
@@ -20,7 +23,10 @@ pub struct CmdComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-enum Mode { One, Each }
+enum Mode {
+    One,
+    Each,
+}
 const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 const STDIN_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 
@@ -36,12 +42,37 @@ fn handoff_join(handle: std::thread::JoinHandle<()>, label: &'static str) {
 }
 
 impl Component for CmdComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         CmdComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            cmd: inports.remove("CMD").expect("found no CMD inport").pop().unwrap(),
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            cmd: inports
+                .remove("CMD")
+                .expect("found no CMD inport")
+                .pop()
+                .unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -54,12 +85,18 @@ impl Component for CmdComponent {
         let mut cmd = self.cmd;
         let mut conf = self.conf;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read sub-process program and args
-        let cmd_ip = cmd.pop().expect("could not read IP from CMD configuration inport");
+        let cmd_ip = cmd
+            .pop()
+            .expect("could not read IP from CMD configuration inport");
         let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
-        let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
+        let mut cmd_words =
+            shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
         let mut cmd_args: Vec<OsString> = vec![];
         if cmd_words.len() > 0 {
             let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
@@ -67,27 +104,59 @@ impl Component for CmdComponent {
         }
         let cmd_program1 = cmd_words.pop().expect("could not pop program name");
         let cmd_program = OsStr::new(cmd_program1.as_str());
-        debug!("got program {} with arguments {:?}", cmd_program.to_str().expect("could not convert OsStr to &str"), cmd_args);
+        debug!(
+            "got program {} with arguments {:?}",
+            cmd_program
+                .to_str()
+                .expect("could not convert OsStr to &str"),
+            cmd_args
+        );
 
         // read configuration
         let mut mode = Mode::Each;
         let mut retry = false;
         //TODO must split the configuration into words with shell_words::split() and then parse the arguments with lexopt, like already done in SSH client component
-        let mut parser = lexopt::Parser::from_args(vec![OsString::from(std::str::from_utf8(&conf.pop().expect("could not read IP from CONF configuration inport")).expect("invalid utf-8"))]);
+        let mut parser = lexopt::Parser::from_args(vec![OsString::from(
+            std::str::from_utf8(
+                &conf
+                    .pop()
+                    .expect("could not read IP from CONF configuration inport"),
+            )
+            .expect("invalid utf-8"),
+        )]);
         while let Some(arg) = parser.next().expect("could not call next()") {
             match arg {
                 Long("retry") => {
-                    retry = parser.value().expect("could not get parser value").parse().expect("could not parse value");
+                    retry = parser
+                        .value()
+                        .expect("could not get parser value")
+                        .parse()
+                        .expect("could not parse value");
                 }
                 Long("mode") => {
-                    let mode_str: OsString = parser.value().expect("could not get parser value").parse::<OsString>().expect("could not parse value");
-                    match mode_str.to_str().expect("could not convert mode_str to str") {
-                        "one" => { mode = Mode::One; },
-                        "each" => { mode = Mode::Each; },
-                        _ => { unreachable!(); }
+                    let mode_str: OsString = parser
+                        .value()
+                        .expect("could not get parser value")
+                        .parse::<OsString>()
+                        .expect("could not parse value");
+                    match mode_str
+                        .to_str()
+                        .expect("could not convert mode_str to str")
+                    {
+                        "one" => {
+                            mode = Mode::One;
+                        }
+                        "each" => {
+                            mode = Mode::Each;
+                        }
+                        _ => {
+                            unreachable!();
+                        }
                     }
                 }
-                _ => { unreachable!(); }
+                _ => {
+                    unreachable!();
+                }
             }
         }
 
@@ -98,16 +167,23 @@ impl Component for CmdComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             // check in port
@@ -130,8 +206,8 @@ impl Component for CmdComponent {
                     //    .args(["-c", "nc -l -n 127.0.0.1 8080"])    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
                     match mode {
                         Mode::Each => {
-                            let mut child = Command::new(cmd_program)   //TODO optimize pre-construct Command once
-                                .args(&cmd_args)    // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
+                            let mut child = Command::new(cmd_program) //TODO optimize pre-construct Command once
+                                .args(&cmd_args) // NOTE: adding a grep or similar has its own buffering so you will not see immediate output on child STDOUT
                                 .stdin(Stdio::piped())
                                 .stdout(Stdio::piped())
                                 .spawn()
@@ -145,9 +221,14 @@ impl Component for CmdComponent {
                             let child_stdout = child
                                 .stdout
                                 .take()
-                                .ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard output."))
-                                .expect("could not get standard output");   //TODO optimize looks like duplication from above line
-                            // set up writer into child STDIN
+                                .ok_or_else(|| {
+                                    Error::new(
+                                        ErrorKind::Other,
+                                        "Could not capture standard output.",
+                                    )
+                                })
+                                .expect("could not get standard output"); //TODO optimize looks like duplication from above line
+                                                                          // set up writer into child STDIN
                             let writer = child
                                 .stdin
                                 //.ok_or_else(|| Error::new(ErrorKind::Other,"Could not capture standard input."))
@@ -193,7 +274,10 @@ impl Component for CmdComponent {
 
                                 // process signals while child may still be running
                                 if let Ok(sig) = self.signals_in.try_recv() {
-                                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    trace!(
+                                        "received signal ip: {}",
+                                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                                    );
                                     if sig == b"stop" {
                                         info!("got stop signal while child process is running, terminating child");
                                         let _ = child.kill();
@@ -204,12 +288,18 @@ impl Component for CmdComponent {
                                         trace!("got ping signal, responding");
                                         let _ = self.signals_out.try_send(b"pong".to_vec());
                                     } else {
-                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"))
+                                        warn!(
+                                            "received unknown signal ip: {}",
+                                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                                        )
                                     }
                                 }
 
                                 // child exit
-                                if let Some(_status) = child.try_wait().expect("failed to query child process status") {
+                                if let Some(_status) = child
+                                    .try_wait()
+                                    .expect("failed to query child process status")
+                                {
                                     if stdout_closed {
                                         break;
                                     }
@@ -258,8 +348,10 @@ impl Component for CmdComponent {
                                 info!("exiting");
                                 return;
                             }
-                        },
-                        Mode::One => { unimplemented!(); }  //TODO implement
+                        }
+                        Mode::One => {
+                            unimplemented!();
+                        } //TODO implement
                     }
 
                     debug!("done");
@@ -280,7 +372,10 @@ impl Component for CmdComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("Cmd"),
             description: String::from("Runs an external program and forwards STDIN, STDERR and STDOUT."),

@@ -1,12 +1,15 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn, error};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::time::{Duration, Instant};
 use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
-use std::thread;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
@@ -17,7 +20,7 @@ pub struct MQTTPublisherComponent {
 }
 
 const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
-const MQTT_QOS: QoS = QoS::AtMostOnce;  //TODO find out what is best for FBP
+const MQTT_QOS: QoS = QoS::AtMostOnce; //TODO find out what is best for FBP
 const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
 
 fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
@@ -32,10 +35,27 @@ fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
 }
 
 impl Component for MQTTPublisherComponent {
-    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        _outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         MQTTPublisherComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -50,7 +70,10 @@ impl Component for MQTTPublisherComponent {
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
@@ -74,78 +97,20 @@ impl Component for MQTTPublisherComponent {
 
         // handle connection events
         //TODO automatic reconnection
-        let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
-            // Iterate to poll the eventloop for connection progress
-            //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
-            //TODO optimize - dont know how to install a signal handler on thread level, otherwise we could save the channel and polling for shutdown
-            /*
-            for event in connection.iter() {
-                match event {
-                    _ => {
-                        trace!("Event = {:?}", event);
-                        // nothing to do, not interested in any events
-                        //TODO really?
-                    }
-                }
-            }
-            */
-            // alternative with recv_timeout()
-            /*
-            loop {
-                // check for closed shutdown signal channel
-                match eventthread_signalsource.try_recv() {
-                    Ok(_) => {
-                        // there will never anything be sent
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        // nothing to do, lets continue receiving MQTT events
-                    },
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        trace!("eventloop listener got close on signal channel, shutting down");
-                        break;
-                    }
-                }
-                // block on MQTT events
-                while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                        match event {
-                        _ => {
-                            debug!("Event = {:?}", event);
-                            // nothing to do, not interested in any events
-                            //TODO really?
-                        }
-                    }
-                }
-            }
-            */
-            while !eventthread_shutdown_ref.load(Ordering::Relaxed) {
-                if let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+        let event_handler_thread = thread::Builder::new()
+            .name(format!(
+                "{}/EV",
+                thread::current()
+                    .name()
+                    .expect("failed to get current thread name")
+            ))
+            .spawn(move || {
+                // Iterate to poll the eventloop for connection progress
+                //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
+                //TODO optimize - dont know how to install a signal handler on thread level, otherwise we could save the channel and polling for shutdown
+                /*
+                for event in connection.iter() {
                     match event {
-                        Err(err) => {
-                            trace!("Event Err = {:?}", err);
-                            match err {
-                                rumqttc::ConnectionError::MqttState(err) => {
-                                    match err {
-                                        rumqttc::StateError::Io(err) => {
-                                            if err.kind() == std::io::ErrorKind::ConnectionAborted {
-                                                debug!("MQTT connection aborted, shutting down");
-                                                break;
-                                            } else {
-                                                error!("MQTT state error: {:?}", err);
-                                                //TODO optimize - maybe send a signal to the main thread to stop the component
-                                            }
-                                        },
-                                        _ => {
-                                            error!("MQTT connection error: {:?}", err);
-                                            //TODO optimize - maybe send a signal to the main thread to stop the component
-                                        }
-                                    }
-                                },
-                                _ => {
-                                    // will be handled by the eventloop?
-                                    //TODO make sure
-                                }
-                            }
-                        },
                         _ => {
                             trace!("Event = {:?}", event);
                             // nothing to do, not interested in any events
@@ -153,9 +118,79 @@ impl Component for MQTTPublisherComponent {
                         }
                     }
                 }
-            }
-            debug!("exiting");
-        }).expect("failed to spawn eventloop listener thread");
+                */
+                // alternative with recv_timeout()
+                /*
+                loop {
+                    // check for closed shutdown signal channel
+                    match eventthread_signalsource.try_recv() {
+                        Ok(_) => {
+                            // there will never anything be sent
+                        },
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            // nothing to do, lets continue receiving MQTT events
+                        },
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            trace!("eventloop listener got close on signal channel, shutting down");
+                            break;
+                        }
+                    }
+                    // block on MQTT events
+                    while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+                            match event {
+                            _ => {
+                                debug!("Event = {:?}", event);
+                                // nothing to do, not interested in any events
+                                //TODO really?
+                            }
+                        }
+                    }
+                }
+                */
+                while !eventthread_shutdown_ref.load(Ordering::Relaxed) {
+                    if let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
+                        match event {
+                            Err(err) => {
+                                trace!("Event Err = {:?}", err);
+                                match err {
+                                    rumqttc::ConnectionError::MqttState(err) => {
+                                        match err {
+                                            rumqttc::StateError::Io(err) => {
+                                                if err.kind()
+                                                    == std::io::ErrorKind::ConnectionAborted
+                                                {
+                                                    debug!(
+                                                        "MQTT connection aborted, shutting down"
+                                                    );
+                                                    break;
+                                                } else {
+                                                    error!("MQTT state error: {:?}", err);
+                                                    //TODO optimize - maybe send a signal to the main thread to stop the component
+                                                }
+                                            }
+                                            _ => {
+                                                error!("MQTT connection error: {:?}", err);
+                                                //TODO optimize - maybe send a signal to the main thread to stop the component
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        // will be handled by the eventloop?
+                                        //TODO make sure
+                                    }
+                                }
+                            }
+                            _ => {
+                                trace!("Event = {:?}", event);
+                                // nothing to do, not interested in any events
+                                //TODO really?
+                            }
+                        }
+                    }
+                }
+                debug!("exiting");
+            })
+            .expect("failed to spawn eventloop listener thread");
 
         // FBP main loop
         loop {
@@ -165,9 +200,13 @@ impl Component for MQTTPublisherComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -201,9 +240,14 @@ impl Component for MQTTPublisherComponent {
                 //debug!("got a packet, dropping it.");
 
                 debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
-                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    client.publish(topic, MQTT_QOS, RETAIN_MSG, ip).expect("failed to publish");
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
+                for ip in chunk.into_iter() {
+                    //TODO is iterator faster or as_slices() or as_mut_slices() ?
+                    client
+                        .publish(topic, MQTT_QOS, RETAIN_MSG, ip)
+                        .expect("failed to publish");
                 }
                 // NOTE: no commit_all() necessary, because into_iter() does that automatically
             }
@@ -223,16 +267,24 @@ impl Component for MQTTPublisherComponent {
         eventthread_shutdown.store(true, Ordering::Relaxed);
         // close MQTT connection -> MQTT event thread will exit from special connection error ConnectionAborted
         if let Err(err) = client.disconnect() {
-            warn!("MQTTPublisher: failed to disconnect MQTT client cleanly: {:?}", err);
+            warn!(
+                "MQTTPublisher: failed to disconnect MQTT client cleanly: {:?}",
+                err
+            );
         }
         // wait for event thread to exit (bounded)
         let join_started = Instant::now();
-        while !event_handler_thread.is_finished() && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE {
+        while !event_handler_thread.is_finished()
+            && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE
+        {
             thread::sleep(Duration::from_millis(10));
         }
         if event_handler_thread.is_finished() {
             if let Err(err) = event_handler_thread.join() {
-                warn!("MQTTPublisher: failed to join eventloop listener thread: {:?}", err);
+                warn!(
+                    "MQTTPublisher: failed to join eventloop listener thread: {:?}",
+                    err
+                );
             }
         } else {
             warn!(
@@ -245,10 +297,15 @@ impl Component for MQTTPublisherComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("MQTTPublisher"),
-            description: String::from("Publishes data as-is from IN port to the MQTT topic given in CONF."),
+            description: String::from(
+                "Publishes data as-is from IN port to the MQTT topic given in CONF.",
+            ),
             icon: String::from("cloud-upload"), // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
@@ -258,9 +315,13 @@ impl Component for MQTTPublisherComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see rumqttc crate documentation"),
+                    description: String::from(
+                        "connection URL which includes options, see rumqttc crate documentation",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd123")
+                    value_default: String::from(
+                        "mqtts://test.mosquitto.org:8886/hello/flowd?client_id=flowd123",
+                    ),
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -270,8 +331,8 @@ impl Component for MQTTPublisherComponent {
                     is_arrayport: false,
                     description: String::from("data to be published on given MQTT topic"),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
             out_ports: vec![],
             ..Default::default()
@@ -291,10 +352,27 @@ pub struct MQTTSubscriberComponent {
 const RECV_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for MQTTSubscriberComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         MQTTSubscriberComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -303,14 +381,20 @@ impl Component for MQTTSubscriberComponent {
 
     fn run(mut self) {
         debug!("MQTTSubscriber is now run()ning!");
-        let conf = &mut self.conf;    //TODO optimize
+        let conf = &mut self.conf; //TODO optimize
         let out = &mut self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
@@ -339,16 +423,23 @@ impl Component for MQTTSubscriberComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -361,7 +452,8 @@ impl Component for MQTTSubscriberComponent {
 
                         // send it
                         debug!("forwarding MQTT payload...");
-                        out.push(packet.payload.to_vec()).expect("could not push into OUT");    //TODO optimize conversion
+                        out.push(packet.payload.to_vec())
+                            .expect("could not push into OUT"); //TODO optimize conversion
                         out_wakeup.unpark();
                         debug!("done");
                     }
@@ -389,7 +481,10 @@ impl Component for MQTTSubscriberComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("MQTTSubscriber"),
             description: String::from("Subscribes to the MQTT topic given in CONF and forwards received message payload to the OUT outport."),

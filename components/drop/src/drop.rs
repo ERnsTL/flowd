@@ -1,5 +1,9 @@
-use flowd_component_api::{ProcessEdgeSource, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{warn, info, debug, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, ProcessSignalSink,
+    ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 pub struct DropComponent {
     inn: ProcessEdgeSource,
@@ -9,86 +13,112 @@ pub struct DropComponent {
 }
 
 impl Component for DropComponent {
-    fn new(mut inports: ProcessInports, _: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        _: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         DropComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("Drop is now run()ning!");
-        let mut inn = self.inn;
-        loop {
-            trace!("begin of iteration");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Drop is now process()ing!");
+        let mut work_units = 0u32;
 
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
-                // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // check in port within budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
+                );
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
                 }
             }
 
-            // check in port
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                //_ = inn.pop().ok();
-                //debug!("got a packet, dropping it.");
-
-                debug!("got {} packets, dropping them.", inn.slots());
-                inn.read_chunk(inn.slots()).expect("receive as chunk failed").commit_all();
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                //out_wakeup.unpark();
+            debug!("got {} packets, dropping them.", self.inn.slots());
+            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
+                chunk.commit_all();
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("Drop"),
             description: String::from("Drops all packets received on IN port."),
             icon: String::from("trash-o"),
             subgraph: false,
-            in_ports: vec![
-                ComponentPort {
-                    name: String::from("IN"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("data to be dropped"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            in_ports: vec![ComponentPort {
+                name: String::from("IN"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("data to be dropped"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             out_ports: vec![],
             ..Default::default()
         }

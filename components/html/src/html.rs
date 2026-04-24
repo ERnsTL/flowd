@@ -1,5 +1,8 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, info, warn, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use skyscraper::html;
@@ -21,11 +24,28 @@ pub struct HTMLStripComponent {
 }
 
 impl Component for HTMLStripComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         HTMLStripComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -37,7 +57,10 @@ impl Component for HTMLStripComponent {
         //let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         //trace!("read config IPs");
@@ -56,16 +79,23 @@ impl Component for HTMLStripComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -103,7 +133,10 @@ impl Component for HTMLStripComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("HTMLStrip"),
             description: String::from("Reads data IPs, strips all HTML tags and sends the cleaned, content-only data to the OUT port."),
@@ -182,11 +215,32 @@ pub struct HTMLQueryComponent {
 }
 
 impl Component for HTMLQueryComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         HTMLQueryComponent {
-            conf: inports.remove("QUERY").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("QUERY")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -198,7 +252,10 @@ impl Component for HTMLQueryComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IP");
@@ -207,7 +264,10 @@ impl Component for HTMLQueryComponent {
             thread::yield_now();
         }
         */
-        let Ok(query_vec) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let Ok(query_vec) = conf.pop() else {
+            trace!("no config IP received - exiting");
+            return;
+        };
         let query_str = std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
 
         // configure
@@ -218,35 +278,48 @@ impl Component for HTMLQueryComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
             // check in port
             loop {
-                if let Ok(ip) = inn.pop() { //TODO optimize - add support for chunks
+                if let Ok(ip) = inn.pop() {
+                    //TODO optimize - add support for chunks
                     // prepare packet
                     debug!("got a packet, processing...");
 
                     // process packet
-                    let document = html::parse(std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8")).expect("failed to parse IP as HTML document");
+                    let document = html::parse(
+                        std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8"),
+                    )
+                    .expect("failed to parse IP as HTML document");
                     let xpath_item_tree = XpathItemTree::from(&document);
-                    let item_set = xpath_query.apply(&xpath_item_tree).expect("failed to apply XPath query to HTML document");
+                    let item_set = xpath_query
+                        .apply(&xpath_item_tree)
+                        .expect("failed to apply XPath query to HTML document");
 
                     // prepare output
                     if !item_set.is_empty() {
                         for item in item_set.into_iter() {
                             // prepare packet
-                            let vec_out = item.to_string().into_bytes();    //TODO currently, this quotes output strings - add option to disable quoting and other output paramaters, or add un-quote component :-)
+                            let vec_out = item.to_string().into_bytes(); //TODO currently, this quotes output strings - add option to disable quoting and other output paramaters, or add un-quote component :-)
 
                             // send it
                             debug!("sending...");
@@ -276,7 +349,10 @@ impl Component for HTMLQueryComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("HTMLQuery"),
             description: String::from("Reads IPs containing HTML data, filters them using the given XPath query and sends the processed resp. filtered data to the OUT port."),

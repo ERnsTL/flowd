@@ -35,7 +35,10 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
     let build_toml_path = Path::new(&manifest_dir).join("flowd.build.toml");
     println!("cargo:rerun-if-changed={}", build_toml_path.display());
-    println!("cargo:rerun-if-changed={}", Path::new(&manifest_dir).join("build.rs").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        Path::new(&manifest_dir).join("build.rs").display()
+    );
 
     // load and validate build configuration
     let build_toml = fs::read_to_string(&build_toml_path)
@@ -96,12 +99,17 @@ fn main() {
     // use block
     for entry in &config.components.entry {
         //NOTE: cargo crate names use kebab case, but rustc uses snake case
-        generated.push_str(&format!("use {}::{};\n", to_snake_case(&entry.crate_name), entry.struct_name));
+        generated.push_str(&format!(
+            "use {}::{};\n",
+            to_snake_case(&entry.crate_name),
+            entry.struct_name
+        ));
     }
     generated.push_str("\n");
 
     // component library
-    generated.push_str("pub(crate) fn build_component_library() -> Arc<RwLock<ComponentLibrary>> {\n");
+    generated
+        .push_str("pub(crate) fn build_component_library() -> Arc<RwLock<ComponentLibrary>> {\n");
     generated.push_str("    Arc::new(RwLock::new(ComponentLibrary::new(vec![\n");
     for entry in &config.components.entry {
         generated.push_str(&format!("        {}::get_metadata(),\n", entry.struct_name));
@@ -117,7 +125,7 @@ fn main() {
     generated.push_str("    signalsource: ProcessSignalSource,\n");
     generated.push_str("    watchdog_signalsink: ProcessSignalSink,\n");
     generated.push_str("    graph_inout: GraphInportOutportHandle,\n");
-    generated.push_str(") -> Option<Box<dyn RunnableComponent>> {\n");
+    generated.push_str(") -> Option<Box<dyn Component>> {\n");
     generated.push_str("    match name {\n");
     for entry in &config.components.entry {
         generated.push_str(&format!(
@@ -134,10 +142,12 @@ fn main() {
     generated.push_str("}\n\n");
 
     // component log filters function
-    generated.push_str("pub fn register_component_log_filters(logger: &mut simplelog::ConfigBuilder) {\n");
+    generated.push_str(
+        "pub fn register_component_log_filters(_logger: &mut simplelog::ConfigBuilder) {\n",
+    );
     for filter in &log_filters {
         generated.push_str(&format!(
-            "    logger.add_filter_ignore_str(\"{}\");\n",
+            "    _logger.add_filter_ignore_str(\"{}\");\n",
             escape_rust_string(filter)
         ));
     }
@@ -165,9 +175,8 @@ fn load_flowd_version(root_cargo: &toml::Value) -> Version {
         .and_then(|v| v.get("version"))
         .and_then(|v| v.as_str())
         .unwrap_or_else(|| panic!("missing [package].version in root Cargo.toml"));
-    Version::parse(raw).unwrap_or_else(|err| {
-        panic!("invalid root Cargo.toml [package].version '{}': {err}", raw)
-    })
+    Version::parse(raw)
+        .unwrap_or_else(|err| panic!("invalid root Cargo.toml [package].version '{}': {err}", raw))
 }
 
 fn load_dependency_specs(root_cargo: &toml::Value) -> HashMap<String, DependencySpec> {
@@ -216,7 +225,10 @@ fn validate_crate_name(
     }
 
     if !dependencies.contains_key(crate_name) {
-        panic!("crate '{}' not found in Cargo.toml dependencies", crate_name);
+        panic!(
+            "crate '{}' not found in Cargo.toml dependencies",
+            crate_name
+        );
     }
 }
 

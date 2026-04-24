@@ -1,9 +1,12 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn, error};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::time::Duration;
 use redis::ErrorKind as RedisErrorKind;
+use std::time::Duration;
 
 const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
@@ -16,10 +19,27 @@ pub struct RedisPublisherComponent {
 }
 
 impl Component for RedisPublisherComponent {
-    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        _outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         RedisPublisherComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -29,12 +49,15 @@ impl Component for RedisPublisherComponent {
     fn run(mut self) {
         debug!("RedisPublisher is now run()ning!");
         let conf = &mut self.conf;
-        let inn = &mut self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
+        let inn = &mut self.inn; //TODO optimize these references, not really needed for them to be referenes, can just consume?
 
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
@@ -42,14 +65,20 @@ impl Component for RedisPublisherComponent {
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
         //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
-        let channel_queryparam = url.query_pairs().find( |(key, _)| key.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
+        let channel_queryparam = url
+            .query_pairs()
+            .find(|(key, _)| key.eq("channel"))
+            .expect("failed to get channel name from connection URL channel parameter");
         let channel_bytes = channel_queryparam.1.as_bytes();
-        let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
+        let channel =
+            std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
         debug!("channel: {}", channel);
 
         // connect
         let client = redis::Client::open(url_str).expect("failed to open client");
-        let mut connection = client.get_connection().expect("failed to get connection on client");
+        let mut connection = client
+            .get_connection()
+            .expect("failed to get connection on client");
         connection
             .set_read_timeout(REDIS_IO_TIMEOUT)
             .expect("failed to set redis read timeout");
@@ -94,9 +123,13 @@ impl Component for RedisPublisherComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -130,8 +163,11 @@ impl Component for RedisPublisherComponent {
                 //debug!("got a packet, dropping it.");
 
                 debug!("got {} packets, forwarding to redis channel.", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
-                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
+                for ip in chunk.into_iter() {
+                    //TODO is iterator faster or as_slices() or as_mut_slices() ?
                     //TODO optimize so that the channel name is already fixed - does the channel name get cloned for every push?
                     //TODO optimize - does it make sense to use PubSub object?
                     //pipe_lpush.lpush(channel, ip).ignore();  //TODO add error handling
@@ -178,10 +214,15 @@ impl Component for RedisPublisherComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("RedisPublisher"),
-            description: String::from("Publishes data as-is from IN port to the Redis MQ pub/sub channel given in CONF."),
+            description: String::from(
+                "Publishes data as-is from IN port to the Redis MQ pub/sub channel given in CONF.",
+            ),
             icon: String::from("cloud-upload"), // or arrow-circle-down
             subgraph: false,
             in_ports: vec![
@@ -191,9 +232,13 @@ impl Component for RedisPublisherComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("connection URL which includes options, see redis crate documentation"),  // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
+                    description: String::from(
+                        "connection URL which includes options, see redis crate documentation",
+                    ), // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
                     values_allowed: vec![],
-                    value_default: String::from("rediss://user:pass@server.com/db_number?channel=channel_name")
+                    value_default: String::from(
+                        "rediss://user:pass@server.com/db_number?channel=channel_name",
+                    ),
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -203,8 +248,8 @@ impl Component for RedisPublisherComponent {
                     is_arrayport: false,
                     description: String::from("data to be published on given Redis MQ channel"),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
             out_ports: vec![],
             ..Default::default()
@@ -224,10 +269,27 @@ pub struct RedisSubscriberComponent {
 const RECV_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
 impl Component for RedisSubscriberComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         RedisSubscriberComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -238,31 +300,47 @@ impl Component for RedisSubscriberComponent {
         debug!("RedisSubscriber is now run()ning!");
         let mut conf = self.conf;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // prepare connection arguments
         // get destination from URL
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
-        let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
+        let channel_queryparam = url
+            .query_pairs()
+            .find(|kv| kv.0.eq("channel"))
+            .expect("failed to get channel name from connection URL channel parameter");
         let channel_bytes = channel_queryparam.1.as_bytes();
-        let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
+        let channel =
+            std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
         debug!("channel: {}", channel);
 
         // connect
         let client = redis::Client::open(url_str).expect("failed to open client");
-        let mut connection = client.get_connection().expect("failed to get connection on client");
+        let mut connection = client
+            .get_connection()
+            .expect("failed to get connection on client");
         let mut pubsub = connection.as_pubsub();
         // subscribe to given topic
         //TODO enable reconnection - or is this done automatically via .iter()?
-        pubsub.subscribe(channel).expect("failed to subscribe to channel");
-        pubsub.set_read_timeout(RECV_TIMEOUT).expect("failed to set read timeout");    //TODO optimize Some packaging
+        pubsub
+            .subscribe(channel)
+            .expect("failed to subscribe to channel");
+        pubsub
+            .set_read_timeout(RECV_TIMEOUT)
+            .expect("failed to set read timeout"); //TODO optimize Some packaging
 
         // main loop
         loop {
@@ -271,16 +349,23 @@ impl Component for RedisSubscriberComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -292,7 +377,7 @@ impl Component for RedisSubscriberComponent {
 
                 // send it
                 debug!("forwarding redis payload...");
-                out.push(payload).expect("could not push into OUT");    //TODO optimize conversion
+                out.push(payload).expect("could not push into OUT"); //TODO optimize conversion
                 out_wakeup.unpark();
                 debug!("done");
             }
@@ -308,7 +393,10 @@ impl Component for RedisSubscriberComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("RedisSubscriber"),
             description: String::from("Subscribes to the Redis MQ pub/sub channel given in CONF and forwards received message data to the OUT outport."),

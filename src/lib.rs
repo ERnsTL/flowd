@@ -4,8 +4,8 @@
 
 // basics and threading
 use std::str;
-use std::sync::{Arc, RwLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, Thread};
 
 // network and WebSocket
@@ -13,15 +13,16 @@ use std::net::TcpStream;
 use tungstenite::Message;
 
 // persistence
-use std::io::prelude::*;
 use std::fs::File;
+use std::io::prelude::*;
 use std::path::Path;
 
 // arguments
 use std::env;
 
 // logging
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate simplelog; //TODO check the paris feature flag for tags, useful?
 
 // JSON serialization and deserialization
@@ -30,25 +31,25 @@ use serde_json::{Map as JsonMap, Value as JsonValue};
 use serde_with::skip_serializing_none;
 
 // data structures
-use std::collections::HashMap;
 use multimap::MultiMap;
+use std::collections::HashMap;
 //use dashmap::DashMap;
 
 // timekeeping in watchdog thread etc.
-use std::time::{Duration, Instant};
 use chrono::prelude::*;
+use std::time::{Duration, Instant};
 
 // flowd component API crate
 pub use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle,
-    MessageBuf, ProcessEdge, ProcessEdgeSink,
-    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
-    ProcessSignalSink, ProcessSignalSource, WakeupNotify, PROCESSEDGE_BUFSIZE,
-    PROCESSEDGE_IIP_BUFSIZE, PROCESSEDGE_SIGNAL_BUFSIZE,
+    BudgetClass, Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle,
+    MessageBuf, NodeContext, ProcessEdge, ProcessEdgeSink, ProcessEdgeSinkConnection,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, ProcessSignalSink,
+    ProcessSignalSource, PushError, WakeupNotify, PROCESSEDGE_BUFSIZE, PROCESSEDGE_IIP_BUFSIZE,
+    PROCESSEDGE_SIGNAL_BUFSIZE,
 };
 
 // configuration
-const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7);   //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
+const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7); //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
 const WATCHDOG_POLL_DUR: core::time::Duration = Duration::from_millis(50);
 const WATCHDOG_MAX_MISSED_PONGS: u8 = 2;
 const CLIENT_BROADCAST_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(200));
@@ -63,22 +64,20 @@ struct PersistedGraphSet {
     graphs: HashMap<String, Graph>,
 }
 
-trait RunnableComponent {
-    fn run(self: Box<Self>);
-}
-
-impl<T: Component> RunnableComponent for T {
-    fn run(self: Box<Self>) {
-        (*self).run()
-    }
-}
-
-
-
-fn run_graph(runtime: Arc<RwLock<Runtime>>, graph: Arc<RwLock<Graph>>, components: Arc<RwLock<ComponentLibrary>>, graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> std::result::Result<(), std::io::Error> {
+fn run_graph(
+    runtime: Arc<RwLock<Runtime>>,
+    graph: Arc<RwLock<Graph>>,
+    components: Arc<RwLock<ComponentLibrary>>,
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+) -> std::result::Result<(), std::io::Error> {
     let graph_guard = graph.read().expect("lock poisoned");
     let components_guard = components.read().expect("lock poisoned");
-    runtime.write().expect("lock poisoned").start(&graph_guard, &components_guard, graph_inout, runtime.clone())?;
+    runtime.write().expect("lock poisoned").start(
+        &graph_guard,
+        &components_guard,
+        graph_inout,
+        runtime.clone(),
+    )?;
     Ok(())
 }
 
@@ -98,7 +97,7 @@ pub fn create_graph_inout_holder() -> Arc<Mutex<GraphInportOutportHolder>> {
         inports: None,
         outports: None,
         websockets: HashMap::new(),
-        packet_tap: None
+        packet_tap: None,
     }))
 }
 
@@ -106,42 +105,167 @@ fn create_default_graph() -> std::result::Result<Graph, std::io::Error> {
     let mut graph = Graph::new(
         String::from("main_graph"),
         String::from("basic description"),
-        String::from("usd")
+        String::from("usd"),
     );
 
     // add graph exported/published inport and outport
-    graph.inports.insert("GRAPHIN".to_owned(), GraphPort {
-        process: "Repeat_31337".to_owned(),
-        port: "IN".to_owned(),
-        metadata: GraphPortMetadata {
-            x: 36,
+    graph.inports.insert(
+        "GRAPHIN".to_owned(),
+        GraphPort {
+            process: "Repeat_31337".to_owned(),
+            port: "IN".to_owned(),
+            metadata: GraphPortMetadata { x: 36, y: 72 },
+        },
+    );
+    graph.outports.insert(
+        "GRAPHOUT".to_owned(),
+        GraphPort {
+            process: "Repeat_31338".to_owned(),
+            port: "OUT".to_owned(),
+            metadata: GraphPortMetadata { x: 468, y: 72 },
+        },
+    );
+    graph.add_node(
+        "main_graph".to_owned(),
+        "Repeat".to_owned(),
+        "Repeat_31337".to_owned(),
+        GraphNodeMetadata {
+            x: 180,
             y: 72,
-        }
-    });
-    graph.outports.insert("GRAPHOUT".to_owned(), GraphPort {
-        process: "Repeat_31338".to_owned(),
-        port: "OUT".to_owned(),
-        metadata: GraphPortMetadata {
-            x: 468,
-            y: 72,
-        }
-    });
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31337".to_owned(), GraphNodeMetadata { x: 180, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
+            height: Some(NODE_HEIGHT_DEFAULT),
+            width: Some(NODE_WIDTH_DEFAULT),
+            label: Some("Repeat".to_owned()),
+            icon: None,
+        },
+    )?;
     //NOTE: bug in noflo-ui, which does not allow reconnecting exported ports to other components, they just vanish then (TODO)
-    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_31337".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Repeat_31338".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_31338".to_owned(), GraphNodeMetadata { x: 324, y: 72, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
+    graph.add_edge(
+        "main_graph".to_owned(),
+        GraphEdge {
+            source: GraphNodeSpec {
+                process: "Repeat_31337".to_owned(),
+                port: "OUT".to_owned(),
+                index: None,
+            },
+            data: None,
+            target: GraphNodeSpec {
+                process: "Repeat_31338".to_owned(),
+                port: "IN".to_owned(),
+                index: None,
+            },
+            metadata: GraphEdgeMetadata::new(None, None, None),
+        },
+    )?;
+    graph.add_node(
+        "main_graph".to_owned(),
+        "Repeat".to_owned(),
+        "Repeat_31338".to_owned(),
+        GraphNodeMetadata {
+            x: 324,
+            y: 72,
+            height: Some(NODE_HEIGHT_DEFAULT),
+            width: Some(NODE_WIDTH_DEFAULT),
+            label: Some("Repeat".to_owned()),
+            icon: None,
+        },
+    )?;
     // add components required for test suite
-    graph.add_node("main_graph".to_owned(), "Repeat".to_owned(), "Repeat_2ufmu".to_owned(), GraphNodeMetadata { x: 36, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Repeat".to_owned()), icon: None })?;
-    graph.add_node("main_graph".to_owned(), "Drop".to_owned(), "Drop_raux7".to_owned(), GraphNodeMetadata { x: 324, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Drop".to_owned()), icon: None })?;
-    graph.add_node("main_graph".to_owned(), "Output".to_owned(), "Output_mwr5y".to_owned(), GraphNodeMetadata { x: 180, y: 216, height: Some(NODE_HEIGHT_DEFAULT), width: Some(NODE_WIDTH_DEFAULT), label: Some("Output".to_owned()), icon: None })?;
-    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "".to_owned(), port: "".to_owned(), index: None }, data: Some("test IIP data".to_owned()), target: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Repeat_2ufmu".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
-    graph.add_edge("main_graph".to_owned(), GraphEdge { source: GraphNodeSpec { process: "Output_mwr5y".to_owned(), port: "OUT".to_owned(), index: None }, data: None, target: GraphNodeSpec { process: "Drop_raux7".to_owned(), port: "IN".to_owned(), index: None }, metadata: GraphEdgeMetadata::new(None, None, None) })?;
+    graph.add_node(
+        "main_graph".to_owned(),
+        "Repeat".to_owned(),
+        "Repeat_2ufmu".to_owned(),
+        GraphNodeMetadata {
+            x: 36,
+            y: 216,
+            height: Some(NODE_HEIGHT_DEFAULT),
+            width: Some(NODE_WIDTH_DEFAULT),
+            label: Some("Repeat".to_owned()),
+            icon: None,
+        },
+    )?;
+    graph.add_node(
+        "main_graph".to_owned(),
+        "Drop".to_owned(),
+        "Drop_raux7".to_owned(),
+        GraphNodeMetadata {
+            x: 324,
+            y: 216,
+            height: Some(NODE_HEIGHT_DEFAULT),
+            width: Some(NODE_WIDTH_DEFAULT),
+            label: Some("Drop".to_owned()),
+            icon: None,
+        },
+    )?;
+    graph.add_node(
+        "main_graph".to_owned(),
+        "Output".to_owned(),
+        "Output_mwr5y".to_owned(),
+        GraphNodeMetadata {
+            x: 180,
+            y: 216,
+            height: Some(NODE_HEIGHT_DEFAULT),
+            width: Some(NODE_WIDTH_DEFAULT),
+            label: Some("Output".to_owned()),
+            icon: None,
+        },
+    )?;
+    graph.add_edge(
+        "main_graph".to_owned(),
+        GraphEdge {
+            source: GraphNodeSpec {
+                process: "".to_owned(),
+                port: "".to_owned(),
+                index: None,
+            },
+            data: Some("test IIP data".to_owned()),
+            target: GraphNodeSpec {
+                process: "Repeat_2ufmu".to_owned(),
+                port: "IN".to_owned(),
+                index: None,
+            },
+            metadata: GraphEdgeMetadata::new(None, None, None),
+        },
+    )?;
+    graph.add_edge(
+        "main_graph".to_owned(),
+        GraphEdge {
+            source: GraphNodeSpec {
+                process: "Repeat_2ufmu".to_owned(),
+                port: "OUT".to_owned(),
+                index: None,
+            },
+            data: None,
+            target: GraphNodeSpec {
+                process: "Output_mwr5y".to_owned(),
+                port: "IN".to_owned(),
+                index: None,
+            },
+            metadata: GraphEdgeMetadata::new(None, None, None),
+        },
+    )?;
+    graph.add_edge(
+        "main_graph".to_owned(),
+        GraphEdge {
+            source: GraphNodeSpec {
+                process: "Output_mwr5y".to_owned(),
+                port: "OUT".to_owned(),
+                index: None,
+            },
+            data: None,
+            target: GraphNodeSpec {
+                process: "Drop_raux7".to_owned(),
+                port: "IN".to_owned(),
+                index: None,
+            },
+            metadata: GraphEdgeMetadata::new(None, None, None),
+        },
+    )?;
     Ok(graph)
 }
 
 /// Load graph set from persistence file or create a default set.
-pub fn load_or_create_graph_set() -> std::result::Result<(HashMap<String, Arc<RwLock<Graph>>>, String), std::io::Error> {
+pub fn load_or_create_graph_set(
+) -> std::result::Result<(HashMap<String, Arc<RwLock<Graph>>>, String), std::io::Error> {
     if Path::new(PERSISTENCE_FILE_NAME).exists() {
         let json_data = std::fs::read_to_string(PERSISTENCE_FILE_NAME)?;
         if let Ok(graph_set) = serde_json::from_str::<PersistedGraphSet>(&json_data) {
@@ -150,14 +274,25 @@ pub fn load_or_create_graph_set() -> std::result::Result<(HashMap<String, Arc<Rw
                 graph_map.insert(graph_id, Arc::new(RwLock::new(graph)));
             }
             if graph_map.is_empty() {
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "persisted graph set is empty"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "persisted graph set is empty",
+                ));
             }
             let active = if graph_map.contains_key(&graph_set.active_graph) {
                 graph_set.active_graph
             } else {
-                graph_map.keys().next().expect("already checked non-empty").clone()
+                graph_map
+                    .keys()
+                    .next()
+                    .expect("already checked non-empty")
+                    .clone()
             };
-            info!("loaded multi-graph persistence with {} graph(s), active '{}'", graph_map.len(), active);
+            info!(
+                "loaded multi-graph persistence with {} graph(s), active '{}'",
+                graph_map.len(),
+                active
+            );
             return Ok((graph_map, active));
         }
 
@@ -180,10 +315,12 @@ pub fn load_or_create_graph_set() -> std::result::Result<(HashMap<String, Arc<Rw
 /// Load active graph from persistence, keeping backward compatibility for single-graph callers.
 pub fn load_or_create_graph() -> std::result::Result<Arc<RwLock<Graph>>, std::io::Error> {
     let (graph_map, active_graph) = load_or_create_graph_set()?;
-    graph_map
-        .get(&active_graph)
-        .cloned()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "active graph not found after load"))
+    graph_map.get(&active_graph).cloned().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "active graph not found after load",
+        )
+    })
 }
 
 // module-based components
@@ -193,6 +330,9 @@ include!(concat!(env!("OUT_DIR"), "/build_generated.rs"));
 
 // multi-graph support
 pub mod multi_graph;
+
+// scheduler for new execution model
+pub mod scheduler;
 
 // server module
 pub mod server;
@@ -211,10 +351,6 @@ fn format_duration(duration: Duration) -> String {
         format!("{}s", seconds)
     }
 }
-
-
-
-
 
 //TODO currently panicks if unknown variant
 //TODO currently panicks if field is missing during decoding
@@ -273,22 +409,20 @@ impl RuntimeRuntimeMessage {
     }
 }
 
-
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeRuntimePayload {
     id: String,                        // spec: UUID of this runtime instance
     label: String,                     // spec: human-readable description of the runtime
-    version: String,                   // spec: supported protocol version //TODO which versions are there? implement proper
+    version: String, // spec: supported protocol version //TODO which versions are there? implement proper
     all_capabilities: Vec<Capability>, // spec: capabilities supported by runtime
     capabilities: Vec<Capability>, // spec: capabities for you //TODO implement privilege level restrictions
     graph: String,                 // spec: currently active graph
     #[serde(rename = "type")]
-    runtime: String,    // spec: name of the runtime software, "flowd"
-    namespace: String,             // spec: namespace of components for this project of top-level graph
-    repository: String,            // spec: source code repository of this runtime software //TODO but it is the repo of the graph, is it?
-    repository_version: String,    // spec: repository version of this software build
+    runtime: String, // spec: name of the runtime software, "flowd"
+    namespace: String, // spec: namespace of components for this project of top-level graph
+    repository: String, // spec: source code repository of this runtime software //TODO but it is the repo of the graph, is it?
+    repository_version: String, // spec: repository version of this software build
 }
 
 #[derive(Debug)]
@@ -306,14 +440,16 @@ pub struct Runtime {
     repository_version: String,        // spec: build/repository version
 
     // runtime state
-    status: RuntimeStatus,  // for network:status, network:started, network:stopped
+    status: RuntimeStatus, // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
-    tracing: bool,  //TODO implement
-    processes: ProcessManager,    // currently it is possible (with some caveats, see struct Process) to have the ProcessManager inside this struct here which is also used for Serialize and Deserialize, but in the future the may easily be some more fields in Process neccessary, which cannot be shared between threads, which cannot be cloned, which are not Sync or Send etc. -> then have to move it out into a separate processes variable and hand it over to handle_client() (already prepared) or maybe into a separate thread which owns non-shareable data structures
+    tracing: bool,             //TODO implement
+    boundary_threads: BoundaryThreadManager, // non-component boundary handlers (for example graph outport bridge); scheduler executes components
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
+    scheduler_threads: HashMap<String, std::thread::JoinHandle<()>>, // per-graph scheduler threads
+    schedulers: HashMap<String, Arc<crate::scheduler::Scheduler>>,   // per-graph schedulers
     secrets: HashMap<String, (String, AccessLevel)>, // graph name -> (secret token, access level) for token-based security
-    graphs: multi_graph::MultiGraphManager, // multi-graph support
+    graphs: multi_graph::MultiGraphManager,          // multi-graph support
 }
 
 #[derive(Debug)]
@@ -346,6 +482,16 @@ struct RuntimeStatusSnapshot {
     started: bool,
     running: bool,
     debug: Option<bool>,
+    scheduler_metrics: HashMap<String, SchedulerMetricsSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+struct SchedulerMetricsSnapshot {
+    executions_per_node: HashMap<String, u64>,
+    work_units_per_node: HashMap<String, u64>,
+    time_since_last_execution_ms: HashMap<String, u64>,
+    queue_depth: usize,
+    loop_iterations: u64,
 }
 
 impl Default for RuntimeRuntimePayload {
@@ -353,7 +499,7 @@ impl Default for RuntimeRuntimePayload {
         RuntimeRuntimePayload {
             id: String::from("f18a4924-9d4f-414d-a37c-deadbeef0000"), //TODO actually random UUID
             label: String::from("human-readable description of the runtime"), //TODO useful text
-            version: String::from("0.7"),                             //TODO actually implement that - what about features+changes post-0.7?
+            version: String::from("0.7"), //TODO actually implement that - what about features+changes post-0.7?
             all_capabilities: vec![
                 Capability::ProtocolNetwork,
                 Capability::NetworkPersist,
@@ -382,9 +528,9 @@ impl Default for RuntimeRuntimePayload {
                 Capability::ProtocolTrace,
             ],
             graph: String::from("default_graph"), // currently active graph
-            runtime: String::from("flowd"), //TODO constant - optimize
-            namespace: String::from("main"), // namespace of components TODO implement
-            repository: String::from("https://github.com/ERnsTL/flowd.git"),  //TODO use this feature of building and saving the graph into a Git repo
+            runtime: String::from("flowd"),       //TODO constant - optimize
+            namespace: String::from("main"),      // namespace of components TODO implement
+            repository: String::from("https://github.com/ERnsTL/flowd.git"), //TODO use this feature of building and saving the graph into a Git repo
             repository_version: String::from("0.0.1-ffffffff"), //TODO use actual git commit and actual version
         }
     }
@@ -406,9 +552,11 @@ impl Default for Runtime {
             repository_version: payload.repository_version,
             status: RuntimeStatus::default(),
             tracing: false,
-            processes: ProcessManager::default(),
+            boundary_threads: BoundaryThreadManager::default(),
             watchdog_thread: None,
             watchdog_channel: None,
+            scheduler_threads: HashMap::new(),
+            schedulers: HashMap::new(),
             secrets: HashMap::new(),
             graphs: multi_graph::MultiGraphManager::new(),
         }
@@ -449,7 +597,47 @@ impl Runtime {
     }
 
     fn status_snapshot(&self) -> RuntimeStatusSnapshot {
-        self.status.snapshot()
+        let status = self.status.snapshot();
+        RuntimeStatusSnapshot {
+            time_started: status.time_started,
+            graph: status.graph,
+            started: status.started,
+            running: status.running,
+            debug: status.debug,
+            scheduler_metrics: self.collect_scheduler_metrics(),
+        }
+    }
+
+    fn collect_scheduler_metrics(&self) -> HashMap<String, SchedulerMetricsSnapshot> {
+        let mut snapshots = HashMap::new();
+        for (graph_name, scheduler) in &self.schedulers {
+            let metrics = scheduler.metrics_snapshot();
+            let time_since_last_execution_ms = metrics
+                .time_since_last_execution
+                .iter()
+                .map(|(node_id, duration)| {
+                    let millis = duration.as_millis();
+                    let clamped = if millis > u64::MAX as u128 {
+                        u64::MAX
+                    } else {
+                        millis as u64
+                    };
+                    (node_id.clone(), clamped)
+                })
+                .collect::<HashMap<_, _>>();
+
+            snapshots.insert(
+                graph_name.clone(),
+                SchedulerMetricsSnapshot {
+                    executions_per_node: metrics.executions_per_node,
+                    work_units_per_node: metrics.work_units_per_node,
+                    time_since_last_execution_ms,
+                    queue_depth: metrics.queue_depth,
+                    loop_iterations: metrics.loop_iterations,
+                },
+            );
+        }
+        snapshots
     }
 
     fn new(active_graph: String) -> Self {
@@ -458,12 +646,12 @@ impl Runtime {
         let initial_graph = Arc::new(RwLock::new(Graph::new(
             active_graph.clone(),
             "Initial graph".to_string(),
-            "default".to_string()
+            "default".to_string(),
         )));
         graphs.add_graph(active_graph.clone(), initial_graph);
 
         Runtime {
-            graph: active_graph.clone(),    //TODO any way to avoid the clone and point to the other one?
+            graph: active_graph.clone(), //TODO any way to avoid the clone and point to the other one?
             status: RuntimeStatus {
                 time_started: chrono::DateTime::<Utc>::MIN_UTC, // zero value - //TODO rather use None
                 graph: active_graph,
@@ -472,7 +660,9 @@ impl Runtime {
                 debug: None,
             },
             graphs,
-            ..Default::default()  //TODO mock other fields as well
+            schedulers: HashMap::new(),
+            scheduler_threads: HashMap::new(),
+            ..Default::default() //TODO mock other fields as well
         }
     }
 
@@ -501,25 +691,45 @@ impl Runtime {
             if let Some(graph_arc) = self.graphs.get_graph(&graph_id) {
                 let graph_read = graph_arc.read().expect("lock poisoned");
                 let graph_value = serde_json::to_value(&*graph_read).map_err(|err| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to serialize graph '{}': {}", graph_id, err))
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("failed to serialize graph '{}': {}", graph_id, err),
+                    )
                 })?;
                 let graph_obj: Graph = serde_json::from_value(graph_value).map_err(|err| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to clone graph '{}': {}", graph_id, err))
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("failed to clone graph '{}': {}", graph_id, err),
+                    )
                 })?;
                 persisted_graphs.insert(graph_id, graph_obj);
             }
         }
         if persisted_graphs.is_empty() {
-            persisted_graphs.insert(self.graph.clone(), serde_json::from_value(serde_json::to_value(graph).map_err(|err| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to serialize fallback graph: {}", err))
-            })?).map_err(|err| {
-                std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to clone fallback graph: {}", err))
-            })?);
+            persisted_graphs.insert(
+                self.graph.clone(),
+                serde_json::from_value(serde_json::to_value(graph).map_err(|err| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("failed to serialize fallback graph: {}", err),
+                    )
+                })?)
+                .map_err(|err| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("failed to clone fallback graph: {}", err),
+                    )
+                })?,
+            );
         }
         let active_graph = if persisted_graphs.contains_key(&self.graph) {
             self.graph.clone()
         } else {
-            persisted_graphs.keys().next().expect("graph set is non-empty").clone()
+            persisted_graphs
+                .keys()
+                .next()
+                .expect("graph set is non-empty")
+                .clone()
         };
         let graph_set = PersistedGraphSet {
             active_graph,
@@ -527,35 +737,62 @@ impl Runtime {
         };
 
         let mut output = File::create(PERSISTENCE_FILE_NAME)?;
-        output.write(serde_json::to_string_pretty(&graph_set).map_err(|err| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to encode graph set: {}", err))
-        })?.as_bytes())?;
+        output.write(
+            serde_json::to_string_pretty(&graph_set)
+                .map_err(|err| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("failed to encode graph set: {}", err),
+                    )
+                })?
+                .as_bytes(),
+        )?;
 
         Ok(())
     }
 
-    //fn start(&mut self, graph: &Graph, process_manager: &mut ProcessManager) -> std::result::Result<&RuntimeStatus, std::io::Error> {
-    fn start(&mut self, graph: &Graph, components: &ComponentLibrary, graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<&RuntimeStatus, std::io::Error> {
+    //fn start(&mut self, graph: &Graph, boundary_threads: &mut BoundaryThreadManager) -> std::result::Result<&RuntimeStatus, std::io::Error> {
+    fn start(
+        &mut self,
+        graph: &Graph,
+        components: &ComponentLibrary,
+        graph_inout_arc: Arc<Mutex<GraphInportOutportHolder>>,
+        runtime: Arc<RwLock<Runtime>>,
+    ) -> std::result::Result<&RuntimeStatus, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
-        if self.status.running || !self.processes.is_empty() || self.watchdog_thread.is_some() {
+        if self.status.running || !self.boundary_threads.is_empty() || self.watchdog_thread.is_some() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
                 String::from("network already running or previous shutdown incomplete"),
             ));
         }
+
+        // Initialize scheduler for this graph if not already done
+        let graph_name = graph.properties.name.clone();
+        if !self.schedulers.contains_key(&graph_name) {
+            self.schedulers.insert(
+                graph_name.clone(),
+                Arc::new(crate::scheduler::Scheduler::new()),
+            );
+        }
+
+        // Get scheduler reference for component registration
+        let scheduler_arc = self.schedulers.get(&graph_name).unwrap().clone();
         // get all graph in and out ports
-        let mut graph_inout = graph_inout_arc.lock().expect("could not acquire lock for network start()");
+        let mut graph_inout = graph_inout_arc
+            .lock()
+            .expect("could not acquire lock for network start()");
         //TODO implement
         //TODO implement: what to do with the old running processes, stop using signal channel? What if they dont respond?
         //TODO implement: what if the name of the node changes? then the process is not found by that name anymore in the process manager
 
-        //TODO check if self.processes.len() == 0 AKA stopped
+        //TODO check if self.boundary_threads.len() == 0 AKA stopped
 
         //TODO optimize thread sync and packet transfer
         // use [`channel`]s, [`Condvar`]s, [`Mutex`]es or [`join`]
         // -> https://doc.rust-lang.org/std/sync/index.html
         // or even basic:  https://doc.rust-lang.org/std/thread/fn.park.html
-        //    -> would have to hand over Arc<ProcessManager> to each process, then it gets the thread handle out of this.
+        //    -> would have to hand over Arc<BoundaryThreadManager> to each boundary handler, then it gets the thread handle out of this.
         //    Problem:  Does not know which process is on the other end, so would also have to hand over the process name on the other end. ugly.
         // -> better to hand over something that can be pre-generated and cloned = no difference between "sender" and "receiver"
         // -> https://doc.rust-lang.org/std/sync/struct.Condvar.html
@@ -595,7 +832,16 @@ impl Runtime {
         // prepare runtime reference for watchdong stopping the network
         let watchdog_runtime = runtime;
         // prepare per-process watchdog control + response channels
-        let mut watchdog_threadandsignal: HashMap<String, (std::sync::mpsc::SyncSender<MessageBuf>, Thread, Arc<AtomicBool>, ProcessSignalSource, bool)> = HashMap::new();
+        let mut watchdog_threadandsignal: HashMap<
+            String,
+            (
+                std::sync::mpsc::SyncSender<MessageBuf>,
+                Thread,
+                Arc<AtomicBool>,
+                ProcessSignalSource,
+                bool,
+            ),
+        > = HashMap::new();
 
         // arrayports: check if multiple edges originate from the same source port
         // and verify that port is declared as arrayport.
@@ -608,7 +854,11 @@ impl Runtime {
             if let Some(ports) = known_source_processes.get_vec_mut(&edge.source.process) {
                 if ports.contains(&edge.source.port) {
                     // check if source port is array port
-                    let component_name = &graph.nodes.get(&edge.source.process).expect("source process not found").component;
+                    let component_name = &graph
+                        .nodes
+                        .get(&edge.source.process)
+                        .expect("source process not found")
+                        .component;
                     for component in components.available.iter() {
                         if component.name == *component_name {
                             for port in component.out_ports.iter() {
@@ -616,7 +866,10 @@ impl Runtime {
                                     if !port.is_arrayport {
                                         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges from source process port which is not an array port")));
                                     } else {
-                                        debug!("found correct in-use array outport {}.{}", edge.source.process, edge.source.port);
+                                        debug!(
+                                            "found correct in-use array outport {}.{}",
+                                            edge.source.process, edge.source.port
+                                        );
                                     }
                                 }
                             }
@@ -628,7 +881,8 @@ impl Runtime {
                 }
             } else {
                 // first use of that process
-                known_source_processes.insert(edge.source.process.clone(), edge.source.port.clone());
+                known_source_processes
+                    .insert(edge.source.process.clone(), edge.source.port.clone());
             }
         }
         drop(known_source_processes);
@@ -639,16 +893,24 @@ impl Runtime {
                 // check for multiple connections to the same target port
                 if ports.contains(&edge.target.port) {
                     // check if target port is array port, since we now have multiple connections into that target port
-                    let component_name = &graph.nodes.get(&edge.target.process).expect("target process not found").component;
+                    let component_name = &graph
+                        .nodes
+                        .get(&edge.target.process)
+                        .expect("target process not found")
+                        .component;
                     for component in components.available.iter() {
                         if component.name == *component_name {
                             for port in component.in_ports.iter() {
                                 if port.name == edge.target.port {
                                     if !port.is_arrayport {
                                         // error
-                                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges to target process port which is not an array port")));    //TODO say which ones
+                                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges to target process port which is not an array port")));
+                                    //TODO say which ones
                                     } else {
-                                        debug!("found correct in-use array inport {}.{}", edge.target.process, edge.target.port);
+                                        debug!(
+                                            "found correct in-use array inport {}.{}",
+                                            edge.target.process, edge.target.port
+                                        );
                                     }
                                 }
                             }
@@ -660,127 +922,210 @@ impl Runtime {
                 }
             } else {
                 // add to list, first use of that process
-                known_target_processes.insert(edge.target.process.clone(), edge.target.port.clone());
+                known_target_processes
+                    .insert(edge.target.process.clone(), edge.target.port.clone());
             }
         }
         drop(known_target_processes);
 
         // generate all connections
         struct ProcPorts {
-            inports: ProcessInports,    // including ports with IIPs
+            inports: ProcessInports, // including ports with IIPs
             outports: ProcessOutports,
-            wake_notify: WakeupNotify,    // for notification of this process
         }
         impl Default for ProcPorts {
             fn default() -> Self {
                 ProcPorts {
                     inports: ProcessInports::new(),
                     outports: ProcessOutports::new(),
-                    wake_notify: std::thread::current(),    //TODO not sure if that makes sense
                 }
             }
         }
         impl std::fmt::Debug for ProcPorts {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-               f.debug_struct("ProcPorts").field("inports", &self.inports).field("outports", &self.outports).finish()
+                f.debug_struct("ProcPorts")
+                    .field("inports", &self.inports)
+                    .field("outports", &self.outports)
+                    .finish()
             }
         }
         let mut ports_all: HashMap<String, ProcPorts> = HashMap::with_capacity(graph.nodes.len());
         // set up keys
         for proc_name in graph.nodes.keys().into_iter() {
             //TODO would be nice to know the name of the process
-            ports_all.try_insert(proc_name.clone(), ProcPorts::default()).expect("preparing edges for process failed: process name already exists");
+            ports_all
+                .try_insert(proc_name.clone(), ProcPorts::default())
+                .expect("preparing edges for process failed: process name already exists");
         }
         //TODO using graph name as fake process, but does that imply we cannot change the graph name during runtime?
         if graph.inports.len() > 0 {
-            ports_all.try_insert(format!("{}-IN", graph.properties.name), ProcPorts::default()).expect("preparing inport edges for graph failed: process name already exists");
+            ports_all
+                .try_insert(
+                    format!("{}-IN", graph.properties.name),
+                    ProcPorts::default(),
+                )
+                .expect("preparing inport edges for graph failed: process name already exists");
         }
         if graph.outports.len() > 0 {
-            ports_all.try_insert(format!("{}-OUT", graph.properties.name), ProcPorts::default()).expect("preparing outport edges for graph failed: process name already exists");
+            ports_all
+                .try_insert(
+                    format!("{}-OUT", graph.properties.name),
+                    ProcPorts::default(),
+                )
+                .expect("preparing outport edges for graph failed: process name already exists");
         }
+
+        // Clone scheduler for signaling closures
+        let scheduler_for_signaling = scheduler_arc.clone();
         // fill keys with connections
         for edge in graph.edges.iter() {
             if let Some(iip) = &edge.data {
                 // prepare IIP edge
-                debug!("preparing edge from IIP to {}.{}", edge.target.process, edge.target.port);
+                debug!(
+                    "preparing edge from IIP to {}.{}",
+                    edge.target.process, edge.target.port
+                );
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
-                sink.push(iip.clone().into_bytes()).expect("failed to send IIP into process channel");    //TODO optimize as_bytes() / clone or String in Edge struct
-                // insert into inports of target process
-                let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
+                sink.push(iip.clone().into_bytes())
+                    .expect("failed to send IIP into process channel"); //TODO optimize as_bytes() / clone or String in Edge struct
+                                                                        // insert into inports of target process
+                let targetproc = ports_all
+                    .get_mut(&edge.target.process)
+                    .expect("process IIP target assignment process not found");
                 // arrayports: insert, but remember that this is a multimap
                 // Compatibility: graph payloads from clients/tests often use lowercase "in"/"out",
                 // but built-in components require uppercase port keys ("IN"/"OUT").
-                targetproc.inports.insert(edge.target.port.to_ascii_uppercase(), source);
+                targetproc
+                    .inports
+                    .insert(edge.target.port.to_ascii_uppercase(), source);
                 // assign into outports of source process
                 // nothing to do in case of IIP - this also means that sink will go ouf ot scope and that source.is_abandoned() = Arc::strong_count() will be 1
                 // in summary: IIP ports are closed/abandoned
             } else {
                 // prepare edge
-                debug!("preparing edge from {}.{} to {}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
+                debug!(
+                    "preparing edge from {}.{} to {}.{}",
+                    edge.source.process, edge.source.port, edge.target.process, edge.target.port
+                );
                 let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
                 // insert into inports of target process
-                let targetproc = ports_all.get_mut(&edge.target.process).expect("process IIP target assignment process not found");
-                let targetproc_wake_notify = targetproc.wake_notify.clone();
+                let targetproc = ports_all
+                    .get_mut(&edge.target.process)
+                    .expect("process IIP target assignment process not found");
                 // arrayports: insert, but remember that this is a multimap
                 // Compatibility: normalize protocol port names to component runtime port names.
-                targetproc.inports.insert(edge.target.port.to_ascii_uppercase(), source);
+                targetproc
+                    .inports
+                    .insert(edge.target.port.to_ascii_uppercase(), source);
                 // assign into outports of source process
-                let sourceproc = ports_all.get_mut(&edge.source.process).expect("process source assignment process not found");
+                let sourceproc = ports_all
+                    .get_mut(&edge.source.process)
+                    .expect("process source assignment process not found");
                 // arrayports: insert, but remember that this is a multimap
-                sourceproc.outports.insert(edge.source.port.to_ascii_uppercase(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.target.process.clone()) } );
+                let target_process = edge.target.process.clone();
+                let scheduler_clone = scheduler_for_signaling.clone();
+                sourceproc.outports.insert(
+                    edge.source.port.to_ascii_uppercase(),
+                    ProcessEdgeSink {
+                        sink: sink,
+                        wakeup: None,
+                        proc_name: Some(target_process.clone()),
+                        signal_ready: Some(Box::new(move || {
+                            let _ = scheduler_clone.signal_ready(&target_process);
+                        })),
+                    },
+                );
             }
         }
         for (public_name, edge) in graph.inports.iter() {
             // prepare edge
-            debug!("preparing edge from graph {} to {}.{}", public_name, edge.process, edge.port);
+            debug!(
+                "preparing edge from graph {} to {}.{}",
+                public_name, edge.process, edge.port
+            );
             let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
             // insert into inports of target process
-            let targetproc = ports_all.get_mut(&edge.process).expect("graph target assignment process not found");
-            let targetproc_wake_notify = targetproc.wake_notify.clone();
+            let targetproc = ports_all
+                .get_mut(&edge.process)
+                .expect("graph target assignment process not found");
             // arrayports: insert, but remember that this is a multimap
             // Compatibility: normalize graph export mapping to uppercase runtime port names.
-            targetproc.inports.insert(edge.port.to_ascii_uppercase(), source);
+            targetproc
+                .inports
+                .insert(edge.port.to_ascii_uppercase(), source);
             // assign into outports of source process
             // source process name = graphname-IN
-            let sourceproc: &mut ProcPorts = ports_all.get_mut(format!("{}-IN", graph.properties.name).as_str()).expect("graph source assignment process not found");
+            let sourceproc: &mut ProcPorts = ports_all
+                .get_mut(format!("{}-IN", graph.properties.name).as_str())
+                .expect("graph source assignment process not found");
             // arrayports: insert, but remember that this is a multimap
-            sourceproc.outports.insert(public_name.clone(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(edge.process.clone()) } );
+            let target_process = edge.process.clone();
+            let scheduler_clone = scheduler_for_signaling.clone();
+            sourceproc.outports.insert(
+                public_name.clone(),
+                ProcessEdgeSink {
+                    sink: sink,
+                    wakeup: None, // Scheduler handles signaling, no thread wakeup needed
+                    proc_name: Some(target_process.clone()),
+                    signal_ready: Some(Box::new(move || {
+                        let _ = scheduler_clone.signal_ready(&target_process);
+                    })),
+                },
+            );
         }
         for (public_name, edge) in graph.outports.iter() {
             // prepare edge
-            debug!("preparing edge from {}.{} to graph {}", edge.process, edge.port, public_name);
+            debug!(
+                "preparing edge from {}.{} to graph {}",
+                edge.process, edge.port, public_name
+            );
             let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
             // insert into inports of target process
             // target process name = graphname-OUT
-            let targetproc = ports_all.get_mut(format!("{}-OUT", graph.properties.name).as_str()).expect("graph target assignment process not found");
-            let targetproc_wake_notify = targetproc.wake_notify.clone();
+            let targetproc = ports_all
+                .get_mut(format!("{}-OUT", graph.properties.name).as_str())
+                .expect("graph target assignment process not found");
             // arrayports: insert, but remember that this is a multimap
             targetproc.inports.insert(public_name.clone(), source);
             // assign into outports of source process
-            let sourceproc = ports_all.get_mut(&edge.process).expect("graph source assignment process not found");
+            let sourceproc = ports_all
+                .get_mut(&edge.process)
+                .expect("graph source assignment process not found");
             // arrayports: insert, but remember that this is a multimap
-            sourceproc.outports.insert(edge.port.to_ascii_uppercase(), ProcessEdgeSink { sink: sink, wakeup: Some(targetproc_wake_notify), proc_name: Some(format!("{}-OUT", graph.properties.name)) } );
+            sourceproc.outports.insert(
+                edge.port.to_ascii_uppercase(),
+                ProcessEdgeSink {
+                    sink: sink,
+                    wakeup: None,
+                    proc_name: Some(format!("{}-OUT", graph.properties.name)),
+                    signal_ready: None,
+                },
+            );
         }
 
         // generate processes and assign prepared connections
-        let thread_wake_handles: Arc<Mutex<HashMap<String, WakeupNotify>>> = Arc::new(Mutex::new(HashMap::new())); // these already exist in ports_all but they get consumed and removed so for the -IN and -OUT they wont exist anymore
         let mut found: bool;
         let mut found2: bool;
         for (proc_name, node) in graph.nodes.iter() {
-            debug!("setting up process name={} component={}", proc_name, node.component);
+            debug!(
+                "setting up process name={} component={}",
+                proc_name, node.component
+            );
             //TODO is there anything in .metadata that affects process setup?
 
             // get prepared ports for this process
-            let ports_this: ProcPorts = ports_all.remove(proc_name).expect("prepared connections for a node not found, source+target nodes in edges != nodes");
+            let ports_this: ProcPorts = ports_all.remove(proc_name).expect(
+                "prepared connections for a node not found, source+target nodes in edges != nodes",
+            );
             //TODO would be great to have the port name here for diagnostics
             let inports: ProcessInports = ports_this.inports;
             //TODO would be great to have the port name here for diagnostics
-            let mut outports: ProcessOutports = ports_this.outports;
+            let outports: ProcessOutports = ports_this.outports;
 
             // check if all ports exist
             found = false;
@@ -811,7 +1156,9 @@ impl Runtime {
                                     break; //TODO optimize condition flow, is mix of break+continue
                                 }
                             }
-                            if found2 { continue; } //TODO optimize condition flow, is mix of break+continue
+                            if found2 {
+                                continue;
+                            } //TODO optimize condition flow, is mix of break+continue
 
                             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required port {} for component {}", proc_name, &inport.name, component.name))));
                         }
@@ -842,7 +1189,9 @@ impl Runtime {
                                     break; //TODO optimize condition flow, is mix of break+continue
                                 }
                             }
-                            if found2 { continue; } //TODO optimize condition flow, is mix of break+continue
+                            if found2 {
+                                continue;
+                            } //TODO optimize condition flow, is mix of break+continue
 
                             return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from(format!("unconnected port checking: process {} is missing required outport {} on component {}", proc_name, &outport.name, component.name))));
                         }
@@ -854,58 +1203,76 @@ impl Runtime {
                 }
             }
             if !found {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("unconnected port checking could not find component in component library")));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from(
+                        "unconnected port checking could not find component in component library",
+                    ),
+                ));
             }
 
             // prepare process signal channel
-            let (signalsink, signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+            let (_signalsink, signalsource) =
+                std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
 
-            // process itself in thread
+            // prepare component for scheduler execution
             let component_name = node.component.clone();
-            let joinhandlesref = thread_wake_handles.clone();
-            //let ports_this_wake_notify = ports_this.wake_notify.clone();
-            let (watchdog_signalsink_clone, watchdog_signalsource_clone) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+            let (watchdog_signalsink_clone, _watchdog_signalsource_clone) =
+                std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
             let graph_inout_ref = create_graph_inout_handle(graph_inout_arc.clone());
-            let process_exited = Arc::new(AtomicBool::new(false));
-            let process_exited_in_thread = process_exited.clone();
-            let joinhandle = thread::Builder::new().name(proc_name.clone()).spawn(move || {
-                // marks process as exited even when unwinding from panic
-                let _thread_exit_flag = ThreadExitFlag::new(process_exited_in_thread);
-                debug!("this is process thread, waiting for Thread replacement");
-                thread::park();
-                debug!("replacing Thread objects");
 
-                // replace all process names with Thread handles
-                // assumption that process names are unique but that is guaranteed by the HashMap key uniqueness
-                // arrayports: do a flat iteration over all outports because of multimap
-                for outport in outports.flat_iter_mut() {
-                    let proc_name = outport.1.proc_name.as_ref().expect("wtf no proc_name is None during outport Thread handle replacement");
-                    let joinhandles_locked = joinhandlesref.lock().expect("failed to get lock for Thread handle replacement");
-                    let thr = joinhandles_locked.get(proc_name).expect("wtf sink process not found during outport Thread handle replacement");
-                    // now the actual replacement - replace wakeup from None with the handle and the process name with None
-                    outport.1.wakeup = Some(thr.clone());   // before this was None, now replaced with Some(Thread)
-                    //NOTE: technically, the process name is not needed any more, but we leave it in for debugging
-                    //outport.1.proc_name = None; // before this was Some(String), now we could replace it with None
+            // instantiate component for scheduler
+            let component_instance: Box<dyn Component> = match instantiate_component(
+                component_name.as_str(),
+                inports,
+                outports,
+                signalsource,
+                watchdog_signalsink_clone,
+                graph_inout_ref,
+            ) {
+                Some(component) => component,
+                None => {
+                    error!("failed to instantiate component in runtime.start: component not found");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("component '{}' not found", component_name),
+                    ));
                 }
-                drop(joinhandlesref);   // not needed anymore, we got the handles
+            };
 
-                // component
-                info!("starting");
-                if let Err(err) = ComponentLibrary::new_component(component_name, inports, outports, signalsource, watchdog_signalsink_clone, graph_inout_ref) {
-                    error!("failed to start component in runtime.start: {}", err);
+            // determine budget class based on component type
+            let budget_class = match component_name.as_str() {
+                // High-throughput components get higher budget
+                "Count" | "Text" | "Repeat" | "Drop" => BudgetClass::Normal,
+                // I/O bound components get lower budget to allow more concurrency
+                "FileReader" | "FileWriter" | "HttpClient" | "TcpClient" => BudgetClass::Heavy,
+                // Real-time budgets are reserved for components that have migrated to scheduler-native
+                // non-blocking `process()` execution. Cron/Delay still use legacy `run()` and therefore
+                // are intentionally not classified as realtime yet.
+                "Cron" | "Delay" => {
+                    warn!(
+                        "component '{}' is not yet scheduler-native; assigning non-realtime budget",
+                        component_name
+                    );
+                    BudgetClass::Heavy
                 }
-            }).expect("thread start failed");
+                // Default to normal for unknown components
+                _ => BudgetClass::Normal,
+            };
 
-            // store thread handle for wakeup in components
-            thread_wake_handles.lock().expect("failed to get lock posting thread handle").insert(proc_name.clone(), joinhandle.thread().clone());
-            //thread_wake_handles.insert(proc_name.clone(), ports_this.wake_notify);
-            // store process signal channel and thread handle for watchdog thread
-            watchdog_threadandsignal.insert(proc_name.clone(), (signalsink.clone(), joinhandle.thread().clone(), process_exited, watchdog_signalsource_clone, true));
-            // store process signal channel and join handle
-            self.processes.insert(proc_name.clone(), Process { signal: signalsink, joinhandle: joinhandle });
+            // register component with scheduler
+            scheduler_arc.add_node(proc_name.clone(), budget_class);
+
+            // add component to scheduler
+            scheduler_arc.add_component(component_instance, proc_name.clone());
+        }
+
+        // Signal all nodes as ready initially to start execution
+        for node_id in scheduler_arc.node_ids() {
+            scheduler_arc.signal_ready(&node_id);
         }
         // work off graphname-IN and graphname-OUT special processes for graph inports and graph outports
-        //TODO the signal channel and joinhandle of the graph outport process/thread could also simply be stored in the processes variable with all other FBP processes
+        //TODO the signal channel and joinhandle of the graph outport process/thread could also simply be stored in boundary_threads with all other boundary handlers
         graph_inout.inports = None;
         graph_inout.outports = None;
         if ports_all.len() > 0 {
@@ -914,129 +1281,182 @@ impl Runtime {
                 // target datastructure
                 let mut outports: HashMap<String, ProcessEdgeSink> = HashMap::new();
                 // get ports for this special component
-                let ports_this: ProcPorts = ports_all.remove(format!("{}-IN", graph.properties.name).as_str()).expect("prepared connections for graph inports not found");
-                // add wakeup handles and sinks of all target processes (translate target proc_name into join_handle)
+                let ports_this: ProcPorts = ports_all
+                    .remove(format!("{}-IN", graph.properties.name).as_str())
+                    .expect("prepared connections for graph inports not found");
+                // add sinks of all target processes (no thread wakeup needed for scheduled components)
                 for (port_name, mut edge) in ports_this.outports {
                     // arrayports: check if there are multiple edges going out of the graph inport, which is not allowed
                     if edge.len() != 1 {
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, String::from("multiple edges from graph inport")));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            String::from("multiple edges from graph inport"),
+                        ));
                     }
-                    // get targetproc
-                    let targetproc_wake_notify = thread_wake_handles.lock().expect("could not lock thread wake handles for getting Thread wake handle").get(edge[0].proc_name.as_ref().expect("target process for graph inport missing name").as_str()).expect("target process for graph inport not found").clone();
                     // insert that port
                     let edge0 = edge.pop().unwrap();
-                    outports.insert(port_name, ProcessEdgeSink { sink: edge0.sink, wakeup: Some(targetproc_wake_notify), proc_name: edge0.proc_name });
+                    outports.insert(
+                        port_name,
+                        ProcessEdgeSink {
+                            sink: edge0.sink,
+                            wakeup: None,
+                            proc_name: edge0.proc_name,
+                            signal_ready: edge0.signal_ready,
+                        },
+                    );
                 }
                 // save the inports (where we put packets into) as the graph inport channel handles; they are "outport handles" because they are being written into (packet sink)
                 graph_inout.inports = Some(outports);
             }
             if ports_all.contains_key(format!("{}-OUT", graph.properties.name).as_str()) {
                 // get ports for this special component, of interest here are the inports (source channels)
-                let ports_this: ProcPorts = ports_all.remove(format!("{}-OUT", graph.properties.name).as_str()).expect("prepared connections for graph outports not found");
+                let ports_this: ProcPorts = ports_all
+                    .remove(format!("{}-OUT", graph.properties.name).as_str())
+                    .expect("prepared connections for graph outports not found");
                 let mut inports = ports_this.inports;
                 // prepare process signal channel
-                let (signalsink, signalsource): (ProcessSignalSink, ProcessSignalSource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+                let (signalsink, signalsource): (ProcessSignalSink, ProcessSignalSource) =
+                    std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
                 // start thread, will move signalsource, inports
                 let graph_name = graph.properties.name.clone(); //TODO cannot change graph name during runtime because of this
-                //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
+                                                                //TODO optimize; WebSocket is not Copy, but a WebSocket can be re-created from the inner TcpStream, which has a try_clone()
                 let graph_inoutref = graph_inout_arc.clone();
                 //let ports_this_wake_notify = ports_this.wake_notify.clone();
                 let graph_out_exited = Arc::new(AtomicBool::new(false));
                 let graph_out_exited_in_thread = graph_out_exited.clone();
-                let (_watchdog_graph_out_signalsink, watchdog_graph_out_signalsource) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
-                let joinhandle = thread::Builder::new().name(format!("{}-OUT", graph.properties.name)).spawn(move || {
-                    // marks graph out handler as exited even when unwinding from panic
-                    let _thread_exit_flag = ThreadExitFlag::new(graph_out_exited_in_thread);
-                    let signals = signalsource;
-                    // arrayports: Note that this does currently not handle arrayports, but since this is forbidden via the graph definition, we can ignore that for now //TODO add check
-                    if inports.len() == 0 {
-                        error!("no graph inports found, exiting");
-                        return;
-                    }
-                    //let mut websocket = tungstenite::WebSocket::from_raw_socket(websocket_stream, tungstenite::protocol::Role::Server, None);
-                    debug!("GraphOutports is now run()ning!");
-
-                    // inform FBP Network Protocol clients that graphout ports are now connected (runtime:packet event type = connect)
-                    //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
-                    for port_name in inports.keys() {
-                        send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new_connect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
-                    }
-
-                    // read IPs
-                    loop {
-                        trace!("begin of iteration");
-                        // check signals
-                        //TODO optimize, there is also try_recv() and recv_timeout()
-                        if let Ok(ip) = signals.try_recv() {
-                            //TODO optimize string conversions
-                            trace!("received signal ip: {}", str::from_utf8(&ip).expect("invalid utf-8"));    //TODO optimize conversion
-                            // stop signal
-                            if ip == b"stop" {    //TODO optimize conversion
-                                info!("got stop signal, exiting");
-                                break;
-                            }
+                let (_watchdog_graph_out_signalsink, watchdog_graph_out_signalsource) =
+                    std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+                let joinhandle = thread::Builder::new()
+                    .name(format!("{}-OUT", graph.properties.name))
+                    .spawn(move || {
+                        // marks graph out handler as exited even when unwinding from panic
+                        let _thread_exit_flag = ThreadExitFlag::new(graph_out_exited_in_thread);
+                        let signals = signalsource;
+                        // arrayports: Note that this does currently not handle arrayports, but since this is forbidden via the graph definition, we can ignore that for now //TODO add check
+                        if inports.len() == 0 {
+                            error!("no graph inports found, exiting");
+                            return;
                         }
-                        // receive on all inports
-                        for (port_name, inport) in inports.iter_mut() {
-                            //TODO while !inport.is_empty() {
-                            loop {
-                                if let Ok(ip) = inport.pop() {
-                                    // output the packet data with newline
-                                    debug!("got a packet for graph outport {}", port_name);
-                                    trace!("{}", str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid conversion here or use from_raw_parts?
+                        //let mut websocket = tungstenite::WebSocket::from_raw_socket(websocket_stream, tungstenite::protocol::Role::Server, None);
+                        debug!("GraphOutports is now run()ning!");
 
-                                    // send out to FBP network protocol client
-                                    debug!("sending out to client...");
-                                    //TODO optimize lock only once for all packets available in inport buffer
-                                    send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new(RuntimePacketResponsePayload {
-                                        port: port_name.clone(),    //TODO optimize
-                                        event: RuntimePacketEvent::Data,
-                                        typ: None,   //TODO implement properly, OTOH it is an optional field
-                                        schema: None,
-                                        graph: graph_name.clone(),
-                                        payload: Some(str::from_utf8(&ip).expect("non utf-8 data").to_owned()),   //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
-                                                // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
-                                    }));
-                                    debug!("done");
-                                } else {
-                                    //TODO optimize unlock graph_inout here
+                        // inform FBP Network Protocol clients that graphout ports are now connected (runtime:packet event type = connect)
+                        //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
+                        for port_name in inports.keys() {
+                            send_runtime_packet(
+                                &graph_inoutref,
+                                &RuntimePacketResponse::new_connect(
+                                    graph_name.clone(),
+                                    port_name.clone(),
+                                    None,
+                                    None,
+                                ),
+                            ); //TODO can we save cloning graph_name several times?
+                        }
+
+                        // read IPs
+                        loop {
+                            trace!("begin of iteration");
+                            // check signals
+                            //TODO optimize, there is also try_recv() and recv_timeout()
+                            if let Ok(ip) = signals.try_recv() {
+                                //TODO optimize string conversions
+                                trace!(
+                                    "received signal ip: {}",
+                                    str::from_utf8(&ip).expect("invalid utf-8")
+                                ); //TODO optimize conversion
+                                   // stop signal
+                                if ip == b"stop" {
+                                    //TODO optimize conversion
+                                    info!("got stop signal, exiting");
                                     break;
                                 }
                             }
+                            // receive on all inports
+                            for (port_name, inport) in inports.iter_mut() {
+                                //TODO while !inport.is_empty() {
+                                loop {
+                                    if let Ok(ip) = inport.pop() {
+                                        // output the packet data with newline
+                                        debug!("got a packet for graph outport {}", port_name);
+                                        trace!("{}", str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid conversion here or use from_raw_parts?
+
+                                        // send out to FBP network protocol client
+                                        debug!("sending out to client...");
+                                        //TODO optimize lock only once for all packets available in inport buffer
+                                        send_runtime_packet(
+                                            &graph_inoutref,
+                                            &RuntimePacketResponse::new(
+                                                RuntimePacketResponsePayload {
+                                                    port: port_name.clone(), //TODO optimize
+                                                    event: RuntimePacketEvent::Data,
+                                                    typ: None, //TODO implement properly, OTOH it is an optional field
+                                                    schema: None,
+                                                    graph: graph_name.clone(),
+                                                    payload: Some(
+                                                        str::from_utf8(&ip)
+                                                            .expect("non utf-8 data")
+                                                            .to_owned(),
+                                                    ), //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
+                                                       // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
+                                                },
+                                            ),
+                                        );
+                                        debug!("done");
+                                    } else {
+                                        //TODO optimize unlock graph_inout here
+                                        break;
+                                    }
+                                }
+                            }
+                            trace!("-- end of iteration");
+                            std::thread::park_timeout(Duration::from_millis(5));
+                            //condvar_block!(&*ports_this_wake_notify);
                         }
-                        trace!("-- end of iteration");
-                        std::thread::park();
-                        //condvar_block!(&*ports_this_wake_notify);
-                    }
-                    // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
-                    //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
-                    info!("notifying clients of graph outports disconnect");
-                    for port_name in inports.keys() {
-                        send_runtime_packet(&graph_inoutref, &RuntimePacketResponse::new_disconnect(graph_name.clone(), port_name.clone(), None, None));  //TODO can we save cloning graph_name several times?
-                    }
+                        // inform FBP Network Protocol clients that graphout ports are now disconnected (runtime:packet event type = disconnect)
+                        //NOTE: inports is from the perspective of the GraphOut handler thread, so these are the graph outports
+                        info!("notifying clients of graph outports disconnect");
+                        for port_name in inports.keys() {
+                            send_runtime_packet(
+                                &graph_inoutref,
+                                &RuntimePacketResponse::new_disconnect(
+                                    graph_name.clone(),
+                                    port_name.clone(),
+                                    None,
+                                    None,
+                                ),
+                            ); //TODO can we save cloning graph_name several times?
+                        }
 
-                    info!("exiting");
-                }).expect("thread start failed");
+                        info!("exiting");
+                    })
+                    .expect("thread start failed");
 
-                // store thread handle for wakeup in components
-                thread_wake_handles.lock().expect("failed to get lock posting graph outport thread handle").insert(format!("{}-OUT", graph.properties.name), joinhandle.thread().clone());
-                //thread_wake_handles.insert(format!("{}-OUT", graph.properties.name), ports_this.wake_notify);
                 // store process signal channel and thread handle for watchdog thread
                 watchdog_threadandsignal.insert(
                     format!("{}-OUT", graph.properties.name),
-                    (signalsink.clone(), joinhandle.thread().clone(), graph_out_exited, watchdog_graph_out_signalsource, false),
+                    (
+                        signalsink.clone(),
+                        joinhandle.thread().clone(),
+                        graph_out_exited,
+                        watchdog_graph_out_signalsource,
+                        false,
+                    ),
                 );
                 // store process signal channel and join handle so that the other processes writing into this graph outport component can find it
-                self.processes.insert(format!("{}-OUT", graph.properties.name), Process {
-                    signal: signalsink,
-                    joinhandle: joinhandle,
-                });
+                self.boundary_threads.insert(
+                    format!("{}-OUT", graph.properties.name),
+                    BoundaryThread {
+                        signal: signalsink,
+                        joinhandle: joinhandle,
+                    },
+                );
 
                 // save single joinhandle and signal for that component
                 //TODO optimize, cannot clone joinhandle
                 //TODO currentcy graph_inout.outports is unused
                 /*
-                graph_inout.outports = Some(Process {
+                graph_inout.outports = Some(BoundaryThread {
                     signal: signalsink,
                     joinhandle: joinhandle,
                 })
@@ -1048,13 +1468,13 @@ impl Runtime {
         // sanity check
         if ports_all.len() != 0 {
             // reset to known state
-            self.processes.clear();
+            self.boundary_threads.clear();
             // report error
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, String::from("there are ports for processes left over, source+target nodes in edges != nodes")));
         }
 
         // unpark all processes since all joinhandles are now known and so that they can replace the process names with the join handles and instantiate their components
-        for proc in self.processes.iter() {
+        for proc in self.boundary_threads.iter() {
             proc.1.joinhandle.thread().unpark();
         }
 
@@ -1062,10 +1482,11 @@ impl Runtime {
         // not possible to kill a thread:  https://stackoverflow.com/questions/26199926/how-to-terminate-or-suspend-a-rust-thread-from-another-thread
         // TODO optimize use condvar or mpsc channel?
         //TODO add ability to change interval after network start
-        //TODO allow reconfiguration of network, currently this is basically a subset copy of self.processes (signal channel sink and thread handle)
+        //TODO allow reconfiguration of network, currently this is basically a subset copy of self.boundary_threads (signal channel sink and thread handle)
         //TODO use the Component.support_health bool there!
         // sink2 and source2 are separate for signaling between runtime and watchdog thread only so that there can be no mixup between runtime<->watchdog and watchdog<->processes communication
-        let (watchdog_signalsink2, watchdog_signalsource2) = std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+        let (watchdog_signalsink2, watchdog_signalsource2) =
+            std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
         let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
             debug!("watchdog is running");
             let mut missed_pongs: HashMap<String, u8> = HashMap::new();
@@ -1238,9 +1659,34 @@ impl Runtime {
             let inport_names = inports.keys().cloned().collect::<Vec<_>>(); //TODO optimize wow, but works:  https://stackoverflow.com/a/45312076/5120003
             drop(graph_inout);
             for port_name in inport_names {
-                send_runtime_packet(&graph_inout_arc, &RuntimePacketResponse::new_connect(graph.properties.name.clone(), port_name.clone(), None, None)); //TODO can we avoid cloning here?
+                send_runtime_packet(
+                    &graph_inout_arc,
+                    &RuntimePacketResponse::new_connect(
+                        graph.properties.name.clone(),
+                        port_name.clone(),
+                        None,
+                        None,
+                    ),
+                ); //TODO can we avoid cloning here?
             }
         }
+
+        // Start scheduler thread for this graph
+        let scheduler_arc_clone = scheduler_arc.clone();
+        let graph_name_clone = graph_name.clone();
+        let scheduler_thread = {
+            thread::Builder::new()
+                .name(format!("scheduler-{}", graph_name))
+                .spawn(move || {
+                    debug!("scheduler thread for graph {} starting", graph_name_clone);
+                    scheduler_arc_clone.run();
+                    debug!("scheduler thread for graph {} exiting", graph_name_clone);
+                })
+                .expect("failed to spawn scheduler thread")
+        };
+
+        // Store the scheduler thread
+        self.scheduler_threads.insert(graph_name, scheduler_thread);
 
         // return status
         self.watchdog_thread = Some(watchdog_thread);
@@ -1253,7 +1699,11 @@ impl Runtime {
         Ok(&self.status)
     }
 
-    fn stop(&mut self, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, watchdog_all_exited: bool) -> std::result::Result<&RuntimeStatus, std::io::Error> {
+    fn stop(
+        &mut self,
+        graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>,
+        watchdog_all_exited: bool,
+    ) -> std::result::Result<&RuntimeStatus, std::io::Error> {
         //TODO implement in full detail
         const STOP_SIGNAL_MAX_RETRIES: usize = 64;
         const PROCESS_JOIN_GRACE_DUR: Duration = Duration::from_secs(5);
@@ -1266,12 +1716,24 @@ impl Runtime {
             // Keep this lock scope short: collect names first, then send disconnects with per-packet locking.
             let inport_names = {
                 let graph_inout_inner = graph_inout.lock().expect("lock poisoned");
-                graph_inout_inner.inports.as_ref().map(|inports| inports.keys().cloned().collect::<Vec<_>>()).unwrap_or_default()
+                graph_inout_inner
+                    .inports
+                    .as_ref()
+                    .map(|inports| inports.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default()
             };
             if !inport_names.is_empty() {
                 info!("notifying clients of graph inports disconnect");
                 for port_name in inport_names {
-                    send_runtime_packet(&graph_inout, &RuntimePacketResponse::new_disconnect(self.graph.clone(), port_name.clone(), None, None));  //TODO can we save cloning here?
+                    send_runtime_packet(
+                        &graph_inout,
+                        &RuntimePacketResponse::new_disconnect(
+                            self.graph.clone(),
+                            port_name.clone(),
+                            None,
+                            None,
+                        ),
+                    ); //TODO can we save cloning here?
                 }
             }
 
@@ -1279,7 +1741,10 @@ impl Runtime {
             info!("stop: signaling watchdog");
             if let Some(watchdog_channel) = self.watchdog_channel.take() {
                 if let Err(err) = watchdog_channel.send(b"stop".to_vec()) {
-                    warn!("stop: watchdog already disconnected while sending stop signal: {}", err);
+                    warn!(
+                        "stop: watchdog already disconnected while sending stop signal: {}",
+                        err
+                    );
                 }
             } else {
                 warn!("stop: watchdog channel missing");
@@ -1294,7 +1759,7 @@ impl Runtime {
 
         // signal all threads
         info!("stop: signaling all processes...");
-        for (name, proc) in self.processes.iter() {
+        for (name, proc) in self.boundary_threads.iter() {
             if proc.joinhandle.is_finished() {
                 info!("stop: process {} already exited", name);
                 continue;
@@ -1332,15 +1797,51 @@ impl Runtime {
         }
         info!("done");
 
+        // Stop all scheduler threads first
+        for (graph_name, scheduler) in &self.schedulers {
+            info!("stop: stopping scheduler for graph {}", graph_name);
+            scheduler.stop();
+        }
+
+        // Join all scheduler threads
+        let mut timed_out_schedulers = Vec::new();
+        for (graph_name, scheduler_thread) in std::mem::take(&mut self.scheduler_threads) {
+            info!("stop: joining scheduler thread for graph {}", graph_name);
+            let join_started = Instant::now();
+            while !scheduler_thread.is_finished() && join_started.elapsed() < PROCESS_JOIN_GRACE_DUR
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if scheduler_thread.is_finished() {
+                if let Err(err) = scheduler_thread.join() {
+                    warn!(
+                        "stop: joining scheduler thread for graph {} returned error: {:?}",
+                        graph_name, err
+                    );
+                }
+            } else {
+                warn!(
+                    "stop: joining scheduler thread for graph {} timed out after {:?}",
+                    graph_name, PROCESS_JOIN_GRACE_DUR
+                );
+                timed_out_schedulers.push((graph_name, scheduler_thread));
+            }
+        }
+        // Restore timed-out threads
+        for (graph_name, thread) in timed_out_schedulers {
+            self.scheduler_threads.insert(graph_name, thread);
+        }
+
         // join all threads
         //TODO what if one of them wont join? hangs? -> kill, how much time to give?
         info!("stop: joining all threads...");
         let mut timed_out_threads: Vec<String> = Vec::new();
-        let mut still_running: ProcessManager = ProcessManager::new();
-        for (name, proc) in std::mem::take(&mut self.processes) {
+        let mut still_running: BoundaryThreadManager = BoundaryThreadManager::new();
+        for (name, proc) in std::mem::take(&mut self.boundary_threads) {
             info!("stop: joining {}", name);
             let join_started = Instant::now();
-            while !proc.joinhandle.is_finished() && join_started.elapsed() < PROCESS_JOIN_GRACE_DUR {
+            while !proc.joinhandle.is_finished() && join_started.elapsed() < PROCESS_JOIN_GRACE_DUR
+            {
                 thread::sleep(Duration::from_millis(10));
             }
             if proc.joinhandle.is_finished() {
@@ -1348,12 +1849,15 @@ impl Runtime {
                     warn!("stop: joining {} returned error: {:?}", name, err);
                 }
             } else {
-                warn!( "stop: joining {} timed out after {:?}, keeping thread tracked for retry", name, PROCESS_JOIN_GRACE_DUR);
+                warn!(
+                    "stop: joining {} timed out after {:?}, keeping thread tracked for retry",
+                    name, PROCESS_JOIN_GRACE_DUR
+                );
                 timed_out_threads.push(name.clone());
                 still_running.insert(name, proc);
             } //TODO there is .thread() -> for killing
         }
-        self.processes = still_running;
+        self.boundary_threads = still_running;
         info!("done");
 
         // join watchdog thread (unless stop() was called from watchdog itself)
@@ -1401,7 +1905,7 @@ impl Runtime {
         // fbp-protocol expects this when a short-lived network already completed
         // by the time network:getstatus is queried right after network:start.
         self.status.started = watchdog_all_exited;
-        self.status.running = false;    // was started, but not running any more
+        self.status.running = false; // was started, but not running any more
         Ok(&self.status)
     }
 
@@ -1419,7 +1923,11 @@ impl Runtime {
     }
 
     //TODO optimize: better to hand over String or &str? Difference between Vec and vec?
-    fn set_debug_edges(&mut self, graph: &str, edges: &Vec<GraphEdgeSpec>) -> std::result::Result<(), std::io::Error> {
+    fn set_debug_edges(
+        &mut self,
+        graph: &str,
+        edges: &Vec<GraphEdgeSpec>,
+    ) -> std::result::Result<(), std::io::Error> {
         if self.graphs.get_graph(graph).is_none() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -1439,7 +1947,11 @@ impl Runtime {
         Ok(())
     }
 
-    fn start_trace(&mut self, graph: &str, _buffer_size: u32) -> std::result::Result<(), std::io::Error> {
+    fn start_trace(
+        &mut self,
+        graph: &str,
+        _buffer_size: u32,
+    ) -> std::result::Result<(), std::io::Error> {
         // Validate graph parameter matches current graph (single-graph mode)
         if graph != self.graph {
             return Err(std::io::Error::new(std::io::ErrorKind::NotFound,
@@ -1451,7 +1963,10 @@ impl Runtime {
         // TODO: check if graph exists and is current graph (multi-graph)
         if self.tracing {
             // wrong state
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("tracing already started")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                String::from("tracing already started"),
+            ));
         }
         self.tracing = true;
         Ok(())
@@ -1469,7 +1984,10 @@ impl Runtime {
         // TODO: check if graph exists and is current graph (multi-graph)
         if !self.tracing {
             // wrong state
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("tracing not started")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("tracing not started"),
+            ));
         }
         self.tracing = false;
         Ok(())
@@ -1503,14 +2021,19 @@ impl Runtime {
         // TODO: implement actual trace dumping
         // TODO: check if graph exists and is current graph (multi-graph)
         // TODO: implement Flowtrace format?
-        Ok(String::from(""))    //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
+        Ok(String::from("")) //TODO how to indicate "empty"? Does it maybe require at least "[]" or "{}"?
     }
 
     fn validate_secret(&self, secret: Option<&String>, graph: &str) -> Result<(), std::io::Error> {
         self.validate_secret_with_access(secret, graph, AccessLevel::ReadWrite)
     }
 
-    fn validate_secret_with_access(&self, secret: Option<&String>, graph: &str, required_access: AccessLevel) -> Result<(), std::io::Error> {
+    fn validate_secret_with_access(
+        &self,
+        secret: Option<&String>,
+        graph: &str,
+        required_access: AccessLevel,
+    ) -> Result<(), std::io::Error> {
         // Compatibility: many FBP clients send empty-string secrets by default.
         // Treat that the same as not providing a secret token.
         let secret = match secret {
@@ -1520,18 +2043,31 @@ impl Runtime {
 
         if let Some((expected_secret, access_level)) = self.secrets.get(graph) {
             if secret != expected_secret {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "invalid secret token"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "invalid secret token",
+                ));
             }
             if *access_level == AccessLevel::ReadOnly && required_access == AccessLevel::ReadWrite {
-                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "readonly access not sufficient for write operation"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "readonly access not sufficient for write operation",
+                ));
             }
         } else {
-            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no secret configured for graph"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "no secret configured for graph",
+            ));
         }
         Ok(())
     }
 
-    fn packet(payload: &RuntimePacketRequestPayload, graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>, runtime: Arc<RwLock<Runtime>>) -> std::result::Result<(), std::io::Error> {
+    fn packet(
+        payload: &RuntimePacketRequestPayload,
+        graph_inout: Arc<std::sync::Mutex<GraphInportOutportHolder>>,
+        runtime: Arc<RwLock<Runtime>>,
+    ) -> std::result::Result<(), std::io::Error> {
         const INPORT_PUSH_GRACE_DUR: Duration = Duration::from_secs(2);
 
         // Implement token-based security: validate secret if provided
@@ -1541,34 +2077,54 @@ impl Runtime {
         //TODO check if graph exists and if that port actually exists
         //TODO check payload datatype, schema, event (?) etc.
         //TODO implement and deliver to destination process
-        info!("runtime: got a packet for port {}: {:?}", payload.port, payload.payload);
-        let packet = payload.payload.as_ref().expect("graph inport runtime:packet is missing payload").clone().into_bytes();
+        info!(
+            "runtime: got a packet for port {}: {:?}",
+            payload.port, payload.payload
+        );
+        let mut packet = payload
+            .payload
+            .as_ref()
+            .expect("graph inport runtime:packet is missing payload")
+            .clone()
+            .into_bytes();
         let wait_started = Instant::now();
         loop {
             let mut graph_inout_locked = graph_inout.lock().expect("lock poisoned");
             // deliver to destination process
             if let Some(inports) = graph_inout_locked.inports.as_mut() {
                 if let Some(inport) = inports.get_mut(payload.port.as_str()) {
-                    if inport.sink.is_full() {
-                        //TODO optimize
-                        //condvar_notify!(&*inport.wake_notify);
-                        inport.wakeup.as_ref().unwrap().unpark();
-                    } else {
-                        inport.sink.push(packet).expect("push packet from graph inport into component failed");
-                        //condvar_notify!(&*inport.wake_notify);
-                        inport.wakeup.as_ref().unwrap().unpark();
-                        return Ok(());
+                    match inport.push(packet) {
+                        Ok(()) => {
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            packet = match err {
+                                PushError::Full(data) => data,
+                            };
+                        }
                     }
                 } else {
-                    return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph inport with that name not found")));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        String::from("graph inport with that name not found"),
+                    ));
                 }
             } else {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("no graph inports exist")));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("no graph inports exist"),
+                ));
             }
             drop(graph_inout_locked);
 
             if wait_started.elapsed() >= INPORT_PUSH_GRACE_DUR {
-                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, format!("graph inport {} backpressured for {:?}", payload.port, INPORT_PUSH_GRACE_DUR)));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "graph inport {} backpressured for {:?}",
+                        payload.port, INPORT_PUSH_GRACE_DUR
+                    ),
+                ));
             }
 
             // sleep some time resp. give up CPU timeslot
@@ -1601,6 +2157,7 @@ impl RuntimeStatus {
             started: self.started,
             running: self.running,
             debug: self.debug,
+            scheduler_metrics: HashMap::new(),
         }
     }
 }
@@ -1614,7 +2171,7 @@ pub struct GraphInportOutportHolder {
 
     // outports are handled by 1 special component that needs to be signaled and joined on network stop()
     // sink and wakeup are given to the processes that write into the graph outport process, so they are not stored here
-    outports: Option<Process>,
+    outports: Option<BoundaryThread>,
 
     // connected client websockets ready to send responses to connected clients, for graphout process
     websockets: HashMap<std::net::SocketAddr, Arc<Mutex<tungstenite::WebSocket<TcpStream>>>>,
@@ -1623,7 +2180,10 @@ pub struct GraphInportOutportHolder {
 }
 
 impl GraphInportOutportHolder {
-    fn set_packet_tap(&mut self, tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>) {
+    fn set_packet_tap(
+        &mut self,
+        tap: Option<std::sync::mpsc::SyncSender<RuntimePacketResponsePayload>>,
+    ) {
         self.packet_tap = tap;
     }
 }
@@ -1633,7 +2193,8 @@ fn broadcast_to_clients<T: Serialize>(
     packet: &T,
     packet_name: &str,
 ) {
-    let msg = serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
+    let msg =
+        serde_json::to_string(packet).expect("failed to serialize packet for websocket clients");
     let clients = {
         let graph_inout_locked = graph_inout.lock().expect("lock poisoned");
         graph_inout_locked
@@ -1648,18 +2209,30 @@ fn broadcast_to_clients<T: Serialize>(
         let mut client = match client.lock() {
             Ok(client) => client,
             Err(err) => {
-                warn!("dropping websocket client {} after {} lock poison: {}", addr, packet_name, err);
+                warn!(
+                    "dropping websocket client {} after {} lock poison: {}",
+                    addr, packet_name, err
+                );
                 failed_clients.push(addr);
                 continue;
             }
         };
-        if let Err(err) = client.get_mut().set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT) {
-            warn!("failed to set websocket client {} write timeout before {} send: {}", addr, packet_name, err);
+        if let Err(err) = client
+            .get_mut()
+            .set_write_timeout(CLIENT_BROADCAST_WRITE_TIMEOUT)
+        {
+            warn!(
+                "failed to set websocket client {} write timeout before {} send: {}",
+                addr, packet_name, err
+            );
         }
         match client.write(Message::text(msg.clone())) {
             Ok(_) => {}
             Err(err) => {
-                warn!("dropping websocket client {} after failed {} send: {}", addr, packet_name, err);
+                warn!(
+                    "dropping websocket client {} after failed {} send: {}",
+                    addr, packet_name, err
+                );
                 failed_clients.push(addr);
             }
         }
@@ -1721,7 +2294,9 @@ fn send_network_data(
     broadcast_to_clients(graph_inout, packet, "network:data");
 }
 
-fn create_graph_inout_handle(graph_inout: Arc<Mutex<GraphInportOutportHolder>>) -> GraphInportOutportHandle {
+fn create_graph_inout_handle(
+    graph_inout: Arc<Mutex<GraphInportOutportHolder>>,
+) -> GraphInportOutportHandle {
     let graph_inout_for_output = graph_inout.clone();
     let graph_inout_for_preview = graph_inout;
     (
@@ -1751,21 +2326,26 @@ mod tests {
             let result = std::panic::catch_unwind(|| {
                 for _ in 0..8 {
                     let harness = linear_harness_direct("bench_deadlock_regression");
-                    harness.start().expect("runtime start failed in regression loop");
+                    harness
+                        .start()
+                        .expect("runtime start failed in regression loop");
                     harness
                         .send_data_to_inport("IN", b"x")
                         .expect("runtime packet send failed in regression loop");
                     harness
                         .wait_for_outport_data("OUT", 1, Duration::from_secs(2))
                         .expect("did not observe expected output packet in regression loop");
-                    harness.stop().expect("runtime stop failed in regression loop");
+                    harness
+                        .stop()
+                        .expect("runtime stop failed in regression loop");
                 }
             });
 
             let send_result = match result {
                 Ok(()) => done_tx.send(Ok(())),
                 Err(panic_payload) => {
-                    let msg = if let Some(s) = (&*panic_payload as &dyn Any).downcast_ref::<&str>() {
+                    let msg = if let Some(s) = (&*panic_payload as &dyn Any).downcast_ref::<&str>()
+                    {
                         (*s).to_string()
                     } else if let Some(s) = (&*panic_payload as &dyn Any).downcast_ref::<String>() {
                         s.clone()
@@ -1781,7 +2361,9 @@ mod tests {
         match done_rx.recv_timeout(Duration::from_secs(20)) {
             Ok(Ok(())) => {}
             Ok(Err(msg)) => panic!("regression worker panicked: {msg}"),
-            Err(_) => panic!("timeout waiting for regression loop completion (possible stop deadlock)"),
+            Err(_) => {
+                panic!("timeout waiting for regression loop completion (possible stop deadlock)")
+            }
         }
     }
 }
@@ -1867,9 +2449,7 @@ impl RuntimeErrorResponse {
         RuntimeErrorResponse {
             protocol: String::from("runtime"),
             command: String::from("error"),
-            payload: RuntimeErrorResponsePayload{
-                message: msg,
-            },
+            payload: RuntimeErrorResponsePayload { message: msg },
         }
     }
 }
@@ -1912,9 +2492,7 @@ impl GraphErrorResponse {
         GraphErrorResponse {
             protocol: String::from("graph"),
             command: String::from("error"),
-            payload: GraphErrorResponsePayload {
-                message: err,
-            },
+            payload: GraphErrorResponsePayload { message: err },
         }
     }
 }
@@ -2017,7 +2595,8 @@ struct RuntimePacketRequest {
 }
 
 #[derive(Deserialize, Debug)]
-struct RuntimePacketRequestPayload {  // protocol spec shows it as non-optional, but fbp-protocol says only port, event, graph are required at https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L46
+struct RuntimePacketRequestPayload {
+    // protocol spec shows it as non-optional, but fbp-protocol says only port, event, graph are required at https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L46
     port: String,
     event: RuntimePacketEvent, //TODO spec what does this do? format is string, but with certain allowed values: TODO
     #[serde(rename = "type")]
@@ -2036,7 +2615,7 @@ struct RuntimePacketResponse {
 }
 
 //TODO serde: RuntimePacketRequestPayload is the same as RuntimePacketResponsePayload except the payload -- any possibility to mark this optional for the response?
-#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
+#[serde_with::skip_serializing_none] // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct RuntimePacketResponsePayload {
     port: String,
@@ -2049,7 +2628,7 @@ struct RuntimePacketResponsePayload {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase")]  // fbp-protocol and noflo-ui expect this in lowercase
+#[serde(rename_all = "lowercase")] // fbp-protocol and noflo-ui expect this in lowercase
 enum RuntimePacketEvent {
     Connect,
     BeginGroup,
@@ -2082,7 +2661,7 @@ impl Default for RuntimePacketResponsePayload {
 }
 
 impl RuntimePacketResponse {
-    fn new (payload: RuntimePacketResponsePayload) -> Self {
+    fn new(payload: RuntimePacketResponsePayload) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2090,7 +2669,12 @@ impl RuntimePacketResponse {
         }
     }
 
-    fn new_connect (graph: String, port: String, typ: Option<String>, schema: Option<String>) -> Self {
+    fn new_connect(
+        graph: String,
+        port: String,
+        typ: Option<String>,
+        schema: Option<String>,
+    ) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2105,7 +2689,13 @@ impl RuntimePacketResponse {
         }
     }
 
-    fn new_begingroup (graph: String, port: String, typ: Option<String>, schema: Option<String>, group_name: String) -> Self {
+    fn new_begingroup(
+        graph: String,
+        port: String,
+        typ: Option<String>,
+        schema: Option<String>,
+        group_name: String,
+    ) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2120,7 +2710,13 @@ impl RuntimePacketResponse {
         }
     }
 
-    fn new_data (graph: String, port: String, typ: Option<String>, schema: Option<String>, payload: String) -> Self {
+    fn new_data(
+        graph: String,
+        port: String,
+        typ: Option<String>,
+        schema: Option<String>,
+        payload: String,
+    ) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2135,7 +2731,13 @@ impl RuntimePacketResponse {
         }
     }
 
-    fn new_endgroup (graph: String, port: String, typ: Option<String>, schema: Option<String>, group_name: String) -> Self {
+    fn new_endgroup(
+        graph: String,
+        port: String,
+        typ: Option<String>,
+        schema: Option<String>,
+        group_name: String,
+    ) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2150,7 +2752,12 @@ impl RuntimePacketResponse {
         }
     }
 
-    fn new_disconnect (graph: String, port: String, typ: Option<String>, schema: Option<String>) -> Self {
+    fn new_disconnect(
+        graph: String,
+        port: String,
+        typ: Option<String>,
+        schema: Option<String>,
+    ) -> Self {
         RuntimePacketResponse {
             protocol: String::from("runtime"),
             command: String::from("packet"),
@@ -2174,8 +2781,8 @@ struct RuntimePacketsentMessage {
     payload: RuntimePacketsentPayload, // clarify spec: echo the full runtime:packet back, with the full payload?! protocol spec looks like runtime needs to echo back oll of runtime:packet except secret, but fbp-protocol schema only requires port, event, graph @ https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/runtime.yml#L194
 }
 
-#[serde_with::skip_serializing_none]    // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
-#[derive(Serialize, Deserialize, Debug)]    //TODO Deserialize seems useless, we are not getting that from the client? unless the client is another runtime maybe...?
+#[serde_with::skip_serializing_none] // fbp-protocol thus noflo-ui does not like "" or null values for schema, type
+#[derive(Serialize, Deserialize, Debug)] //TODO Deserialize seems useless, we are not getting that from the client? unless the client is another runtime maybe...?
 struct RuntimePacketsentPayload {
     port: String,
     event: RuntimePacketEvent, //TODO spec what does this do? format? fbp-protocol says: string enum
@@ -2199,7 +2806,8 @@ impl RuntimePacketsentMessage {
 
 impl From<RuntimePacketRequestPayload> for RuntimePacketsentPayload {
     fn from(payload: RuntimePacketRequestPayload) -> Self {
-        RuntimePacketsentPayload {  // we just leave away the field secret; and many fields can be None
+        RuntimePacketsentPayload {
+            // we just leave away the field secret; and many fields can be None
             port: payload.port,
             event: payload.event,
             typ: payload.typ,
@@ -2233,11 +2841,12 @@ impl RuntimePortsMessage {
         RuntimePortsMessage {
             protocol: String::from("runtime"),
             command: String::from("ports"),
-            payload:  RuntimePortsPayload {
+            payload: RuntimePortsPayload {
                 graph: runtime.graph.clone(),
                 in_ports: graph.ports_as_componentportsarray(&graph.inports),
                 out_ports: graph.ports_as_componentportsarray(&graph.outports),
-        }}
+            },
+        }
     }
 }
 
@@ -2352,10 +2961,11 @@ struct NetworkEdgesResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct NetworkEdgesResponsePayload {    //TODO spec: is a confirmative response of type network:edges enough or should all values be echoed back? noflo-ui definitely complains about an empty payload on a confirmative network:edges response.
+struct NetworkEdgesResponsePayload {
+    //TODO spec: is a confirmative response of type network:edges enough or should all values be echoed back? noflo-ui definitely complains about an empty payload on a confirmative network:edges response.
     graph: String,
     edges: Vec<GraphEdgeSpec>,
-}   //TODO optimize senseless duplication of structs, use serde_partial (or so?) for sending the response
+} //TODO optimize senseless duplication of structs, use serde_partial (or so?) for sending the response
 
 impl Default for NetworkEdgesResponse {
     fn default() -> Self {
@@ -2371,7 +2981,7 @@ impl Default for NetworkEdgesResponsePayload {
     fn default() -> Self {
         NetworkEdgesResponsePayload {
             graph: String::from("default_graph"),
-            edges: vec!(),
+            edges: vec![],
         }
     }
 }
@@ -2414,7 +3024,7 @@ impl NetworkOutputResponse {
             protocol: String::from("network"),
             command: String::from("output"),
             payload: NetworkOutputResponsePayload {
-                typ: String::from("message"),   //TODO optimize can we &str into a const maybe instead of always generating these String::from()?
+                typ: String::from("message"), //TODO optimize can we &str into a const maybe instead of always generating these String::from()?
                 message: Some(msg),
                 url: None,
             },
@@ -2440,9 +3050,9 @@ impl NetworkOutputResponse {
 struct NetworkOutputResponsePayload {
     #[serde(rename = "type")]
     typ: String, // spec: either "message" or "previewurl"    //TODO convert to enum
-    message: Option<String>,    //TODO optimize would &str as parameter be faster to decode into for serde?
-    url: Option<String>, // spec: URL for an image generated by the runtime
-    //TODO serde "rule" that either message or url must be present in case of type="message" or "previewurl", respectively
+    message: Option<String>, //TODO optimize would &str as parameter be faster to decode into for serde?
+    url: Option<String>,     // spec: URL for an image generated by the runtime
+                             //TODO serde "rule" that either message or url must be present in case of type="message" or "previewurl", respectively
 }
 
 impl Default for NetworkOutputResponsePayload {
@@ -2476,7 +3086,8 @@ impl Default for NetworkConnectResponse {
 
 #[skip_serializing_none]
 #[derive(Serialize, Debug)]
-struct NetworkTransmissionPayload { //TODO rename to NetworkEventPayload? In FBP network protocol spec the base fields (id, sr, tgt, graph, subgraph) are referenced ad "network/event":  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/network.yml#L246
+struct NetworkTransmissionPayload {
+    //TODO rename to NetworkEventPayload? In FBP network protocol spec the base fields (id, sr, tgt, graph, subgraph) are referenced ad "network/event":  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/network.yml#L246
     id: String, // spec: textual edge identifier, usually in form of a FBP language line
     // Compatibility: runtime-generated DATA packets in tests don't have src.
     src: Option<GraphNodeSpecNetwork>,
@@ -2484,7 +3095,7 @@ struct NetworkTransmissionPayload { //TODO rename to NetworkEventPayload? In FBP
     tgt: Option<GraphNodeSpecNetwork>,
     graph: String,
     subgraph: Option<Vec<String>>, // spec: Subgraph identifier for the event. An array of node IDs. optional according to schema. TODO what does it mean? why a list of node IDs? - check schema:  https://github.com/flowbased/fbp-protocol/blob/555880e1f42680bf45e104b8c25b97deff01f77e/schema/yaml/shared.yml#L193
-    data: Option<String>,   //TODO fix do this using type system (composable traits? "inheritance"?) data is only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
+    data: Option<String>, //TODO fix do this using type system (composable traits? "inheritance"?) data is only mandatory for network:data response, not for begingroup, endgroup, connect, disconnect
 }
 
 impl Default for NetworkTransmissionPayload {
@@ -2692,6 +3303,48 @@ struct NetworkStartedResponse {
 
 #[serde_with::skip_serializing_none]
 #[derive(Serialize, Debug, Clone)]
+struct NetworkSchedulerMetricsPayload {
+    #[serde(rename = "executionsPerNode")]
+    executions_per_node: HashMap<String, u64>,
+    #[serde(rename = "workUnitsPerNode")]
+    work_units_per_node: HashMap<String, u64>,
+    #[serde(rename = "timeSinceLastExecutionMs")]
+    time_since_last_execution_ms: HashMap<String, u64>,
+    #[serde(rename = "queueDepth")]
+    queue_depth: usize,
+    #[serde(rename = "loopIterations")]
+    loop_iterations: u64,
+}
+
+fn network_scheduler_metrics(
+    snapshot: &RuntimeStatusSnapshot,
+) -> Option<HashMap<String, NetworkSchedulerMetricsPayload>> {
+    if snapshot.scheduler_metrics.is_empty() {
+        return None;
+    }
+
+    Some(
+        snapshot
+            .scheduler_metrics
+            .iter()
+            .map(|(graph_name, metrics)| {
+                (
+                    graph_name.clone(),
+                    NetworkSchedulerMetricsPayload {
+                        executions_per_node: metrics.executions_per_node.clone(),
+                        work_units_per_node: metrics.work_units_per_node.clone(),
+                        time_since_last_execution_ms: metrics.time_since_last_execution_ms.clone(),
+                        queue_depth: metrics.queue_depth,
+                        loop_iterations: metrics.loop_iterations,
+                    },
+                )
+            })
+            .collect(),
+    )
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Serialize, Debug, Clone)]
 struct NetworkStartedResponsePayload {
     #[serde(rename = "time")]
     time_started: UtcTime, //TODO clarify spec: defined as just a String. But what time format? meaning of the field anyway?
@@ -2699,6 +3352,8 @@ struct NetworkStartedResponsePayload {
     started: bool, // spec: see network:status response for meaning of started and running //TODO spec: shouldn't this always be true?
     running: bool,
     debug: Option<bool>,
+    #[serde(rename = "schedulerMetrics")]
+    scheduler_metrics: Option<HashMap<String, NetworkSchedulerMetricsPayload>>,
 }
 
 //NOTE: this type alias allows us to implement Serialize (a trait from another crate) for DateTime (also from another crate)
@@ -2720,8 +3375,12 @@ impl<'de> Deserialize<'de> for UtcTime {
 
 impl Serialize for UtcTime {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::ser::Serializer {
-        return Ok(serializer.serialize_str(self.0.format("%+").to_string().as_str()).expect("fail serializing datetime"));
+    where
+        S: serde::ser::Serializer,
+    {
+        return Ok(serializer
+            .serialize_str(self.0.format("%+").to_string().as_str())
+            .expect("fail serializing datetime"));
     }
 }
 
@@ -2743,6 +3402,7 @@ impl Default for NetworkStartedResponsePayload {
             started: false,
             running: false,
             debug: None,
+            scheduler_metrics: None,
         }
     }
 }
@@ -2759,12 +3419,14 @@ impl NetworkStartedResponse {
 
 impl From<RuntimeStatusSnapshot> for NetworkStartedResponsePayload {
     fn from(status: RuntimeStatusSnapshot) -> Self {
+        let scheduler_metrics = network_scheduler_metrics(&status);
         NetworkStartedResponsePayload {
             time_started: UtcTime(status.time_started),
             graph: status.graph,
             started: status.started,
             running: status.running,
             debug: status.debug,
+            scheduler_metrics,
         }
     }
 }
@@ -2801,6 +3463,8 @@ struct NetworkStoppedResponsePayload {
     started: bool, // spec: see network:status response for meaning of started and running
     running: bool, // TODO spec: shouldn't this always be false?    //TODO spec: ordering of fields is different between network:started and network:stopped -> fix in spec.
     debug: Option<bool>,
+    #[serde(rename = "schedulerMetrics")]
+    scheduler_metrics: Option<HashMap<String, NetworkSchedulerMetricsPayload>>,
 }
 
 impl Default for NetworkStoppedResponse {
@@ -2822,6 +3486,7 @@ impl Default for NetworkStoppedResponsePayload {
             started: false,
             running: false,
             debug: None,
+            scheduler_metrics: None,
         }
     }
 }
@@ -2830,7 +3495,11 @@ impl NetworkStoppedResponse {
     fn new(status: &RuntimeStatusSnapshot) -> Self {
         let uptime_duration = chrono::Utc::now() - status.time_started;
         let uptime_seconds = uptime_duration.num_seconds();
-        println!("graph '{}' uptime: {}", status.graph, format_duration(Duration::from_secs(uptime_seconds as u64)));
+        println!(
+            "graph '{}' uptime: {}",
+            status.graph,
+            format_duration(Duration::from_secs(uptime_seconds as u64))
+        );
         return NetworkStoppedResponse {
             protocol: String::from("network"),
             command: String::from("stopped"),
@@ -2841,6 +3510,7 @@ impl NetworkStoppedResponse {
                 started: status.started,
                 running: status.running,
                 debug: status.debug,
+                scheduler_metrics: network_scheduler_metrics(status),
             },
         };
     }
@@ -2897,9 +3567,11 @@ struct NetworkStatusPayload {
     graph: String,
     uptime: Option<i64>, // spec: time the network has been running, in seconds. NOTE: seconds since start of the network. NOTE: i64 because of return type from new() chrono calculations return type, which cannot be converted to u32.
     // NOTE: started+running=is running now. started+not running=network has finished. not started+not running=network was never started. not started+running=undefined (TODO).
-    started: bool, // spec: whether or not network has been started
-    running: bool, // spec: boolean tells whether the network is running at the moment or not
-    debug: Option<bool>,   // spec: whether or not network is in debug mode
+    started: bool,       // spec: whether or not network has been started
+    running: bool,       // spec: boolean tells whether the network is running at the moment or not
+    debug: Option<bool>, // spec: whether or not network is in debug mode
+    #[serde(rename = "schedulerMetrics")]
+    scheduler_metrics: Option<HashMap<String, NetworkSchedulerMetricsPayload>>,
 }
 
 impl Default for NetworkStatusPayload {
@@ -2910,6 +3582,7 @@ impl Default for NetworkStatusPayload {
             started: true,
             running: true,
             debug: None,
+            scheduler_metrics: None,
         }
     }
 }
@@ -2922,6 +3595,7 @@ impl NetworkStatusPayload {
             started: status.started,
             running: status.running,
             debug: status.debug,
+            scheduler_metrics: network_scheduler_metrics(status),
         }
     }
 }
@@ -2980,9 +3654,7 @@ impl NetworkDebugResponse {
         NetworkDebugResponse {
             protocol: String::from("network"),
             command: String::from("debug"),
-            payload: NetworkDebugResponsePayload {
-                graph: graph,
-            },
+            payload: NetworkDebugResponsePayload { graph: graph },
         }
     }
 }
@@ -3148,8 +3820,6 @@ impl Default for ComponentSourcePayload {
     }
 }
 
-
-
 // ----------
 // component:setsource
 // ----------
@@ -3181,12 +3851,12 @@ struct GraphClearRequest {
 #[derive(Deserialize, Debug)]
 struct GraphClearRequestPayload {
     #[serde(rename = "id")]
-    name: String,   // name of the graph
+    name: String, // name of the graph
     #[serde(rename = "name")]
     label: Option<String>, // human-readable label of the graph
     // Compatibility: fbp-protocol test fixture sends graph:clear without these keys.
-    library: Option<String>,    //TODO clarify spec, optional per fbp-tests
-    main: bool, // TODO clarify spec
+    library: Option<String>, //TODO clarify spec, optional per fbp-tests
+    main: bool,              // TODO clarify spec
     icon: Option<String>,
     description: Option<String>,
     secret: Option<String>,
@@ -3203,12 +3873,12 @@ struct GraphClearResponse {
 #[derive(Serialize, Debug)]
 struct GraphClearResponsePayload {
     #[serde(rename = "id")]
-    name: String,   // name of the graph
+    name: String, // name of the graph
     #[serde(rename = "name")]
     label: String, // human-readable label of the graph
     // Compatibility: tests fail if optional keys are echoed as empty strings.
-    library: Option<String>,    //TODO clarify spec
-    main: bool, // TODO clarify spec
+    library: Option<String>, //TODO clarify spec
+    main: bool,              // TODO clarify spec
     icon: Option<String>,
     description: Option<String>,
 }
@@ -3244,7 +3914,10 @@ impl GraphClearResponse {
             payload: GraphClearResponsePayload {
                 //TODO unify GraphClearRequest and GraphClearResponse -> optimize this
                 name: payload.name.clone(),
-                label: payload.label.clone().unwrap_or_else(|| payload.name.clone()),
+                label: payload
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| payload.name.clone()),
                 library: payload.library.clone(),
                 main: payload.main,
                 icon: payload.icon.clone(),
@@ -3266,14 +3939,14 @@ struct GraphAddnodeRequest {
 #[derive(Deserialize, Debug)]
 struct GraphAddnodeRequestPayload {
     #[serde(rename = "id")]
-    name: String,                  // name of the node/process
-    component: String,           // component name to be used for this node/process
+    name: String, // name of the node/process
+    component: String, // component name to be used for this node/process
     // Compatibility: tests send arbitrary metadata object and may omit x/y/width/height.
     #[serde(default)]
     metadata: JsonMap<String, JsonValue>, //TODO spec: key-value pairs (with some well-known values)
     // Compatibility: tests also exercise "graph missing" behavior on purpose.
-    graph: Option<String>,                 // name of the graph
-    icon: Option<String>,          // optional icon for the node
+    graph: Option<String>, // name of the graph
+    icon: Option<String>,  // optional icon for the node
     secret: Option<String>,
 }
 
@@ -3282,9 +3955,9 @@ struct GraphAddnodeRequestPayload {
 struct GraphNodeMetadata {
     x: i32, // TODO check spec: can x and y be negative? -> i32 or u32? TODO in specs is range not defined, but noflo-ui uses negative coordinates as well
     y: i32,
-    width: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
-    height: Option<u32>,  // not mentioned in specs, but used by noflo-ui, usually 72
-    label: Option<String>,  // not mentioned in specs, but used by noflo-ui, used for the process name in bigger letters than component name
+    width: Option<u32>, // not mentioned in specs, but used by noflo-ui, usually 72
+    height: Option<u32>, // not mentioned in specs, but used by noflo-ui, usually 72
+    label: Option<String>, // not mentioned in specs, but used by noflo-ui, used for the process name in bigger letters than component name
     icon: Option<String>,  // icon for the node, used by FBP protocol clients like noflo-ui
 }
 
@@ -3312,7 +3985,6 @@ impl Default for GraphNodeMetadata {
             icon: None,
         }
     }
-
 }
 
 #[derive(Serialize, Debug)]
@@ -3343,7 +4015,8 @@ impl GraphAddnodeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddnodeResponsePayload {    // TODO check spec: should the sent values be echoed back as confirmation or is empty graph:addnode vs. a graph:error enough?
+struct GraphAddnodeResponsePayload {
+    // TODO check spec: should the sent values be echoed back as confirmation or is empty graph:addnode vs. a graph:error enough?
     #[serde(rename = "id")]
     name: String,
     component: String,
@@ -3360,7 +4033,6 @@ impl Default for GraphAddnodeResponsePayload {
             graph: String::from("default_graph"),
         }
     }
-
 }
 
 // graph:removenode -> graph:removenode | graph:error
@@ -3586,14 +4258,15 @@ impl Default for GraphNodeSpecNetwork {
 #[serde_with::skip_serializing_none]
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct GraphEdgeMetadata {
-    route: Option<i32>, //TODO clarify spec: Route identifier of a graph edge
+    route: Option<i32>,     //TODO clarify spec: Route identifier of a graph edge
     schema: Option<String>, //TODO clarify spec: JSON schema associated with a graph edge (TODO check schema)
-    secure: Option<bool>, //TODO clarify spec: Whether edge data should be treated as secure
+    secure: Option<bool>,   //TODO clarify spec: Whether edge data should be treated as secure
 }
 
 impl Default for GraphEdgeMetadata {
     fn default() -> Self {
-        GraphEdgeMetadata { //TODO clarify spec: totally unsure what these mean or if these are sensible defaults or if better to leave fields undefined if no value
+        GraphEdgeMetadata {
+            //TODO clarify spec: totally unsure what these mean or if these are sensible defaults or if better to leave fields undefined if no value
             route: None,
             schema: None,
             secure: None,
@@ -3619,12 +4292,13 @@ struct GraphAddedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphAddedgeResponsePayload {    //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? sending no response -> timeout and sending graph:addedge with empty payload -> error.
+struct GraphAddedgeResponsePayload {
+    //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? sending no response -> timeout and sending graph:addedge with empty payload -> error.
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     graph: String,
-}   //TODO optimize struct duplication with GraphAddedgeRequestPayload
+} //TODO optimize struct duplication with GraphAddedgeRequestPayload
 
 impl GraphAddedgeResponse {
     fn from_request(payload: GraphAddedgeRequestPayload) -> Self {
@@ -3687,11 +4361,12 @@ struct GraphRemoveedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphRemoveedgeResponsePayload { //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? if not sending a response, then comes a timeout. sending empty payload gives an error.
+struct GraphRemoveedgeResponsePayload {
+    //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:addedge instead of graph:error enough? if not sending a response, then comes a timeout. sending empty payload gives an error.
     graph: String, //TODO spec: for graph:addedge the graph attricbute is after src,tgt but for removeedge it is first
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
-}   //TODO optimize useless duplication
+} //TODO optimize useless duplication
 
 impl Default for GraphRemoveedgeResponse {
     fn default() -> Self {
@@ -3753,12 +4428,13 @@ struct GraphChangeedgeResponse {
 }
 
 #[derive(Serialize, Debug)]
-struct GraphChangeedgeResponsePayload { //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough? dont know if a response is expected, but sending one with an empty payload gives an error.
+struct GraphChangeedgeResponsePayload {
+    //TODO clarify spec: should request values be echoed back as confirmation or is message type graph:changeedge instead of graph:error enough? dont know if a response is expected, but sending one with an empty payload gives an error.
     graph: String,
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
-}   //TODO optimize struct duplication from GraphChangeedgeRequestPayload
+} //TODO optimize struct duplication from GraphChangeedgeRequestPayload
 
 impl Default for GraphChangeedgeResponse {
     fn default() -> Self {
@@ -3811,7 +4487,7 @@ struct GraphAddinitialRequestPayload {
     // Compatibility: tests omit metadata for addinitial.
     #[serde(default)]
     metadata: GraphEdgeMetadata, //TODO spec: key-value pairs (with some well-known values)
-    src: GraphIIPSpecNetwork,   //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
+    src: GraphIIPSpecNetwork, //TODO spec: object,array,string,number,integer,boolean,null. //NOTE: this is is for the IIP structure from the FBP Network protocol, it is different in the FBP Graph spec schema!
     tgt: GraphNodeSpecNetwork,
     secret: Option<String>, // only present in the request payload
 }
@@ -3827,7 +4503,7 @@ struct GraphAddinitialResponse {
 //NOTE: PartialEq are for graph.remove_initialip()
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct GraphIIPSpecNetwork {
-    data: String,   // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
+    data: String, // spec: can put JSON object, array, string, number, integer, boolean, null in there TODO how to handle this in Rust / serde?
 }
 
 #[derive(Serialize, Debug)]
@@ -3851,7 +4527,9 @@ impl Default for GraphAddinitialResponse {
 impl Default for GraphAddinitialResponsePayload {
     fn default() -> Self {
         GraphAddinitialResponsePayload {
-            src: GraphIIPSpecNetwork { data: String::new() },
+            src: GraphIIPSpecNetwork {
+                data: String::new(),
+            },
             tgt: GraphNodeSpecNetwork::default(),
             metadata: GraphEdgeMetadata::default(),
             graph: String::from("default_graph"),
@@ -3919,7 +4597,9 @@ impl Default for GraphRemoveinitialResponse {
 impl Default for GraphRemoveinitialResponsePayload {
     fn default() -> Self {
         GraphRemoveinitialResponsePayload {
-            src: GraphIIPSpecNetwork { data: String::new() },
+            src: GraphIIPSpecNetwork {
+                data: String::new(),
+            },
             tgt: GraphNodeSpecNetwork::default(),
             graph: String::from("default_graph"),
         }
@@ -4020,7 +4700,7 @@ struct GraphRemoveinportRequest {
 #[derive(Deserialize, Debug)]
 struct GraphRemoveinportRequestPayload {
     graph: String,
-    public: String, // public name of the exported port
+    public: String,         // public name of the exported port
     secret: Option<String>, // only present in the request payload
 }
 
@@ -4177,7 +4857,7 @@ struct GraphRemoveoutportRequest {
 #[derive(Deserialize, Debug)]
 struct GraphRemoveoutportRequestPayload {
     graph: String,
-    public: String, // public name of the exported port
+    public: String,         // public name of the exported port
     secret: Option<String>, // only present in the request payload
 }
 
@@ -4285,7 +4965,7 @@ struct GraphAddgroupRequestPayload {
     graph: String,
     nodes: Vec<String>,           // array of node IDs
     metadata: GraphGroupMetadata, //TODO spec: key-value pairs (with some well-known values)
-    secret: Option<String>,               // only present in the request payload
+    secret: Option<String>,       // only present in the request payload
 }
 
 //NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
@@ -4591,7 +5271,7 @@ struct TraceStartRequestPayload {
     graph: String,
     #[serde(rename = "buffersize")]
     buffer_size: u32, // spec: size of tracing buffer to keep in bytes, TODO unconsistent: no camelCase here
-    secret: Option<String>,  // only present in the request payload
+    secret: Option<String>, // only present in the request payload
 }
 
 #[derive(Serialize, Debug)]
@@ -4619,7 +5299,7 @@ impl Default for TraceStartResponse {
 impl Default for TraceStartResponsePayload {
     fn default() -> Self {
         TraceStartResponsePayload {
-            graph: String::from("default_graph")
+            graph: String::from("default_graph"),
         }
     }
 }
@@ -4686,9 +5366,7 @@ impl TraceStopResponse {
         TraceStopResponse {
             protocol: String::from("trace"),
             command: String::from("stop"),
-            payload: TraceStopResponsePayload {
-                graph: graph,
-            },
+            payload: TraceStopResponsePayload { graph: graph },
         }
     }
 }
@@ -4743,9 +5421,7 @@ impl TraceClearResponse {
         TraceClearResponse {
             protocol: String::from("trace"),
             command: String::from("clear"),
-            payload: TraceClearResponsePayload {
-                graph: graph,
-            },
+            payload: TraceClearResponsePayload { graph: graph },
         }
     }
 }
@@ -4765,7 +5441,7 @@ struct TraceDumpRequestPayload {
     #[serde(rename = "type")] //TODO is this correct?
     typ: String, //TODO spec which types are possible? // spec calls this field "type"
     flowtrace: String, // spec: a Flowtrace file of the type given in attribute "type" -- TODO format defined there:  https://github.com/flowbased/flowtrace
-    secret: Option<String>,    // only present in the request payload
+    secret: Option<String>, // only present in the request payload
 }
 
 #[derive(Serialize, Debug)]
@@ -4778,7 +5454,7 @@ struct TraceDumpResponse {
 #[derive(Serialize, Debug)]
 struct TraceDumpResponsePayload {
     graph: String,
-    flowtrace: String,  //TODO any better format than String - a data structure?
+    flowtrace: String, //TODO any better format than String - a data structure?
 } //TODO clarify spec: should request values be echoed back as confirmation or is message type trace:dump instead of trace:error enough?
 
 impl Default for TraceDumpResponse {
@@ -4795,7 +5471,7 @@ impl Default for TraceDumpResponsePayload {
     fn default() -> Self {
         TraceDumpResponsePayload {
             graph: String::from("default_graph"),
-            flowtrace: String::from(""),    //TODO clarify spec: how to indicate an empty tracefile? Does it need "[]" or "{}" at least?
+            flowtrace: String::from(""), //TODO clarify spec: how to indicate an empty tracefile? Does it need "[]" or "{}" at least?
         }
     }
 }
@@ -4850,9 +5526,7 @@ impl TraceErrorResponse {
         TraceErrorResponse {
             protocol: String::from("trace"),
             command: String::from("error"),
-            payload: TraceErrorResponsePayload {
-                message: err,
-            },
+            payload: TraceErrorResponsePayload { message: err },
         }
     }
 }
@@ -4927,19 +5601,20 @@ struct GraphNode {
     protocol_metadata: JsonMap<String, JsonValue>,
 }
 
-#[serde_with::skip_serializing_none]    // noflo-ui interprets even "data": null as "this is an IIP". not good but we can disable serializing None //TODO make issue in noflo-ui
+#[serde_with::skip_serializing_none]
+// noflo-ui interprets even "data": null as "this is an IIP". not good but we can disable serializing None //TODO make issue in noflo-ui
 #[derive(Serialize, Deserialize, Debug)]
 struct GraphEdge {
     #[serde(rename = "src")]
     source: GraphNodeSpec,
     //TODO enable sending of object/hashmap IIPs also, currently allows only string
-    data: Option<String>,  // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
+    data: Option<String>, // spec: inconsistency between Graph spec schema and Network Protocol spec! Graph: data outside here, but Network protocol says "data" is field inside src and remaining fields are removed.
     #[serde(rename = "tgt")]
     target: GraphNodeSpec,
     metadata: GraphEdgeMetadata,
 }
 
-#[serde_with::skip_serializing_none]    // do not serialize index if it is None
+#[serde_with::skip_serializing_none] // do not serialize index if it is None
 #[derive(Deserialize, Serialize, Debug)]
 struct GraphNodeSpec {
     process: String,
@@ -5011,9 +5686,9 @@ impl Graph {
             },
             inports: HashMap::new(),
             outports: HashMap::new(),
-            groups: vec!(),
+            groups: vec![],
             nodes: HashMap::new(),
-            edges: vec!(),
+            edges: vec![],
         }
     }
 
@@ -5035,7 +5710,10 @@ impl Graph {
     /// Future FBP specification updates might provide richer port metadata, but for now this
     /// conversion serves the practical need of exposing graph ports through the component API
     /// for tooling and introspection purposes.
-    fn ports_as_componentportsarray(&self, inports_or_outports: &HashMap<String,GraphPort>) -> Vec<ComponentPort> {
+    fn ports_as_componentportsarray(
+        &self,
+        inports_or_outports: &HashMap<String, GraphPort>,
+    ) -> Vec<ComponentPort> {
         let mut out = Vec::with_capacity(inports_or_outports.len());
         for (name, _info) in inports_or_outports.iter() {
             out.push(ComponentPort {
@@ -5045,18 +5723,25 @@ impl Graph {
                 required: true, //TODO clarify spec: not available from FBP JSON Graph port
                 is_arrayport: false, //TODO clarify spec: not available from FBP JSON Graph port
                 description: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
-                values_allowed: vec!(), //TODO clarify spec: not available from FBP JSON Graph port
+                values_allowed: vec![], //TODO clarify spec: not available from FBP JSON Graph port
                 value_default: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port
-                //TODO clarify spec: cannot return Graph inport fields process, port, metadata (x,y)
+                                                 //TODO clarify spec: cannot return Graph inport fields process, port, metadata (x,y)
             });
         }
         return out;
     }
 
-    fn clear(&mut self, payload: &GraphClearRequestPayload, runtime: &Runtime) -> Result<(), std::io::Error> {
+    fn clear(
+        &mut self,
+        payload: &GraphClearRequestPayload,
+        runtime: &Runtime,
+    ) -> Result<(), std::io::Error> {
         if runtime.status.running {
             // not allowed at the moment (TODO), theoretically graph and network could be different and the graph could be modified while the network is still running in the old config, then stop network and immediately start the network again according to the new graph structure, having only short downtime.
-            return Err(std::io::Error::new(std::io::ErrorKind::ResourceBusy, String::from("network still running")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ResourceBusy,
+                String::from("network still running"),
+            ));
             //TODO ^ requires the feature "io_error_more", is this OK or risky, or bloated?
         }
         // update graph properties
@@ -5078,11 +5763,14 @@ impl Graph {
         match self.inports.try_insert(name, portdef) {
             Ok(_) => {
                 return Ok(());
-            },
+            }
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport with that name already exists")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    String::from("inport with that name already exists"),
+                ));
+            }
         }
     }
 
@@ -5092,11 +5780,14 @@ impl Graph {
         match self.outports.try_insert(name, portdef) {
             Ok(_) => {
                 return Ok(());
-            },
+            }
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("outport with that name already exists")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    String::from("outport with that name already exists"),
+                ));
+            }
         }
     }
 
@@ -5106,10 +5797,13 @@ impl Graph {
         match self.inports.remove(&name) {
             Some(_) => {
                 return Ok(());
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("inport not found")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("inport not found"),
+                ));
+            }
         }
     }
 
@@ -5119,10 +5813,13 @@ impl Graph {
         match self.outports.remove(&name) {
             Some(_) => {
                 return Ok(());
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("outport not found")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("outport not found"),
+                ));
+            }
         }
     }
 
@@ -5142,18 +5839,25 @@ impl Graph {
         get+return = remove
         */
         if self.inports.contains_key(&new) {
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("inport already exists")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                String::from("inport already exists"),
+            ));
         }
         match self.inports.remove(&old) {
             Some(v) => {
-                self.inports.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                self.inports
+                    .try_insert(new, v)
+                    .expect("wtf key occupied on insertion"); // should not happen
                 return Ok(());
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("inport not found")));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("inport not found"),
+                ));
             }
         }
-
 
         //NOTE: below does not work because of "shared reference"
         /*
@@ -5185,20 +5889,34 @@ impl Graph {
 
         //TODO optimize: which is faster? see above.
         if self.outports.contains_key(&new) {
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("outport already exists")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                String::from("outport already exists"),
+            ));
         }
         match self.outports.remove(&old) {
             Some(v) => {
-                self.outports.try_insert(new, v).expect("wtf key occupied on insertion");    // should not happen
+                self.outports
+                    .try_insert(new, v)
+                    .expect("wtf key occupied on insertion"); // should not happen
                 return Ok(());
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("outport not found")));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("outport not found"),
+                ));
             }
         }
     }
 
-    fn add_node_from_payload(&mut self, graph: String, component: String, name: String, metadata: JsonMap<String, JsonValue>) -> Result<GraphAddnodeResponsePayload, std::io::Error> {
+    fn add_node_from_payload(
+        &mut self,
+        graph: String,
+        component: String,
+        name: String,
+        metadata: JsonMap<String, JsonValue>,
+    ) -> Result<GraphAddnodeResponsePayload, std::io::Error> {
         let metadata_parsed = graph_node_metadata_from_payload(&metadata);
         // Compatibility: tests use collection-prefixed component names (for example "core/Repeat")
         // while internal runtime lookup uses bare names ("Repeat").
@@ -5207,7 +5925,8 @@ impl Graph {
             .next()
             .unwrap_or(component.as_str())
             .to_owned();
-        let mut response = self.add_node(graph.clone(), normalized_component, name, metadata_parsed)?;
+        let mut response =
+            self.add_node(graph.clone(), normalized_component, name, metadata_parsed)?;
         if let Some(node) = self.nodes.get_mut(&response.name) {
             // Compatibility: fbp-tests expect changenode responses to contain only user-supplied keys.
             node.protocol_metadata = metadata.clone();
@@ -5218,10 +5937,19 @@ impl Graph {
         Ok(response)
     }
 
-    fn add_node(&mut self, graph: String, component: String, name: String, metadata: GraphNodeMetadata) -> Result<GraphAddnodeResponsePayload, std::io::Error> {
+    fn add_node(
+        &mut self,
+        graph: String,
+        component: String,
+        name: String,
+        metadata: GraphNodeMetadata,
+    ) -> Result<GraphAddnodeResponsePayload, std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
         //TODO implement
         //TODO in what state is it allowed do change the nodeset?
@@ -5248,18 +5976,28 @@ impl Graph {
         match self.nodes.try_insert(name, nodedef) {
             Ok(_) => {
                 return Ok(ret);
-            },
+            }
             Err(_) => {
                 //TODO we could pass on the std::collections::hash_map::OccupiedError
-                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("node with that name already exists")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    String::from("node with that name already exists"),
+                ));
+            }
         }
     }
 
-    fn remove_node(&mut self, graph: String, name: String) -> Result<Vec<GraphRemoveedgeResponsePayload>, std::io::Error> {
+    fn remove_node(
+        &mut self,
+        graph: String,
+        name: String,
+    ) -> Result<Vec<GraphRemoveedgeResponsePayload>, std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
         //TODO implement
         //TODO in which state should removing a node be allowed?
@@ -5288,29 +6026,45 @@ impl Graph {
                     }
                 });
                 return Ok(removed_edges);
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node not found")));
-            },
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("node not found"),
+                ));
+            }
         }
     }
 
-    fn rename_node(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
+    fn rename_node(
+        &mut self,
+        graph: String,
+        old: String,
+        new: String,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
         //TODO in which state should manipulating nodes be allowed?
         //TODO check graph name and state, multi-graph support
 
         // check if new name already exists
         if self.nodes.contains_key(&new) {
-            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, String::from("node with that name already exists")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                String::from("node with that name already exists"),
+            ));
         }
         // remove, then re-insert (there is no rename in HashMap)
         match self.nodes.remove(&old) {
             Some(v) => {
-                self.nodes.try_insert(new.clone(), v).expect("wtf key occupied on insertion");    // should not happen
+                self.nodes
+                    .try_insert(new.clone(), v)
+                    .expect("wtf key occupied on insertion"); // should not happen
 
                 // rename in edges
                 for edge in self.edges.iter_mut() {
@@ -5320,20 +6074,31 @@ impl Graph {
                     if edge.target.process == old {
                         edge.target.process = new.clone();
                     }
-                };
+                }
 
                 return Ok(());
-            },
+            }
             None => {
-                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wtf node not found")));  // should not happen either
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    String::from("wtf node not found"),
+                )); // should not happen either
             }
         }
     }
 
-    fn change_node(&mut self, graph: String, name: String, metadata: JsonMap<String, JsonValue>) -> Result<JsonMap<String, JsonValue>, std::io::Error> {
+    fn change_node(
+        &mut self,
+        graph: String,
+        name: String,
+        metadata: JsonMap<String, JsonValue>,
+    ) -> Result<JsonMap<String, JsonValue>, std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
         //TODO implement
         //TODO in which state should manipulating nodes be allowed?
@@ -5341,7 +6106,8 @@ impl Graph {
 
         //TODO currently we discard additional fields! -> issue #188
         //TODO clarify spec: should the whole metadata hashmap be replaced (but then how to delete metadata entries?) or should only the given fields be overwritten?
-        if let Some(node) = self.nodes.get_mut(&name) { //TODO optimize: borrowing a String here
+        if let Some(node) = self.nodes.get_mut(&name) {
+            //TODO optimize: borrowing a String here
             for (key, value) in metadata.iter() {
                 if value.is_null() {
                     node.protocol_metadata.remove(key);
@@ -5361,14 +6127,20 @@ impl Graph {
             }
             return Ok(node.protocol_metadata.clone());
         } else {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("node by that name not found")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("node by that name not found"),
+            ));
         }
     }
 
     fn add_edge(&mut self, graph: String, edge: GraphEdge) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
         //TODO implement
         //TODO in what state is it allowed do change the edgeset?
@@ -5381,10 +6153,18 @@ impl Graph {
         Ok(())
     }
 
-    fn remove_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork) -> Result<(), std::io::Error> {
+    fn remove_edge(
+        &mut self,
+        graph: String,
+        source: GraphNodeSpecNetwork,
+        target: GraphNodeSpecNetwork,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // find correct index and remove
@@ -5394,13 +6174,25 @@ impl Graph {
                 return Ok(());
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("edge with that src+tgt not found"),
+        ));
     }
 
-    fn change_edge(&mut self, graph: String, source: GraphNodeSpecNetwork, target: GraphNodeSpecNetwork, metadata: GraphEdgeMetadata) -> Result<(), std::io::Error> {
+    fn change_edge(
+        &mut self,
+        graph: String,
+        source: GraphNodeSpecNetwork,
+        target: GraphNodeSpecNetwork,
+        metadata: GraphEdgeMetadata,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // find correct index and set metadata
@@ -5410,11 +6202,17 @@ impl Graph {
                 return Ok(());
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that src+tgt not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("edge with that src+tgt not found"),
+        ));
     }
 
     // spec: According to the FBP JSON graph format spec, initial IPs are declared as a special-case of a graph edge in the "connections" part of the graph.
-    fn add_initialip(&mut self, payload: GraphAddinitialRequestPayload) -> Result<(), std::io::Error> {
+    fn add_initialip(
+        &mut self,
+        payload: GraphAddinitialRequestPayload,
+    ) -> Result<(), std::io::Error> {
         //TODO implement
         //TODO in what state is it allowed do change initial IPs (which are similar to edges)?
         //TODO check graph name and state, multi-graph support
@@ -5425,7 +6223,10 @@ impl Graph {
         Ok(())
     }
 
-    fn remove_initialip(&mut self, payload: GraphRemoveinitialRequestPayload) -> Result<GraphIIPSpecNetwork, std::io::Error> {
+    fn remove_initialip(
+        &mut self,
+        payload: GraphRemoveinitialRequestPayload,
+    ) -> Result<GraphIIPSpecNetwork, std::io::Error> {
         //TODO implement
         //TODO in what state is it allowed to change initial IPs (which are similar to edges)?
         //TODO check graph name and state, multi-graph support
@@ -5434,7 +6235,15 @@ impl Graph {
         //NOTE: if finding and removing last match first, therefore using self.edges.iter().rev().enumerate(), then rev() reverses the order, but enumerate's index of 0 is the last element!
         for i in 0..self.edges.len() {
             if let Some(iipdata) = self.edges[i].data.clone() {
-                if payload.src.is_none() || iipdata.as_bytes() == payload.src.as_ref().expect("already checked").data.as_bytes() {
+                if payload.src.is_none()
+                    || iipdata.as_bytes()
+                        == payload
+                            .src
+                            .as_ref()
+                            .expect("already checked")
+                            .data
+                            .as_bytes()
+                {
                     if self.edges[i].target == payload.tgt {
                         self.edges.remove(i);
                         return Ok(GraphIIPSpecNetwork { data: iipdata });
@@ -5442,24 +6251,43 @@ impl Graph {
                 }
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("edge with that data+tgt not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("edge with that data+tgt not found"),
+        ));
     }
 
-    fn add_group(&mut self, graph: String, name: String, nodes: Vec<String>, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
+    fn add_group(
+        &mut self,
+        graph: String,
+        name: String,
+        nodes: Vec<String>,
+        metadata: GraphGroupMetadata,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // TODO: check nodes if they actually exist; check for duplicates; and node can only be part of a single group
-        self.groups.push(GraphGroup { name: name, nodes: nodes, metadata: metadata });
+        self.groups.push(GraphGroup {
+            name: name,
+            nodes: nodes,
+            metadata: metadata,
+        });
         Ok(())
     }
 
     fn remove_group(&mut self, graph: String, name: String) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // find correct index and remove
@@ -5469,13 +6297,24 @@ impl Graph {
                 return Ok(());
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("group with that name not found"),
+        ));
     }
 
-    fn rename_group(&mut self, graph: String, old: String, new: String) -> Result<(), std::io::Error> {
+    fn rename_group(
+        &mut self,
+        graph: String,
+        old: String,
+        new: String,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // find correct index and rename
@@ -5485,13 +6324,24 @@ impl Graph {
                 return Ok(());
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("group with that name not found"),
+        ));
     }
 
-    fn change_group(&mut self, graph: String, name: String, metadata: GraphGroupMetadata) -> Result<(), std::io::Error> {
+    fn change_group(
+        &mut self,
+        graph: String,
+        name: String,
+        metadata: GraphGroupMetadata,
+    ) -> Result<(), std::io::Error> {
         // check graph name
         if graph != self.properties.name {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("wrong graph addressed")));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("wrong graph addressed"),
+            ));
         }
 
         // find correct index and set metadata
@@ -5501,7 +6351,10 @@ impl Graph {
                 return Ok(());
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("group with that name not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("group with that name not found"),
+        ));
     }
 
     fn get_source(&self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
@@ -5511,12 +6364,15 @@ impl Graph {
             return Ok(ComponentSourcePayload {
                 name: name,
                 language: String::from("json"), //TODO clarify spec: what to set here?
-                library: String::from(""), //TODO clarify spec: what to set here?
+                library: String::from(""),      //TODO clarify spec: what to set here?
                 code: serde_json::to_string(self).expect("failed to serialize graph"),
                 tests: String::from("// tests for graph here"), //TODO clarify spec: what to set here?
             });
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("graph with that name not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("graph with that name not found"),
+        ));
     }
 }
 
@@ -5524,7 +6380,7 @@ impl Default for GraphPropertiesEnvironment {
     fn default() -> Self {
         GraphPropertiesEnvironment {
             typ: String::from("flowd"), //TODO constant value - optimize
-            content: String::from(""), //TODO always empty for flowd - optimize
+            content: String::from(""),  //TODO always empty for flowd - optimize
         }
     }
 }
@@ -5533,13 +6389,15 @@ impl Default for GraphPropertiesEnvironment {
 impl From<GraphAddinportRequestPayload> for GraphPort {
     fn from(payload: GraphAddinportRequestPayload) -> Self {
         let metadata = payload.metadata.unwrap_or_default();
-        GraphPort { //TODO optimize structure very much the same -> use one for both?
+        GraphPort {
+            //TODO optimize structure very much the same -> use one for both?
             process: payload.node,
             port: payload.port,
-            metadata: GraphPortMetadata {   //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
+            metadata: GraphPortMetadata {
+                //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
                 x: metadata.x,
                 y: metadata.y,
-            }
+            },
         }
     }
 }
@@ -5548,13 +6406,15 @@ impl From<GraphAddinportRequestPayload> for GraphPort {
 impl From<GraphAddoutportRequestPayload> for GraphPort {
     fn from(payload: GraphAddoutportRequestPayload) -> Self {
         let metadata = payload.metadata.unwrap_or_default();
-        GraphPort { //TODO optimize structure very much the same -> use one for both?
+        GraphPort {
+            //TODO optimize structure very much the same -> use one for both?
             process: payload.node,
             port: payload.port,
-            metadata: GraphPortMetadata {   //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
+            metadata: GraphPortMetadata {
+                //TODO optimize: GraphPortMetadata and GraphNodeMetadata are structurally the same
                 x: metadata.x,
                 y: metadata.y,
-            }
+            },
         }
     }
 }
@@ -5575,12 +6435,17 @@ impl From<GraphAddedgeRequestPayload> for GraphEdge {
 impl<'a> From<GraphAddinitialRequestPayload> for GraphEdge {
     fn from(payload: GraphAddinitialRequestPayload) -> Self {
         GraphEdge {
-            source: GraphNodeSpec { //TODO clarify spec: what to set as "src" if it is an IIP?
+            source: GraphNodeSpec {
+                //TODO clarify spec: what to set as "src" if it is an IIP?
                 process: String::from(""),
                 port: String::from(""),
-                index: Some(String::from("")),  //TODO clarify spec: what to save here when noflo-ui does not send this field?
+                index: Some(String::from("")), //TODO clarify spec: what to save here when noflo-ui does not send this field?
             },
-            data: if payload.src.data.len() > 0 { Some(payload.src.data) } else { None },   //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
+            data: if payload.src.data.len() > 0 {
+                Some(payload.src.data)
+            } else {
+                None
+            }, //NOTE: there is an inconsistency between FBP network protocol and FBP graph schema
             target: GraphNodeSpec::from(payload.tgt),
             metadata: payload.metadata, //TODO defaults may be unsensible -> clarify spec
         }
@@ -5601,13 +6466,13 @@ impl From<GraphNodeSpecNetwork> for GraphNodeSpec {
 // processes
 // ----------
 
-struct Process {
-    signal: ProcessSignalSink,    // signalling channel, uses mpsc channel which is lower performance but shareable and ok for signalling
-    joinhandle: std::thread::JoinHandle<()>,    // for waiting for thread exit TODO what is its generic parameter?
-    //TODO detect process exit
+struct BoundaryThread {
+    signal: ProcessSignalSink, // signalling channel, uses mpsc channel which is lower performance but shareable and ok for signalling
+    joinhandle: std::thread::JoinHandle<()>, // for waiting for thread exit TODO what is its generic parameter?
+                                             //TODO detect process exit
 }
 
-type ProcessManager = HashMap<String, Process>;
+type BoundaryThreadManager = HashMap<String, BoundaryThread>;
 
 struct ThreadExitFlag {
     exited: Arc<AtomicBool>,
@@ -5625,9 +6490,12 @@ impl Drop for ThreadExitFlag {
     }
 }
 
-impl std::fmt::Debug for Process {
+impl std::fmt::Debug for BoundaryThread {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Process").field("signal", &self.signal).field("joinhandle", &self.joinhandle).finish()
+        f.debug_struct("BoundaryThread")
+            .field("signal", &self.signal)
+            .field("joinhandle", &self.joinhandle)
+            .finish()
     }
 }
 
@@ -5649,7 +6517,7 @@ impl ComponentLibrary {
         }
     }
 
-    fn get_source(& self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
+    fn get_source(&self, name: String) -> Result<ComponentSourcePayload, std::io::Error> {
         // spec: Name of the component to for which to get source code.
         // spec: Should contain the library prefix, example: "my-project/SomeComponent"
         //TODO how to re-compile Rust components? how to meaningfully debug from the web? would need compiler output.
@@ -5665,20 +6533,40 @@ impl ComponentLibrary {
                     name: name,
                     language: String::from(""), //TODO implement - get real info
                     library: String::from(""),  //TODO implement - get real info
-                    code: String::from("// code for component here"),   //TODO implement - get real info
+                    code: String::from("// code for component here"), //TODO implement - get real info
                     tests: String::from("// tests for component here"), //TODO where to get the tests from? in what format?
                 });
             }
         }
-        return Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            String::from("component not found"),
+        ));
     }
 
-    fn new_component(name: String, inports: ProcessInports, outports: ProcessOutports, signalsource: ProcessSignalSource, watchdog_signalsink: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Result<(), std::io::Error> {
-        if let Some(component) = instantiate_component(name.as_str(), inports, outports, signalsource, watchdog_signalsink, graph_inout) {
-            component.run();
+    fn new_component(
+        name: String,
+        inports: ProcessInports,
+        outports: ProcessOutports,
+        signalsource: ProcessSignalSource,
+        watchdog_signalsink: ProcessSignalSink,
+        graph_inout: GraphInportOutportHandle,
+    ) -> Result<(), std::io::Error> {
+        if let Some(_component) = instantiate_component(
+            name.as_str(),
+            inports,
+            outports,
+            signalsource,
+            watchdog_signalsink,
+            graph_inout,
+        ) {
+            // Component will be managed by scheduler, not run directly
             Ok(())
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, String::from("component not found")))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                String::from("component not found"),
+            ))
         }
     }
 }
@@ -5736,7 +6624,11 @@ pub mod bench_api {
             Ok(())
         }
 
-        pub fn send_data_to_inport(&self, inport: &str, payload: &[u8]) -> std::result::Result<(), std::io::Error> {
+        pub fn send_data_to_inport(
+            &self,
+            inport: &str,
+            payload: &[u8],
+        ) -> std::result::Result<(), std::io::Error> {
             let graph_name = self.runtime.read().expect("lock poisoned").graph.clone();
             let packet = RuntimePacketRequestPayload {
                 port: inport.to_string(),
@@ -5769,7 +6661,10 @@ pub mod bench_api {
                 }
                 let remaining = timeout - elapsed;
                 let pkt = self.packet_rx.recv_timeout(remaining).map_err(|_| {
-                    std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out waiting for runtime packet")
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "timed out waiting for runtime packet",
+                    )
                 })?;
                 if pkt.port == outport && matches!(pkt.event, RuntimePacketEvent::Data) {
                     count += 1;
@@ -5808,7 +6703,11 @@ pub mod bench_api {
     }
 
     fn build_linear_graph(name: &str) -> Graph {
-        let mut graph = Graph::new(name.to_string(), "benchmark".to_string(), "random".to_string());
+        let mut graph = Graph::new(
+            name.to_string(),
+            "benchmark".to_string(),
+            "random".to_string(),
+        );
 
         graph.inports.insert(
             "IN".to_string(),
@@ -5867,7 +6766,11 @@ pub mod bench_api {
     }
 
     fn build_fan_out_graph(name: &str) -> Graph {
-        let mut graph = Graph::new(name.to_string(), "benchmark".to_string(), "random".to_string());
+        let mut graph = Graph::new(
+            name.to_string(),
+            "benchmark".to_string(),
+            "random".to_string(),
+        );
 
         graph.inports.insert(
             "IN".to_string(),
@@ -5887,28 +6790,61 @@ pub mod bench_api {
         );
 
         graph
-            .add_node(name.to_string(), "Demux3".to_string(), "Demux".to_string(), default_node_metadata(100, 80, "Demux"))
+            .add_node(
+                name.to_string(),
+                "Demux3".to_string(),
+                "Demux".to_string(),
+                default_node_metadata(100, 80, "Demux"),
+            )
             .expect("failed to add Demux");
         graph
-            .add_node(name.to_string(), "Repeat".to_string(), "A".to_string(), default_node_metadata(240, 40, "A"))
+            .add_node(
+                name.to_string(),
+                "Repeat".to_string(),
+                "A".to_string(),
+                default_node_metadata(240, 40, "A"),
+            )
             .expect("failed to add A");
         graph
-            .add_node(name.to_string(), "Repeat".to_string(), "B".to_string(), default_node_metadata(240, 80, "B"))
+            .add_node(
+                name.to_string(),
+                "Repeat".to_string(),
+                "B".to_string(),
+                default_node_metadata(240, 80, "B"),
+            )
             .expect("failed to add B");
         graph
-            .add_node(name.to_string(), "Repeat".to_string(), "C".to_string(), default_node_metadata(240, 120, "C"))
+            .add_node(
+                name.to_string(),
+                "Repeat".to_string(),
+                "C".to_string(),
+                default_node_metadata(240, 120, "C"),
+            )
             .expect("failed to add C");
         graph
-            .add_node(name.to_string(), "Muxer".to_string(), "Merge".to_string(), default_node_metadata(420, 80, "Merge"))
+            .add_node(
+                name.to_string(),
+                "Muxer".to_string(),
+                "Merge".to_string(),
+                default_node_metadata(420, 80, "Merge"),
+            )
             .expect("failed to add Merge");
 
         graph
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "Demux".to_string(), port: "A".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "Demux".to_string(),
+                        port: "A".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "A".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "A".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5917,9 +6853,17 @@ pub mod bench_api {
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "Demux".to_string(), port: "B".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "Demux".to_string(),
+                        port: "B".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "B".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "B".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5928,9 +6872,17 @@ pub mod bench_api {
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "Demux".to_string(), port: "C".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "Demux".to_string(),
+                        port: "C".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "C".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "C".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5939,9 +6891,17 @@ pub mod bench_api {
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "A".to_string(), port: "OUT".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "A".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "Merge".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "Merge".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5950,9 +6910,17 @@ pub mod bench_api {
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "B".to_string(), port: "OUT".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "B".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "Merge".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "Merge".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5961,9 +6929,17 @@ pub mod bench_api {
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "C".to_string(), port: "OUT".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "C".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "Merge".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "Merge".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -5973,7 +6949,11 @@ pub mod bench_api {
     }
 
     fn build_fan_in_graph(name: &str) -> Graph {
-        let mut graph = Graph::new(name.to_string(), "benchmark".to_string(), "random".to_string());
+        let mut graph = Graph::new(
+            name.to_string(),
+            "benchmark".to_string(),
+            "random".to_string(),
+        );
 
         graph.inports.insert(
             "IN_A".to_string(),
@@ -6001,18 +6981,36 @@ pub mod bench_api {
         );
 
         graph
-            .add_node(name.to_string(), "Muxer".to_string(), "Merge".to_string(), default_node_metadata(120, 80, "Merge"))
+            .add_node(
+                name.to_string(),
+                "Muxer".to_string(),
+                "Merge".to_string(),
+                default_node_metadata(120, 80, "Merge"),
+            )
             .expect("failed to add Merge");
         graph
-            .add_node(name.to_string(), "Repeat".to_string(), "Node".to_string(), default_node_metadata(260, 80, "Node"))
+            .add_node(
+                name.to_string(),
+                "Repeat".to_string(),
+                "Node".to_string(),
+                default_node_metadata(260, 80, "Node"),
+            )
             .expect("failed to add Node");
         graph
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "Merge".to_string(), port: "OUT".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "Merge".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "Node".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "Node".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -6022,7 +7020,11 @@ pub mod bench_api {
     }
 
     fn build_io_sim_graph(name: &str) -> Graph {
-        let mut graph = Graph::new(name.to_string(), "benchmark".to_string(), "random".to_string());
+        let mut graph = Graph::new(
+            name.to_string(),
+            "benchmark".to_string(),
+            "random".to_string(),
+        );
 
         graph.inports.insert(
             "IN".to_string(),
@@ -6042,18 +7044,36 @@ pub mod bench_api {
         );
 
         graph
-            .add_node(name.to_string(), "Delay".to_string(), "Delay".to_string(), default_node_metadata(100, 80, "Delay"))
+            .add_node(
+                name.to_string(),
+                "Delay".to_string(),
+                "Delay".to_string(),
+                default_node_metadata(100, 80, "Delay"),
+            )
             .expect("failed to add Delay");
         graph
-            .add_node(name.to_string(), "Repeat".to_string(), "Node".to_string(), default_node_metadata(260, 80, "Node"))
+            .add_node(
+                name.to_string(),
+                "Repeat".to_string(),
+                "Node".to_string(),
+                default_node_metadata(260, 80, "Node"),
+            )
             .expect("failed to add Node");
         graph
             .add_edge(
                 name.to_string(),
                 GraphEdge {
-                    source: GraphNodeSpec { process: "Delay".to_string(), port: "OUT".to_string(), index: None },
+                    source: GraphNodeSpec {
+                        process: "Delay".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
                     data: None,
-                    target: GraphNodeSpec { process: "Node".to_string(), port: "IN".to_string(), index: None },
+                    target: GraphNodeSpec {
+                        process: "Node".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
                     metadata: GraphEdgeMetadata::new(None, None, None),
                 },
             )
@@ -6062,8 +7082,14 @@ pub mod bench_api {
             .add_initialip(GraphAddinitialRequestPayload {
                 graph: name.to_string(),
                 metadata: GraphEdgeMetadata::new(None, None, None),
-                src: GraphIIPSpecNetwork { data: "?delay=50us".to_string() },
-                tgt: GraphNodeSpecNetwork { node: "Delay".to_string(), port: "CONF".to_string(), index: None },
+                src: GraphIIPSpecNetwork {
+                    data: "?delay=50us".to_string(),
+                },
+                tgt: GraphNodeSpecNetwork {
+                    node: "Delay".to_string(),
+                    port: "CONF".to_string(),
+                    index: None,
+                },
                 secret: None,
             })
             .expect("failed to add IIP to Delay.CONF");
@@ -6075,7 +7101,9 @@ pub mod bench_api {
         BenchRuntimeHarness::new(build_linear_graph(name))
     }
 
-    pub fn linear_harness_from_persistence(name: &str) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
+    pub fn linear_harness_from_persistence(
+        name: &str,
+    ) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
         let graph = build_linear_graph(name);
         let graph_json = graph_to_persistence_json(&graph)?;
         let mut path = std::env::temp_dir();
@@ -6094,11 +7122,17 @@ pub mod bench_api {
         BenchRuntimeHarness::new(build_fan_out_graph(name))
     }
 
-    pub fn fan_out_harness_from_persistence(name: &str) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
+    pub fn fan_out_harness_from_persistence(
+        name: &str,
+    ) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
         let graph = build_fan_out_graph(name);
         let graph_json = graph_to_persistence_json(&graph)?;
         let mut path = std::env::temp_dir();
-        path.push(format!("flowd-bench-graph-load-{}-{}.json", std::process::id(), name));
+        path.push(format!(
+            "flowd-bench-graph-load-{}-{}.json",
+            std::process::id(),
+            name
+        ));
         std::fs::write(&path, graph_json)?;
         let loaded = load_graph_from_persistence_path(&path)?;
         let _ = std::fs::remove_file(&path);
@@ -6109,11 +7143,17 @@ pub mod bench_api {
         BenchRuntimeHarness::new(build_fan_in_graph(name))
     }
 
-    pub fn fan_in_harness_from_persistence(name: &str) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
+    pub fn fan_in_harness_from_persistence(
+        name: &str,
+    ) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
         let graph = build_fan_in_graph(name);
         let graph_json = graph_to_persistence_json(&graph)?;
         let mut path = std::env::temp_dir();
-        path.push(format!("flowd-bench-graph-load-{}-{}.json", std::process::id(), name));
+        path.push(format!(
+            "flowd-bench-graph-load-{}-{}.json",
+            std::process::id(),
+            name
+        ));
         std::fs::write(&path, graph_json)?;
         let loaded = load_graph_from_persistence_path(&path)?;
         let _ = std::fs::remove_file(&path);
@@ -6124,11 +7164,17 @@ pub mod bench_api {
         BenchRuntimeHarness::new(build_io_sim_graph(name))
     }
 
-    pub fn io_sim_harness_from_persistence(name: &str) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
+    pub fn io_sim_harness_from_persistence(
+        name: &str,
+    ) -> std::result::Result<BenchRuntimeHarness, std::io::Error> {
         let graph = build_io_sim_graph(name);
         let graph_json = graph_to_persistence_json(&graph)?;
         let mut path = std::env::temp_dir();
-        path.push(format!("flowd-bench-graph-load-{}-{}.json", std::process::id(), name));
+        path.push(format!(
+            "flowd-bench-graph-load-{}-{}.json",
+            std::process::id(),
+            name
+        ));
         std::fs::write(&path, graph_json)?;
         let loaded = load_graph_from_persistence_path(&path)?;
         let _ = std::fs::remove_file(&path);

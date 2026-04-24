@@ -1,5 +1,9 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort, PushError};
-use log::{debug, trace, info, error, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    PushError,
+};
+use log::{debug, error, info, trace, warn};
 
 pub struct EqualsComponent {
     cmp: ProcessEdgeSource,
@@ -12,12 +16,37 @@ pub struct EqualsComponent {
 }
 
 impl Component for EqualsComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         EqualsComponent {
-            cmp: inports.remove("CMP").expect("found no CMP inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out_true: outports.remove("TRUE").expect("found no TRUE outport").pop().unwrap(),
-            out_false: outports.remove("FALSE").expect("found no FALSE outport").pop().unwrap(),
+            cmp: inports
+                .remove("CMP")
+                .expect("found no CMP inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out_true: outports
+                .remove("TRUE")
+                .expect("found no TRUE outport")
+                .pop()
+                .unwrap(),
+            out_false: outports
+                .remove("FALSE")
+                .expect("found no FALSE outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -29,9 +58,15 @@ impl Component for EqualsComponent {
         let mut cmp = self.cmp;
         let mut inn = self.inn;
         let mut out_true = self.out_true.sink;
-        let out_true_wakeup = self.out_true.wakeup.expect("got no wakeup handle for outport TRUE");
+        let out_true_wakeup = self
+            .out_true
+            .wakeup
+            .expect("got no wakeup handle for outport TRUE");
         let mut out_false = self.out_false.sink;
-        let out_false_wakeup = self.out_false.wakeup.expect("got no wakeup handle for outport FALSE");
+        let out_false_wakeup = self
+            .out_false
+            .wakeup
+            .expect("got no wakeup handle for outport FALSE");
 
         // read cmp until we get a value
         //TODO maybe support s-exprs here to support more complex comparisons
@@ -53,9 +88,13 @@ impl Component for EqualsComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -86,7 +125,10 @@ impl Component for EqualsComponent {
                                     } else if sig == b"ping" {
                                         let _ = self.signals_out.try_send(b"pong".to_vec());
                                     } else {
-                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                        warn!(
+                                            "received unknown signal ip: {}",
+                                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                                        );
                                     }
                                 }
                                 out_true_wakeup.unpark();
@@ -97,7 +139,9 @@ impl Component for EqualsComponent {
                                 break;
                             }
                             // send nao
-                            out_true.push(ip_ret).expect("could not push into TRUE - but said !is_full");
+                            out_true
+                                .push(ip_ret)
+                                .expect("could not push into TRUE - but said !is_full");
                         }
                         out_true_wakeup.unpark();
                     } else {
@@ -118,7 +162,10 @@ impl Component for EqualsComponent {
                                     } else if sig == b"ping" {
                                         let _ = self.signals_out.try_send(b"pong".to_vec());
                                     } else {
-                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                        warn!(
+                                            "received unknown signal ip: {}",
+                                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                                        );
                                     }
                                 }
                                 out_false_wakeup.unpark();
@@ -129,7 +176,9 @@ impl Component for EqualsComponent {
                                 break;
                             }
                             // send nao
-                            out_false.push(ip_ret).expect("could not push into FALSE - but said !is_full");
+                            out_false
+                                .push(ip_ret)
+                                .expect("could not push into FALSE - but said !is_full");
                         }
                         out_false_wakeup.unpark();
                     }
@@ -156,7 +205,10 @@ impl Component for EqualsComponent {
 
             // check for new cmp value
             if let Ok(cmp) = cmp.pop() {
-                trace!("got new cmp value: {}", std::str::from_utf8(&cmp).expect("invalid utf-8"));
+                trace!(
+                    "got new cmp value: {}",
+                    std::str::from_utf8(&cmp).expect("invalid utf-8")
+                );
                 cmp_value = cmp;
             }
 
@@ -166,7 +218,10 @@ impl Component for EqualsComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("Equals"),
             description: String::from("Sends each IP from IN port to TRUE or FALSE port, depending on whether it is equal to the latest IP from CMP port"),

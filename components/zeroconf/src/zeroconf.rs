@@ -1,10 +1,13 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn, error};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
-use mdns_sd::{ServiceDaemon, ServiceInfo, ServiceEvent};
-use std::time::Duration;
+use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::thread;
+use std::time::Duration;
 
 /*
 Goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
@@ -21,9 +24,22 @@ pub struct ZeroconfResponderComponent {
 }
 
 impl Component for ZeroconfResponderComponent {
-    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        _outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         ZeroconfResponderComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -36,34 +52,54 @@ impl Component for ZeroconfResponderComponent {
 
         // get configuration
         trace!("read config IP");
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url_str = std::str::from_utf8(&url_vec).expect("configuration URL is invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
         // get instance name
-        let instance_name = url.path().strip_prefix("/").expect("failed to strip prefix '/' from instance name in configuration URL path").to_owned();
+        let instance_name = url
+            .path()
+            .strip_prefix("/")
+            .expect("failed to strip prefix '/' from instance name in configuration URL path")
+            .to_owned();
         // get service name
         //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
-        let service_name_queryparam = url.query_pairs().find( |(key, _)| key.eq("service") ).expect("failed to get service from connection URL");
+        let service_name_queryparam = url
+            .query_pairs()
+            .find(|(key, _)| key.eq("service"))
+            .expect("failed to get service from connection URL");
         let service_name_bytes = service_name_queryparam.1.as_bytes();
-        let service_name = std::str::from_utf8(service_name_bytes).expect("failed to convert socket address to str");
+        let service_name = std::str::from_utf8(service_name_bytes)
+            .expect("failed to convert socket address to str");
         //TODO add support for publishing on defined interface
 
         // configure
         // set up responder
         let responder = ServiceDaemon::new().expect("failed to create mDNS-SD daemon");
         // prepare service record
-        let host_name = url.host_str().expect("failed to get socket address from connection URL").to_owned() + ".local.";
+        let host_name = url
+            .host_str()
+            .expect("failed to get socket address from connection URL")
+            .to_owned()
+            + ".local.";
         //let properties = [("property_1", "test"), ("property_2", "1234")];
         let my_service = ServiceInfo::new(
             service_name,
             &instance_name,
             &host_name,
-            url.host_str().expect("failed to get socket address from connection URL"),
-            url.port().expect("failed to get port from configuration URL"),
-            None    //&properties[..],
-        ).unwrap();
+            url.host_str()
+                .expect("failed to get socket address from connection URL"),
+            url.port()
+                .expect("failed to get port from configuration URL"),
+            None, //&properties[..],
+        )
+        .unwrap();
         // register service with responder, which will publish it
-        responder.register(my_service).expect("Failed to register our service");
+        responder
+            .register(my_service)
+            .expect("Failed to register our service");
         debug!("responder started");
 
         // FBP main loop
@@ -74,9 +110,13 @@ impl Component for ZeroconfResponderComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -91,28 +131,33 @@ impl Component for ZeroconfResponderComponent {
 
         // shut down
         responder.shutdown().expect("failed to shut down responder");
-        thread::sleep(Duration::from_millis(500));    // give it some time to shut down
+        thread::sleep(Duration::from_millis(500)); // give it some time to shut down
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("ZeroconfResponder"),
-            description: String::from("Starts an mDNS and DNS-SD responder for the service given in CONF."),
-            icon: String::from("podcast"),  // or handshake-o
+            description: String::from(
+                "Starts an mDNS and DNS-SD responder for the service given in CONF.",
+            ),
+            icon: String::from("podcast"), // or handshake-o
             subgraph: false,
-            in_ports: vec![
-                ComponentPort {
-                    name: String::from("CONF"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("configuration URL with options"),
-                    values_allowed: vec![],
-                    value_default: String::from("mdns://192.168.1.123:1234/flowd_subnetwork_abc?service=_fbp._tcp.local.")
-                }
-            ],
+            in_ports: vec![ComponentPort {
+                name: String::from("CONF"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("configuration URL with options"),
+                values_allowed: vec![],
+                value_default: String::from(
+                    "mdns://192.168.1.123:1234/flowd_subnetwork_abc?service=_fbp._tcp.local.",
+                ),
+            }],
             out_ports: vec![],
             ..Default::default()
         }
@@ -130,10 +175,27 @@ pub struct ZeroconfBrowserComponent {
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for ZeroconfBrowserComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         ZeroconfBrowserComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -144,24 +206,36 @@ impl Component for ZeroconfBrowserComponent {
         debug!("ZeroconfQuery is now run()ning!");
         let mut conf = self.conf;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // get configuration
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
         let url = url::Url::parse(&url_str).expect("failed to parse URL");
 
         // get service name from URL
-        let service_name = url.host_str().expect("failed to get service name from connection URL").to_owned();
+        let service_name = url
+            .host_str()
+            .expect("failed to get service name from connection URL")
+            .to_owned();
 
         // get instance name from URL
         let instance_name: &str;
         if url.path().is_empty() {
             instance_name = "";
         } else {
-            instance_name = url.path().strip_prefix("/").expect("failed to strip prefix '/' from instance name in configuration URL path");
+            instance_name = url
+                .path()
+                .strip_prefix("/")
+                .expect("failed to strip prefix '/' from instance name in configuration URL path");
         }
 
         //TODO add support for domains other than "local"
@@ -190,16 +264,23 @@ impl Component for ZeroconfBrowserComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -210,12 +291,21 @@ impl Component for ZeroconfBrowserComponent {
                 // process
                 match event {
                     ServiceEvent::ServiceResolved(info) => {
-                        trace!("got a resolved service of given service name: {}", info.get_fullname());
+                        trace!(
+                            "got a resolved service of given service name: {}",
+                            info.get_fullname()
+                        );
 
                         // check instance name - it is part of the fullname up until the first dot
-                        let instance_name_this = info.get_fullname().split('.').next().expect("failed to get instance name from fullname");
+                        let instance_name_this = info
+                            .get_fullname()
+                            .split('.')
+                            .next()
+                            .expect("failed to get instance name from fullname");
                         if instance_name_this.contains(instance_name) {
-                            debug!("got a resolved service with matching instance name, sending...");
+                            debug!(
+                                "got a resolved service with matching instance name, sending..."
+                            );
 
                             //TODO add support for multiple IP addresses
                             //TODO add support for IPv6 address and which is prefferred result - IPv4 or IPv6
@@ -223,7 +313,11 @@ impl Component for ZeroconfBrowserComponent {
 
                             // send it
                             // NOTE: the first address is not always the best one, it could be a local address or an IP address that is not reachable from the network like a VPN address - OTOH, that is up to the publisher to do properly. Just FYI.
-                            let address = info.get_addresses().iter().next().expect("failed to get first IP address");
+                            let address = info
+                                .get_addresses()
+                                .iter()
+                                .next()
+                                .expect("failed to get first IP address");
                             let address_str;
                             if address.is_ipv6() {
                                 address_str = format!("[{}]", address); //TODO better use URL instead of this formatting exception, which does this automatically
@@ -235,8 +329,9 @@ impl Component for ZeroconfBrowserComponent {
                                 address_str,
                                 info.get_port(),
                                 instance_name_this
-                                ).into_bytes();
-                            out.push(result).expect("could not push into OUT");    //TODO optimize conversion
+                            )
+                            .into_bytes();
+                            out.push(result).expect("could not push into OUT"); //TODO optimize conversion
                             out_wakeup.unpark();
                             debug!("done");
                         } else {
@@ -257,11 +352,14 @@ impl Component for ZeroconfBrowserComponent {
             //NOTE: dont park thread here - this is achieved by recv_timeout()
         }
         client.shutdown().expect("failed to shut down client");
-        thread::sleep(Duration::from_millis(500));    // give it some time to shut down
+        thread::sleep(Duration::from_millis(500)); // give it some time to shut down
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("ZeroconfBrowser"),
             description: String::from("Starts an mDNS-SD browser and tries to find service instance based on the given service name in CONF and sends found responses to OUT outport."),

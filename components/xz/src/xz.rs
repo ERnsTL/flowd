@@ -1,9 +1,12 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, info, warn, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use std::io::prelude::*;
-use xz::write::{XzEncoder, XzDecoder};
+use xz::write::{XzDecoder, XzEncoder};
 
 pub struct XzCompressComponent {
     //conf: ProcessEdgeSource,
@@ -14,14 +17,31 @@ pub struct XzCompressComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-const COMPRESSION_LEVEL: u32 = 9;   //TODO maybe make configurable
+const COMPRESSION_LEVEL: u32 = 9; //TODO maybe make configurable
 
 impl Component for XzCompressComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         XzCompressComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -33,7 +53,10 @@ impl Component for XzCompressComponent {
         //let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         //trace!("read config IPs");
@@ -52,16 +75,23 @@ impl Component for XzCompressComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -79,7 +109,11 @@ impl Component for XzCompressComponent {
                     let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
                     compressor.write(&ip).expect("failed to write into encoder");
                     //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
-                    debug!("compression: {} bytes in, {} bytes out", compressor.total_in(), compressor.total_out());
+                    debug!(
+                        "compression: {} bytes in, {} bytes out",
+                        compressor.total_in(),
+                        compressor.total_out()
+                    );
                     let vec_out = compressor.finish().expect("failed to finish encoding");
 
                     // send it
@@ -106,7 +140,10 @@ impl Component for XzCompressComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("XzCompress"),
             description: String::from("Reads data IPs, compresses each using XZ (LZMA2) and sends the compressed data to the OUT port."),
@@ -163,11 +200,28 @@ pub struct XzDecompressComponent {
 }
 
 impl Component for XzDecompressComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         XzDecompressComponent {
             //conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -179,7 +233,10 @@ impl Component for XzDecompressComponent {
         //let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         //trace!("read config IPs");
@@ -198,16 +255,23 @@ impl Component for XzDecompressComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -223,8 +287,14 @@ impl Component for XzDecompressComponent {
                     //TODO support for chunks via open bracket, closing bracket
                     let vec_buf = Vec::new();
                     let mut decompressor = XzDecoder::new(vec_buf);
-                    decompressor.write(&ip).expect("failed to write into decoder");
-                    debug!("decompression: {} bytes in, {} bytes out", decompressor.total_in(), decompressor.total_out());
+                    decompressor
+                        .write(&ip)
+                        .expect("failed to write into decoder");
+                    debug!(
+                        "decompression: {} bytes in, {} bytes out",
+                        decompressor.total_in(),
+                        decompressor.total_out()
+                    );
                     let vec_out = decompressor.finish().expect("failed to finish decoding");
 
                     // send it
@@ -252,7 +322,10 @@ impl Component for XzDecompressComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("XzDecompress"),
             description: String::from("Reads IPs, applies XZ (LZMA2) decompression and forwards the decompressed data to OUT port."),

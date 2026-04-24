@@ -1,5 +1,8 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use std::thread;
@@ -17,11 +20,32 @@ pub struct TeraTemplateComponent {
 }
 
 impl Component for TeraTemplateComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TeraTemplateComponent {
-            conf: inports.remove("TEMPLATE").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("TEMPLATE")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -33,13 +57,19 @@ impl Component for TeraTemplateComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // check config port
         trace!("read config IP");
         while conf.is_empty() {
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
+                );
                 if sig == b"stop" {
                     info!("got stop signal while waiting for template config, exiting");
                     return;
@@ -47,12 +77,18 @@ impl Component for TeraTemplateComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                    );
                 }
             }
             thread::yield_now();
         }
-        let Ok(template) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let Ok(template) = conf.pop() else {
+            trace!("no config IP received - exiting");
+            return;
+        };
 
         // configure
         // create a new Tera instance and add a template from a string
@@ -60,7 +96,8 @@ impl Component for TeraTemplateComponent {
         let mut tera = Tera::default();
         unsafe {
             //let ip_str = String::from_utf8(ip).expect("invalid utf-8 in IP");
-            tera.add_raw_template("a", std::str::from_utf8_unchecked(&template)).unwrap();
+            tera.add_raw_template("a", std::str::from_utf8_unchecked(&template))
+                .unwrap();
         }
 
         // main loop
@@ -71,9 +108,13 @@ impl Component for TeraTemplateComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -100,7 +141,8 @@ impl Component for TeraTemplateComponent {
                     trace!("{}", rendered);
 
                     // send result to out port
-                    out.push(rendered.trim().as_bytes().to_vec()).expect("could not push into OUT");   //TODO optimize - allocations?
+                    out.push(rendered.trim().as_bytes().to_vec())
+                        .expect("could not push into OUT"); //TODO optimize - allocations?
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -123,7 +165,10 @@ impl Component for TeraTemplateComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TeraTemplate"),
             description: String::from("Sends IPs through the template given on TEMPLATE and the rendered result to the outport."),

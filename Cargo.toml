@@ -1,6 +1,6 @@
 [package]
 name = "flowd-rs"
-version = "0.4.0"
+version = "0.5.0-pre"
 authors = ["Ernst Rohlicek <ernst@rohlicek.at>"]
 repository = "https://github.com/ERnsTL/flowd"
 license = "LGPL-3.0-or-later"
@@ -16,6 +16,7 @@ members = [".", "component_api", "components/*"]
 [features]
 default = []
 allow-module-components = []
+enforce-process-non-blocking-contract = []
 
 [dependencies]
 #NOTE: the features remove logging level output more detailed than certain level, at compile-time (!)

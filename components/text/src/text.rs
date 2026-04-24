@@ -1,5 +1,8 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use std::thread;
@@ -14,11 +17,32 @@ pub struct TextReplaceComponent {
 }
 
 impl Component for TextReplaceComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         TextReplaceComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -30,7 +54,10 @@ impl Component for TextReplaceComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -41,7 +68,10 @@ impl Component for TextReplaceComponent {
             // wait for packet
             while conf.is_empty() {
                 if let Ok(sig) = self.signals_in.try_recv() {
-                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                    trace!(
+                        "received signal ip: {}",
+                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                    );
                     if sig == b"stop" {
                         info!("got stop signal while waiting for replacement config, exiting");
                         return;
@@ -49,7 +79,10 @@ impl Component for TextReplaceComponent {
                         trace!("got ping signal, responding");
                         let _ = self.signals_out.try_send(b"pong".to_vec());
                     } else {
-                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                        warn!(
+                            "received unknown signal ip: {}",
+                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                        );
                     }
                 }
                 thread::yield_now();
@@ -58,7 +91,10 @@ impl Component for TextReplaceComponent {
             while conf.slots() >= 2 {
                 let from = conf.pop().expect("failed to pop CONF replacement from IP");
                 let to = conf.pop().expect("failed to pop CONF replacement to IP");
-                let entry = (String::from_utf8(from).unwrap(), String::from_utf8(to).unwrap());
+                let entry = (
+                    String::from_utf8(from).unwrap(),
+                    String::from_utf8(to).unwrap(),
+                );
                 trace!("got replacement pair: from={} to={}", entry.0, entry.1);
                 replacements.push(entry);
             }
@@ -73,16 +109,23 @@ impl Component for TextReplaceComponent {
             trace!("begin of iteration");
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -98,13 +141,15 @@ impl Component for TextReplaceComponent {
                     //TODO feature - add version using regular expressions
                     //TODO feature - add search and replacement of \r, \n, \t etc. as well
                     for replacement in &replacements {
-                        text = text.replace(replacement.0.as_str(), replacement.1.as_str());    //TODO optimize - better &String or String.as_str() ?
+                        text = text.replace(replacement.0.as_str(), replacement.1.as_str());
+                        //TODO optimize - better &String or String.as_str() ?
                     }
 
                     // send it
                     debug!("forwarding...");
                     //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(text.into_bytes()).expect("could not push into OUT");
+                    out.push(text.into_bytes())
+                        .expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
                 } else {
@@ -126,7 +171,10 @@ impl Component for TextReplaceComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("TextReplace"),
             description: String::from("Reads IPs as UTF-8 strings, applies text replacements and forwards the processed string IPs."),

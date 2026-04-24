@@ -1,5 +1,9 @@
-use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource, PushError};
-use log::{debug, info, warn, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    PushError,
+};
+use log::{debug, info, trace, warn};
 
 // component-specific
 //use std::io::BufRead;
@@ -13,10 +17,27 @@ pub struct SplitLinesComponent {
 }
 
 impl Component for SplitLinesComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         SplitLinesComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -27,22 +48,32 @@ impl Component for SplitLinesComponent {
         debug!("SplitLines is now run()ning!");
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         loop {
             trace!("begin of iteration");
             let mut stop_requested = false;
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             // check in port
@@ -66,7 +97,7 @@ impl Component for SplitLinesComponent {
                     while let Some(line) = line_iter.next() {
                         // write first line
                         match out.push(line) {
-                            Ok(_) => {},
+                            Ok(_) => {}
                             Err(PushError::Full(line)) => {
                                 // full, so wake up output-side component
                                 out_wakeup.unpark();
@@ -82,7 +113,10 @@ impl Component for SplitLinesComponent {
                                         } else if sig == b"ping" {
                                             let _ = self.signals_out.try_send(b"pong".to_vec());
                                         } else {
-                                            warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                            warn!(
+                                                "received unknown signal ip: {}",
+                                                std::str::from_utf8(&sig).expect("invalid utf-8")
+                                            );
                                         }
                                     }
                                     out_wakeup.unpark();
@@ -93,7 +127,8 @@ impl Component for SplitLinesComponent {
                                     break;
                                 }
                                 // send first line now that outport is !full
-                                out.push(line).expect("could not push into OUT - but said !is_full");
+                                out.push(line)
+                                    .expect("could not push into OUT - but said !is_full");
                             }
                         }
                         if stop_requested {
@@ -150,36 +185,37 @@ impl Component for SplitLinesComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("SplitLines"),
-            description: String::from("Splits IP contents by newline (\\n) and forwards the parts in separate IPs."),
+            description: String::from(
+                "Splits IP contents by newline (\\n) and forwards the parts in separate IPs.",
+            ),
             icon: String::from("cut"),
             subgraph: false,
-            in_ports: vec![
-                ComponentPort {
-                    name: String::from("IN"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("IPs with text to split"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("split lines"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            in_ports: vec![ComponentPort {
+                name: String::from("IN"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("IPs with text to split"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("split lines"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }

@@ -1,12 +1,15 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, info, warn, error, trace};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 //component-specific
-use std::vec;
-use std::ffi::OsString;
 use lexopt::prelude::*;
 use ssh::TerminalSize;
+use std::ffi::OsString;
 use std::time::Duration;
+use std::vec;
 
 /*
 Ability to remotely execute a command and forward data to its STDIN and receive data from its STDOUT.
@@ -30,17 +33,45 @@ pub struct SSHClientComponent {
 }
 
 const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(7));
-const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(2000));     //TODO should be set to 500ms for streaming mode
+const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(2000)); //TODO should be set to 500ms for streaming mode
 
-enum Mode { One, Each }
+enum Mode {
+    One,
+    Each,
+}
 
 impl Component for SSHClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         SSHClientComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            cmd: inports.remove("CMD").expect("found no CMD inport").pop().unwrap(),
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            cmd: inports
+                .remove("CMD")
+                .expect("found no CMD inport")
+                .pop()
+                .unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -53,10 +84,15 @@ impl Component for SSHClientComponent {
         let mut cmd = self.cmd;
         let mut conf = self.conf;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read sub-process program and args
-        let cmd_ip = cmd.pop().expect("could not read IP from CMD configuration inport");
+        let cmd_ip = cmd
+            .pop()
+            .expect("could not read IP from CMD configuration inport");
         let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
         // NOTE: ssh does the parsing of the command-line itself, we just pass it as a str
         /*
@@ -77,35 +113,77 @@ impl Component for SSHClientComponent {
         let mut mode = Mode::Each;
         let mut retry = false;
         let mut pipe_out: bool = false;
-        let conf_vec = conf.pop().expect("could not read IP from CONF configuration inport");
+        let conf_vec = conf
+            .pop()
+            .expect("could not read IP from CONF configuration inport");
         let conf_words_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
-        let conf_words = shell_words::split(conf_words_str).expect("failed to parse command-line of sub-process");
+        let conf_words = shell_words::split(conf_words_str)
+            .expect("failed to parse command-line of sub-process");
         let mut parser = lexopt::Parser::from_args(conf_words);
         let mut address_port: Option<String> = None;
         while let Some(arg) = parser.next().expect("could not call next()") {
             match arg {
                 Long("retry") => {
-                    retry = parser.value().expect("failed to get value for retry").parse().expect("failed to parse value for retry");
+                    retry = parser
+                        .value()
+                        .expect("failed to get value for retry")
+                        .parse()
+                        .expect("failed to parse value for retry");
                 }
                 Long("mode") => {
-                    let mode_str: OsString = parser.value().expect("failed to get value for mode").parse::<OsString>().expect("failed to parse value for mode");
-                    match mode_str.to_str().expect("could not convert mode_str to str") {
-                        "one" => { mode = Mode::One; },
-                        "each" => { mode = Mode::Each; },
-                        _ => { unreachable!(); }
+                    let mode_str: OsString = parser
+                        .value()
+                        .expect("failed to get value for mode")
+                        .parse::<OsString>()
+                        .expect("failed to parse value for mode");
+                    match mode_str
+                        .to_str()
+                        .expect("could not convert mode_str to str")
+                    {
+                        "one" => {
+                            mode = Mode::One;
+                        }
+                        "each" => {
+                            mode = Mode::Each;
+                        }
+                        _ => {
+                            unreachable!();
+                        }
                     }
                 }
                 Long("user") => {
-                    username = Some(parser.value().expect("failed to get value for user").into_string().expect("failed to get parser value for user"));
+                    username = Some(
+                        parser
+                            .value()
+                            .expect("failed to get value for user")
+                            .into_string()
+                            .expect("failed to get parser value for user"),
+                    );
                 }
                 Long("pass") => {
-                    password = Some(parser.value().expect("failed to get value for pass").into_string().expect("failed to get parser value for pass"));
+                    password = Some(
+                        parser
+                            .value()
+                            .expect("failed to get value for pass")
+                            .into_string()
+                            .expect("failed to get parser value for pass"),
+                    );
                 }
                 Short('i') => {
-                    private_key_path = Some(parser.value().expect("failed to get value for -i").into_string().expect("failed to get parser value for -i"));
+                    private_key_path = Some(
+                        parser
+                            .value()
+                            .expect("failed to get value for -i")
+                            .into_string()
+                            .expect("failed to get parser value for -i"),
+                    );
                 }
                 Long("pipeout") => {
-                    pipe_out = parser.value().expect("failed to get value for pipeout").parse().expect("failed to parse value for pipeout");
+                    pipe_out = parser
+                        .value()
+                        .expect("failed to get value for pipeout")
+                        .parse()
+                        .expect("failed to parse value for pipeout");
                 }
                 Value(val) => {
                     // check for address:port
@@ -162,16 +240,23 @@ impl Component for SSHClientComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             // check in port
@@ -197,7 +282,7 @@ impl Component for SSHClientComponent {
                     // open session
                     let mut session = session_builder
                         // connect does not support SSH-tpyical user@host:port syntax but only the basic from TcpStream.connect("host:port")
-                        .connect_with_timeout(&address_port, CONNECT_TIMEOUT)   //TODO optimize - avoid unwrap, could do unwrap_unchecked because of previous check
+                        .connect_with_timeout(&address_port, CONNECT_TIMEOUT) //TODO optimize - avoid unwrap, could do unwrap_unchecked because of previous check
                         .unwrap()
                         .run_local();
 
@@ -207,17 +292,29 @@ impl Component for SSHClientComponent {
                     //  but in exec_shell resp. streaming mode it is read from the channel, and then there is nothing available yet,
                     //  then we just do another iteration, able to handle singals
                     let out_vec: Vec<u8>;
-                    if pipe_out {   // stream data from SSH command to next component
+                    if pipe_out {
+                        // stream data from SSH command to next component
                         // open and execute command in SSH channel in session
                         let channel = session.open_channel().unwrap();
                         // start shell in the channel
-                        let mut channel_shell = channel.shell(TerminalSize::from_type(80, 25, ssh::TerminalSizeType::Character)).unwrap();
+                        let mut channel_shell = channel
+                            .shell(TerminalSize::from_type(
+                                80,
+                                25,
+                                ssh::TerminalSizeType::Character,
+                            ))
+                            .unwrap();
                         // write trigger IP into the remote shell STDIN
-                        channel_shell.write(&ip).expect("failed to write into channel_shell");
+                        channel_shell
+                            .write(&ip)
+                            .expect("failed to write into channel_shell");
                         // read from that command
-                        out_vec = channel_shell.read().expect("failed to read from channel_shell");
+                        out_vec = channel_shell
+                            .read()
+                            .expect("failed to read from channel_shell");
                         //TODO implement this mode - currently does only 1 read()
-                    } else { // one command execution per inport packet
+                    } else {
+                        // one command execution per inport packet
                         // capture of output desired
                         let exec = session.open_exec().expect("failed to open exec");
                         out_vec = exec.send_command(cmd_line).expect("failed to send command");
@@ -263,7 +360,10 @@ impl Component for SSHClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("SSHClient"),
             description: String::from("Runs a program remotely and forwards STDIN, STDERR and STDOUT."),

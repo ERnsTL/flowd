@@ -1,9 +1,12 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{debug, trace, info, warn, error};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 /*
 use std::os::unix::net::UnixDatagram;
 use std::os::unix::net::UnixStream;
@@ -15,12 +18,12 @@ use std::io::ErrorKind;
 use std::io::BufReader;
 use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
 */
-use std::time::{Duration, Instant};
-use uds::UnixSocketAddr;
-use std::io::{ErrorKind, Write, Read};
+use std::collections::HashMap;
+use std::io::{ErrorKind, Read, Write};
 use std::net::Shutdown;
 use std::thread::{self};
-use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use uds::UnixSocketAddr;
 
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
@@ -60,9 +63,8 @@ Situation 2024-04:
 enum SocketType {
     Datagram,
     Stream,
-    SeqPacket
-    // NOTE: what is seqpacket, it is the way to go unless really streaming is employed and many many messages are received since 1 read syscall will yield only 1 seqpacket=message.
-    // http://www.ccplusplus.com/2011/08/understanding-sockseqpacket-socket-type.html
+    SeqPacket, // NOTE: what is seqpacket, it is the way to go unless really streaming is employed and many many messages are received since 1 read syscall will yield only 1 seqpacket=message.
+               // http://www.ccplusplus.com/2011/08/understanding-sockseqpacket-socket-type.html
 }
 
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
@@ -73,11 +75,32 @@ const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
 const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 impl Component for UnixSocketClientComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         UnixSocketClientComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -89,7 +112,10 @@ impl Component for UnixSocketClientComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IPs");
@@ -98,7 +124,10 @@ impl Component for UnixSocketClientComponent {
             thread::yield_now();
         }
         */
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
 
         // prepare connection arguments
         let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
@@ -116,10 +145,12 @@ impl Component for UnixSocketClientComponent {
         };
         debug!("got abstract socket address: {}", address_is_abstract);
         // get address from URL
-        let address_str ;
+        let address_str;
         if address_is_abstract {
             // get abstract socket address from URL host
-            address_str = url.host_str().expect("failed to get abstract socket address from URL host");
+            address_str = url
+                .host_str()
+                .expect("failed to get abstract socket address from URL host");
         } else {
             // get path-based socket address from URL path
             address_str = url.path();
@@ -133,7 +164,10 @@ impl Component for UnixSocketClientComponent {
         //TODO implement - currently variables are not used
         let _read_buffer_size;
         if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
-            _read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
+            _read_buffer_size = value
+                .to_string()
+                .parse::<usize>()
+                .expect("failed to parse query pair value for read buffer as integer");
         } else {
             _read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
         }
@@ -141,7 +175,12 @@ impl Component for UnixSocketClientComponent {
         //TODO differentiate internal read timeout and read timeout when connection has to be reconnected
         let read_timeout: Duration;
         if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rtimeout") {
-            read_timeout = Duration::from_millis(value.to_string().parse::<u64>().expect("failed to parse query pair value for read timeout as integer"));
+            read_timeout = Duration::from_millis(
+                value
+                    .to_string()
+                    .parse::<u64>()
+                    .expect("failed to parse query pair value for read timeout as integer"),
+            );
         } else {
             read_timeout = DEFAULT_READ_TIMEOUT;
         }
@@ -151,8 +190,10 @@ impl Component for UnixSocketClientComponent {
             socket_type = match value.to_string().as_str() {
                 "seqpacket" => SocketType::SeqPacket,
                 "stream" => SocketType::Stream,
-                "dgram"|"datagram" => SocketType::Datagram,
-                _ => { panic!("failed to parse query pair value for key socket_type into dgram|datagram|stream|seqpacket"); }
+                "dgram" | "datagram" => SocketType::Datagram,
+                _ => {
+                    panic!("failed to parse query pair value for key socket_type into dgram|datagram|stream|seqpacket");
+                }
             };
         } else {
             // NOTE: not setting a default type, because this may produce "unable to connect" errors because of unexpected socket type (and the default might change in the future)
@@ -168,12 +209,14 @@ impl Component for UnixSocketClientComponent {
             // std variant
             //socket_address = SocketAddr::from_abstract_name(address_str).expect("failed to parse abstract socket address into SocketAddr");
             // uds variant
-            socket_address = UnixSocketAddr::from_abstract(address_str).expect("failed to parse abstract socket address into UnixSocketAddr");
+            socket_address = UnixSocketAddr::from_abstract(address_str)
+                .expect("failed to parse abstract socket address into UnixSocketAddr");
         } else {
             // std variant
             //socket_address = SocketAddr::from_pathname(address_str).expect("failed to parse path-based socket address into SocketAddr");
             // uds variant
-            socket_address = UnixSocketAddr::from_path(address_str).expect("failed to parse path-based socket address into UnixSocketAddr");
+            socket_address = UnixSocketAddr::from_path(address_str)
+                .expect("failed to parse path-based socket address into UnixSocketAddr");
         };
 
         // prepare socket client
@@ -182,9 +225,16 @@ impl Component for UnixSocketClientComponent {
         //let client_stream;
         //let client_dgram;
         match socket_type {
-            SocketType::SeqPacket => { client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address).expect("failed to connect"); }
-            SocketType::Stream => { unimplemented!(); } //client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
-            SocketType::Datagram => { unimplemented!(); } //client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
+            SocketType::SeqPacket => {
+                client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address)
+                    .expect("failed to connect");
+            }
+            SocketType::Stream => {
+                unimplemented!();
+            } //client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
+            SocketType::Datagram => {
+                unimplemented!();
+            } //client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
         };
 
         // prepare buffered reader
@@ -193,7 +243,9 @@ impl Component for UnixSocketClientComponent {
         let mut buf = [0u8; DEFAULT_READ_BUFFER_SIZE];
 
         // set read timeout to avoid blocking forever and watchdog thread marking the process as non-responding
-        client_seqpacket.set_read_timeout(Some(read_timeout)).expect("failed to set socket read timeout");
+        client_seqpacket
+            .set_read_timeout(Some(read_timeout))
+            .expect("failed to set socket read timeout");
 
         // main loop
         loop {
@@ -202,16 +254,23 @@ impl Component for UnixSocketClientComponent {
             // check signals
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -230,11 +289,13 @@ impl Component for UnixSocketClientComponent {
                 //debug!("got a packet, dropping it.");
 
                 debug!("got {} packets, sending into socket...", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
 
                 for ip in chunk.into_iter() {
                     match client_seqpacket.send(ip.as_ref()) {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(err) => {
                             //TODO handle disconnection and reconnection here
                             //TODO automatic reconnection - reconnect timeout of 30s, then error out.
@@ -271,10 +332,11 @@ impl Component for UnixSocketClientComponent {
                 Ok(bytes_in) => {
                     debug!("got packet with {} bytes, repeating...", bytes_in);
                     debug!("repeating packet...");
-                    out.push(Vec::from(&buf[0..bytes_in])).expect("could not push into OUT");
+                    out.push(Vec::from(&buf[0..bytes_in]))
+                        .expect("could not push into OUT");
                     out_wakeup.unpark();
                     debug!("done");
-                },
+                }
                 Err(err) => {
                     //TODO handle disconnection and reconnection here
                     //TODO automatic reconnection - reconnect timeout of 30s, then error out.
@@ -307,11 +369,14 @@ impl Component for UnixSocketClientComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("UnixSocketClient"),
-            description: String::from("Drops all packets received on IN port."),    //###
-            icon: String::from("trash-o"),  //###
+            description: String::from("Drops all packets received on IN port."), //###
+            icon: String::from("trash-o"),                                       //###
             subgraph: false,
             in_ports: vec![
                 ComponentPort {
@@ -320,9 +385,9 @@ impl Component for UnixSocketClientComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("data to be dropped"),    //###
+                    description: String::from("data to be dropped"), //###
                     values_allowed: vec![],
-                    value_default: String::from("")
+                    value_default: String::from(""),
                 },
                 ComponentPort {
                     name: String::from("IN"),
@@ -332,21 +397,19 @@ impl Component for UnixSocketClientComponent {
                     is_arrayport: false,
                     description: String::from("data to be dropped"),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("data to be dropped"),    //###
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("data to be dropped"), //###
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }
@@ -362,11 +425,32 @@ pub struct UnixSocketServerComponent {
 }
 
 impl Component for UnixSocketServerComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         UnixSocketServerComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            resp: inports.remove("RESP").expect("found no RESP inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            resp: inports
+                .remove("RESP")
+                .expect("found no RESP inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -382,7 +466,10 @@ impl Component for UnixSocketServerComponent {
                 break;
             }
             if let Ok(ip) = self.signals_in.try_recv() {
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 if ip == b"stop" {
                     info!("got stop signal while waiting for CONF, exiting");
                     return;
@@ -390,7 +477,10 @@ impl Component for UnixSocketServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             thread::yield_now();
@@ -400,19 +490,27 @@ impl Component for UnixSocketServerComponent {
         let listenpath = std::str::from_utf8(&config).expect("could not parse listenpath as utf8");
         trace!("got path {}", listenpath);
         std::fs::remove_file(&listenpath).ok();
-        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath)).expect("bind unix listener socket");
-        listener.set_nonblocking(true).expect("set listen socket to non-blocking");
+        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath))
+            .expect("bind unix listener socket");
+        listener
+            .set_nonblocking(true)
+            .expect("set listen socket to non-blocking");
         let resp = &mut self.resp;
         let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
         let shutdown = Arc::new(AtomicBool::new(false));
 
-        let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> = Arc::new(Mutex::new(HashMap::new()));
+        let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> =
+            Arc::new(Mutex::new(HashMap::new()));
         let sockets_ref = Arc::clone(&sockets);
         let out_ref = Arc::clone(&out);
         let out_wakeup_ref = out_wakeup.clone();
         let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(Vec::new()));
+        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
+            Arc::new(Mutex::new(Vec::new()));
         let connection_threads_ref = connection_threads.clone();
         let listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
             let mut socketnum: u32 = 0;
@@ -493,7 +591,10 @@ impl Component for UnixSocketServerComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
                 if ip == b"stop" {
                     info!("got stop signal, exiting");
@@ -502,14 +603,18 @@ impl Component for UnixSocketServerComponent {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
             // check in port
             //TODO while !inn.is_empty() {
             loop {
-                if let Ok(ip) = resp.pop() { //TODO normally the IP should be immutable and forwarded as-is into the component library
+                if let Ok(ip) = resp.pop() {
+                    //TODO normally the IP should be immutable and forwarded as-is into the component library
                     // output the packet data with newline
                     debug!("got a packet, writing into unix socket...");
 
@@ -523,21 +628,21 @@ impl Component for UnixSocketServerComponent {
                             .write_all(&ip);
                         match write_res {
                             Ok(_) => {}
-                            Err(err) => {
-                                match err.kind() {
-                                    ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                                        warn!("unixsocketserver: timed out writing response to client {}, dropping packet", socket_id);
-                                    }
-                                    ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
-                                        warn!("unixsocketserver: dropping disconnected client {} after write error: {}", socket_id, err);
-                                        let _ = sockets_locked.remove(&socket_id);
-                                    }
-                                    _ => {
-                                        warn!("unixsocketserver: write to client {} failed: {}, dropping client", socket_id, err);
-                                        let _ = sockets_locked.remove(&socket_id);
-                                    }
+                            Err(err) => match err.kind() {
+                                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                    warn!("unixsocketserver: timed out writing response to client {}, dropping packet", socket_id);
                                 }
-                            }
+                                ErrorKind::BrokenPipe
+                                | ErrorKind::ConnectionReset
+                                | ErrorKind::NotConnected => {
+                                    warn!("unixsocketserver: dropping disconnected client {} after write error: {}", socket_id, err);
+                                    let _ = sockets_locked.remove(&socket_id);
+                                }
+                                _ => {
+                                    warn!("unixsocketserver: write to client {} failed: {}, dropping client", socket_id, err);
+                                    let _ = sockets_locked.remove(&socket_id);
+                                }
+                            },
                         }
                     } else {
                         debug!("no connected clients, dropping response packet");
@@ -588,7 +693,10 @@ impl Component for UnixSocketServerComponent {
             }
             if handle.is_finished() {
                 if let Err(err) = handle.join() {
-                    warn!("failed to join unixsocket connection handler thread: {:?}", err);
+                    warn!(
+                        "failed to join unixsocket connection handler thread: {:?}",
+                        err
+                    );
                 }
             } else {
                 warn!(
@@ -603,7 +711,10 @@ impl Component for UnixSocketServerComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("UnixSocketServer"),
             description: String::from("Unix socket server"),
@@ -616,9 +727,11 @@ impl Component for UnixSocketServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("configuration value, currently the path to listen on"),
+                    description: String::from(
+                        "configuration value, currently the path to listen on",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("/tmp/server.sock")
+                    value_default: String::from("/tmp/server.sock"),
                 },
                 ComponentPort {
                     name: String::from("RESP"),
@@ -626,23 +739,23 @@ impl Component for UnixSocketServerComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("response data from downstream process for each connection"),
+                    description: String::from(
+                        "response data from downstream process for each connection",
+                    ),
                     values_allowed: vec![],
-                    value_default: String::from("")
-                }
+                    value_default: String::from(""),
+                },
             ],
-            out_ports: vec![
-                ComponentPort {
-                    name: String::from("OUT"),
-                    allowed_type: String::from("any"),
-                    schema: None,
-                    required: true,
-                    is_arrayport: false,
-                    description: String::from("signal and content data from client connections"),
-                    values_allowed: vec![],
-                    value_default: String::from("")
-                }
-            ],
+            out_ports: vec![ComponentPort {
+                name: String::from("OUT"),
+                allowed_type: String::from("any"),
+                schema: None,
+                required: true,
+                is_arrayport: false,
+                description: String::from("signal and content data from client connections"),
+                values_allowed: vec![],
+                value_default: String::from(""),
+            }],
             ..Default::default()
         }
     }

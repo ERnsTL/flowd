@@ -1,5 +1,7 @@
+use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
 use std::thread::Thread;
+use std::time::Instant;
 
 use multimap::MultiMap;
 use serde::Serialize;
@@ -12,13 +14,43 @@ pub type ProcessOutports = MultiMap<String, ProcessEdgeSink>;
 pub type ProcessEdge = rtrb::RingBuffer<MessageBuf>;
 pub type ProcessEdgeSource = rtrb::Consumer<MessageBuf>;
 pub type ProcessEdgeSinkConnection = rtrb::Producer<MessageBuf>;
-pub use rtrb::PushError;    // re-eport for abstraction
+pub use rtrb::PushError; // re-eport for abstraction
 
-#[derive(Debug)]
 pub struct ProcessEdgeSink {
     pub sink: ProcessEdgeSinkConnection,
     pub wakeup: Option<WakeupNotify>,
     pub proc_name: Option<String>,
+    pub signal_ready: Option<Box<dyn Fn() + Send + Sync>>,
+}
+
+impl ProcessEdgeSink {
+    /// Push data into the edge and signal readiness if configured
+    pub fn push(&mut self, data: MessageBuf) -> Result<(), PushError<MessageBuf>> {
+        match self.sink.push(data) {
+            Ok(()) => {
+                // Signal scheduler that downstream component may be ready
+                if let Some(signal) = &self.signal_ready {
+                    signal();
+                }
+                // Wake non-scheduler boundary handlers (for example graph outport bridge).
+                if let Some(wakeup) = &self.wakeup {
+                    wakeup.unpark();
+                }
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl Debug for ProcessEdgeSink {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProcessEdgeSink")
+            .field("sink", &self.sink)
+            .field("wakeup", &self.wakeup)
+            .field("proc_name", &self.proc_name)
+            .finish()
+    }
 }
 
 pub const PROCESSEDGE_BUFSIZE: usize = 7 * 7 * 7 * 7;
@@ -29,8 +61,8 @@ pub const PROCESSEDGE_IIP_BUFSIZE: usize = 1;
 pub type WakeupNotify = Thread;
 
 // signals
-pub type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>;   // only one allowed (single consumer)
-pub type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>;   // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
+pub type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>; // only one allowed (single consumer)
+pub type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>; // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 
 // information packets (IPs) = messages
 /*
@@ -45,11 +77,67 @@ And there is no "master" who owns the data - then we could give threads A and B 
 */
 pub type MessageBuf = Vec<u8>;
 
+// Process result for scheduler-based execution
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProcessResult {
+    DidWork(u32), // processed N work units
+    NoWork,       // no work available
+    Finished,     // component completed (for finite sources)
+}
+
+// Budget classes for execution control
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BudgetClass {
+    Normal = 32,   // 16-64 range, start at 32
+    Heavy = 8,     // 4-16 range, start at 8
+    Realtime = 96, // 64-128 range, start at 96
+}
+
+// Node context for scheduler
+#[derive(Debug, Clone)]
+pub struct NodeContext {
+    pub node_id: String,
+    pub budget_class: BudgetClass,
+    pub remaining_budget: u32,
+    pub ready_signal: std::sync::Arc<std::sync::atomic::AtomicBool>, // level-triggered readiness
+    pub last_execution: Instant,
+    pub execution_count: u64,
+    pub work_units_processed: u64,
+}
+
 // component
-pub trait Component {
-    fn new(inports: ProcessInports, outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, graph_inout: GraphInportOutportHandle) -> Self where Self: Sized;
-    fn run(self);   //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized;
+pub trait Component: Send {
+    fn new(
+        inports: ProcessInports,
+        outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized;
+
+    // Scheduler-based execution: process one work unit and return result
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        // Default implementation for backward compatibility
+        // Components should override this with proper scheduler-aware logic
+        ProcessResult::NoWork
+    }
+
+    // Legacy method for backward compatibility during transition
+    fn run(self)
+    where
+        Self: Sized,
+    {
+        //NOTE: consume self because this method is not expected to return, and we can hand over data from self to sub-threads (lifetime of &self issue)
+        // Components will be migrated to implement process() instead
+        // For now, this is a placeholder that will be removed
+        unimplemented!("Components should implement process() for scheduler-based execution");
+    }
+
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized;
 
     /*// to support reconnecting of inports and outports
     fn reconfigure_connection(

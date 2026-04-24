@@ -1,4 +1,8 @@
-use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource, PushError};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    PushError,
+};
 use log::{debug, info, trace, warn};
 
 // component-specific
@@ -50,11 +54,29 @@ pub struct DelayComponent {
 }
 
 impl Component for DelayComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self {
         DelayComponent {
-            conf: inports.remove("CONF").expect("delay missing CONF").pop().unwrap(),
-            inn: inports.remove("IN").expect("delay missing IN").pop().unwrap(),
-            out: outports.remove("OUT").expect("delay missing OUT").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("delay missing CONF")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("delay missing IN")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("delay missing OUT")
+                .pop()
+                .unwrap(),
             signals_in,
             signals_out,
         }
@@ -74,7 +96,10 @@ impl Component for DelayComponent {
                 match parse_delay(config_str) {
                     Ok(d) => d,
                     Err(e) => {
-                        info!("invalid delay config '{}': {}, using default 50us", config_str, e);
+                        info!(
+                            "invalid delay config '{}': {}, using default 50us",
+                            config_str, e
+                        );
                         Duration::from_micros(50)
                     }
                 }

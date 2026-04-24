@@ -1,14 +1,18 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, ProcessEdgeSinkConnection, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
+    ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::Arc;
+use std::net::ToSocketAddrs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::net::ToSocketAddrs;
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 use std::thread;
 use std::thread::Thread;
+use std::time::{Duration, Instant};
 extern crate imap;
 extern crate native_tls;
 use imap::extensions::idle::WaitOutcome;
@@ -41,10 +45,27 @@ pub struct IMAPAppendComponent {
 }
 
 impl Component for IMAPAppendComponent {
-    fn new(mut inports: ProcessInports, _outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        _outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         IMAPAppendComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -54,12 +75,15 @@ impl Component for IMAPAppendComponent {
     fn run(self) {
         debug!("IMAPAppend is now run()ning!");
         let mut conf = self.conf;
-        let mut inn = self.inn;    //TODO optimize these references, not really needed for them to be referenes, can just consume?
+        let mut inn = self.inn; //TODO optimize these references, not really needed for them to be referenes, can just consume?
 
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // parse and connect to IMAP server
@@ -124,16 +148,23 @@ impl Component for IMAPAppendComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     stop_requested = true;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
             if stop_requested {
@@ -156,8 +187,11 @@ impl Component for IMAPAppendComponent {
             while !inn.is_empty() {
                 //_ = inn.pop().ok();
                 debug!("got {} packets, appending to IMAP mailbox.", inn.slots());
-                let chunk = inn.read_chunk(inn.slots()).expect("receive as chunk failed");
-                for ip in chunk.into_iter() {   //TODO is iterator faster or as_slices() or as_mut_slices() ?
+                let chunk = inn
+                    .read_chunk(inn.slots())
+                    .expect("receive as chunk failed");
+                for ip in chunk.into_iter() {
+                    //TODO is iterator faster or as_slices() or as_mut_slices() ?
                     // TODO for objects and open brackets, we need headers and a body - "Type: OpenBracket\r\nProcess: Drop_xxxxx\r\nPort: IN\r\n\r\n..."
                     let mut pending = ip;
                     loop {
@@ -168,7 +202,10 @@ impl Component for IMAPAppendComponent {
                             Err(mpsc::TrySendError::Full(returned)) => {
                                 pending = returned;
                                 if let Ok(sig) = self.signals_in.try_recv() {
-                                    trace!("received signal ip while waiting for append queue: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                    trace!(
+                                        "received signal ip while waiting for append queue: {}",
+                                        std::str::from_utf8(&sig).expect("invalid utf-8")
+                                    );
                                     if sig == b"stop" {
                                         info!("got stop signal while waiting for append queue, exiting");
                                         stop_requested = true;
@@ -177,7 +214,10 @@ impl Component for IMAPAppendComponent {
                                         trace!("got ping signal, responding");
                                         let _ = self.signals_out.try_send(b"pong".to_vec());
                                     } else {
-                                        warn!("received unknown signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
+                                        warn!(
+                                            "received unknown signal ip: {}",
+                                            std::str::from_utf8(&sig).expect("invalid utf-8")
+                                        );
                                     }
                                 }
                                 if stop_requested {
@@ -219,7 +259,9 @@ impl Component for IMAPAppendComponent {
         append_shutdown.store(true, Ordering::Relaxed);
         drop(append_tx);
         let append_join_started = Instant::now();
-        while !append_worker.is_finished() && append_join_started.elapsed() < APPEND_THREAD_JOIN_GRACE {
+        while !append_worker.is_finished()
+            && append_join_started.elapsed() < APPEND_THREAD_JOIN_GRACE
+        {
             thread::sleep(Duration::from_millis(10));
         }
         if append_worker.is_finished() {
@@ -237,7 +279,10 @@ impl Component for IMAPAppendComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("IMAPAppend"),
             description: String::from("Appends data as-is from IN port to the mailbox given in CONF."),
@@ -280,10 +325,27 @@ pub struct IMAPFetchIdleComponent {
 }
 
 impl Component for IMAPFetchIdleComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         IMAPFetchIdleComponent {
-            conf: inports.remove("CONF").expect("found no CONF inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -298,7 +360,10 @@ impl Component for IMAPFetchIdleComponent {
         // check config port
         trace!("read config IP");
         //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else { error!("no config IP received - exiting"); return; };
+        let Ok(url_vec) = conf.pop() else {
+            error!("no config IP received - exiting");
+            return;
+        };
         let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
 
         // parse and connect to IMAP server
@@ -309,49 +374,61 @@ impl Component for IMAPFetchIdleComponent {
 
         // handle connection events
         //TODO automatic reconnection
-        let event_handler_thread = thread::Builder::new().name(format!("{}/I", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
-            // unpack outport
-            let mut out = outport.sink;
-            let out_wakeup = outport.wakeup.as_mut().expect("got no wakeup handle for outport OUT");
+        let event_handler_thread = thread::Builder::new()
+            .name(format!(
+                "{}/I",
+                thread::current()
+                    .name()
+                    .expect("failed to get current thread name")
+            ))
+            .spawn(move || {
+                // unpack outport
+                let mut out = outport.sink;
+                let out_wakeup = outport
+                    .wakeup
+                    .as_mut()
+                    .expect("got no wakeup handle for outport OUT");
 
-            // first fetch of any existing unread messages
-            fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
-            // main loop of idle and fetch
-            while let Ok(res) = idle(&mut imap_session) {
-                // check for shutdown signal before we fetch
-                if shutdown_ref.load(std::sync::atomic::Ordering::Relaxed) {
-                    debug!("got shutdown signal, exiting event handler thread");
+                // first fetch of any existing unread messages
+                fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
+                // main loop of idle and fetch
+                while let Ok(res) = idle(&mut imap_session) {
+                    // check for shutdown signal before we fetch
+                    if shutdown_ref.load(std::sync::atomic::Ordering::Relaxed) {
+                        debug!("got shutdown signal, exiting event handler thread");
 
-                    debug!("closing connection");
-                    close(&mut imap_session);
+                        debug!("closing connection");
+                        close(&mut imap_session);
 
-                    debug!("exiting");
-                    return;
+                        debug!("exiting");
+                        return;
+                    }
+
+                    // fetch any new messages
+                    match res {
+                        WaitOutcome::TimedOut => {
+                            // listen again - and we know the server connection is still alive
+                        }
+                        WaitOutcome::MailboxChanged => {
+                            debug!("mailbox changed");
+                            fetch(&mut imap_session, &mut out, &out_wakeup)
+                                .expect("failed to fetch");
+                        }
+                    }
                 }
 
-                // fetch any new messages
-                match res {
-                    WaitOutcome::TimedOut => {
-                        // listen again - and we know the server connection is still alive
-                    },
-                    WaitOutcome::MailboxChanged => {
-                        debug!("mailbox changed");
-                        fetch(&mut imap_session, &mut out, &out_wakeup).expect("failed to fetch");
-                    },
-                }
-            }
+                debug!("closing connection");
+                close(&mut imap_session);
 
-            debug!("closing connection");
-            close(&mut imap_session);
+                // signal main thread that we are done
+                //TODO optimize - useless if we got notified by the main thread of shutdown ;-)
+                //TODO optimize - code duplication between "we signal main thread" case and "we got signalled by main thread" case
+                debug!("signalling main thread that we are done");
+                shutdown_ref.store(true, std::sync::atomic::Ordering::Relaxed);
 
-            // signal main thread that we are done
-            //TODO optimize - useless if we got notified by the main thread of shutdown ;-)
-            //TODO optimize - code duplication between "we signal main thread" case and "we got signalled by main thread" case
-            debug!("signalling main thread that we are done");
-            shutdown_ref.store(true, std::sync::atomic::Ordering::Relaxed);
-
-            debug!("exiting");
-        }).expect("failed to spawn event handler thread");
+                debug!("exiting");
+            })
+            .expect("failed to spawn event handler thread");
 
         // FBP main loop
         loop {
@@ -360,16 +437,23 @@ impl Component for IMAPFetchIdleComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 } else {
-                    warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"))
+                    warn!(
+                        "received unknown signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    )
                 }
             }
 
@@ -393,12 +477,17 @@ impl Component for IMAPFetchIdleComponent {
         // wait for event handler thread to exit
         debug!("joining event handler thread");
         let join_started = Instant::now();
-        while !event_handler_thread.is_finished() && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE {
+        while !event_handler_thread.is_finished()
+            && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE
+        {
             thread::sleep(Duration::from_millis(10));
         }
         if event_handler_thread.is_finished() {
             if let Err(err) = event_handler_thread.join() {
-                warn!("IMAPFetchIdle: failed to join event handler thread: {:?}", err);
+                warn!(
+                    "IMAPFetchIdle: failed to join event handler thread: {:?}",
+                    err
+                );
             }
         } else {
             warn!(
@@ -417,7 +506,10 @@ impl Component for IMAPFetchIdleComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("IMAPFetchIdle"),
             description: String::from("Fetches and then idles on the IMAP mailbox given in CONF and forwards received messages to the OUT outport."),
@@ -457,7 +549,12 @@ fn parse_url(url: &str) -> url::Url {
     url::Url::parse(url).expect("failed to parse connection URL")
 }
 
-fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStream<std::net::TcpStream>>, &str) {
+fn login_and_connect(
+    url_parsed: &url::Url,
+) -> (
+    imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
+    &str,
+) {
     // prepare connection arguments
     // get protocol from URL
     let protocol = url_parsed.scheme();
@@ -470,9 +567,13 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
     //  this is to be done using https://docs.rs/percent-encoding/latest/percent_encoding/
     //  for now we just handle %40 = @ sign to be able to give user@example.com as username in the URL
     let user = url_parsed.username().replace("%40", "@");
-    let password = url_parsed.password().expect("no password given in connection URL");
+    let password = url_parsed
+        .password()
+        .expect("no password given in connection URL");
     // get host and port from URL
-    let host = url_parsed.host_str().expect("no host given in connection URL");
+    let host = url_parsed
+        .host_str()
+        .expect("no host given in connection URL");
     let port = url_parsed.port().unwrap_or(993);
     // get mailbox from URL
     let mut mailbox = url_parsed.path();
@@ -483,10 +584,19 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
     mailbox = mailbox.trim_start_matches('/');
     //TODO optimize the password substring, see https://users.rust-lang.org/t/how-to-get-a-substring-of-a-string/1351/16
     //  also see https://users.rust-lang.org/t/rust-format-max-width/100096
-    debug!("user={}  pass={}...  host={}  mailbox={}", user, password.chars().into_iter().take(3).collect::<String>(), host, mailbox);
+    debug!(
+        "user={}  pass={}...  host={}  mailbox={}",
+        user,
+        password.chars().into_iter().take(3).collect::<String>(),
+        host,
+        mailbox
+    );
 
     // connect with explicit socket timeouts so append/fetch operations stay stoppable.
-    let tls = native_tls::TlsConnector::builder().min_protocol_version(Some(native_tls::Protocol::Tlsv12)).build().expect("failed to prepare TLS connection");
+    let tls = native_tls::TlsConnector::builder()
+        .min_protocol_version(Some(native_tls::Protocol::Tlsv12))
+        .build()
+        .expect("failed to prepare TLS connection");
     let socket_addr = (host, port)
         .to_socket_addrs()
         .expect("failed to resolve IMAP server host")
@@ -494,22 +604,30 @@ fn login_and_connect(url_parsed: &url::Url) -> (imap::Session<native_tls::TlsStr
         .expect("IMAP server host resolved to no address");
     let tcp = std::net::TcpStream::connect_timeout(&socket_addr, IMAP_CONNECT_TIMEOUT)
         .expect("failed to connect to IMAP server");
-    tcp.set_read_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP read timeout");
-    tcp.set_write_timeout(IMAP_IO_TIMEOUT).expect("failed to set IMAP TCP write timeout");
+    tcp.set_read_timeout(IMAP_IO_TIMEOUT)
+        .expect("failed to set IMAP TCP read timeout");
+    tcp.set_write_timeout(IMAP_IO_TIMEOUT)
+        .expect("failed to set IMAP TCP write timeout");
     // we pass in the domain twice to check that the server's TLS certificate is valid for the domain we're connecting to.
     //NOTE: if getting authentication errors, check for special characters in URL parts, maybe a .to_ascii() is necessary because of URL-escaping
-    let tls_stream = native_tls::TlsConnector::connect(&tls, host, tcp).expect("failed to establish TLS to IMAP server");
+    let tls_stream = native_tls::TlsConnector::connect(&tls, host, tcp)
+        .expect("failed to establish TLS to IMAP server");
     let mut client = imap::Client::new(tls_stream);
-    client.read_greeting().expect("failed to read IMAP server greeting");
+    client
+        .read_greeting()
+        .expect("failed to read IMAP server greeting");
 
     // the client we have here is unauthenticated.
     // to do anything useful with the e-mails, we need to log in
     let mut imap_session = client
         .login(user, password)
-        .map_err(|e| e.0).expect("failed to login to IMAP server");
+        .map_err(|e| e.0)
+        .expect("failed to login to IMAP server");
 
     // we want to fetch the first email in the given mailbox
-    imap_session.select(mailbox).expect("failed to select mailbox");
+    imap_session
+        .select(mailbox)
+        .expect("failed to select mailbox");
 
     // return
     (imap_session, mailbox)
@@ -523,7 +641,11 @@ fn close(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     imap_session.logout().expect("logout failed");
 }
 
-fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>, out: &mut ProcessEdgeSinkConnection, out_wakeup: &Thread) -> Result<(), ()> {
+fn fetch(
+    imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
+    out: &mut ProcessEdgeSinkConnection,
+    out_wakeup: &Thread,
+) -> Result<(), ()> {
     // find unseen messages in the given mailbox
     let uids_set = imap_session.uid_search("UNSEEN").expect("search failed");
 
@@ -548,12 +670,18 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
     let query = "BODY[]";
     //let query = "BODY[TEXT]";
     //let uid_set = "(".to_owned() + uids.iter().map(|val| val.to_string()).collect::<Vec<_>>().join(" ").as_str() + ")";
-    let uid_set = uids.iter().map(|val| val.to_string()).collect::<Vec<_>>().join(",");
+    let uid_set = uids
+        .iter()
+        .map(|val| val.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     debug!("fetching messages {}", uid_set);
     // TODO possible race condition of there are multiple IMAP idlers running trying to fetch the same messages
     //   might lead to more-than-once delivery of messages
     // TODO in case of multiple idlers, ordering of messages is not guaranteed
-    let messages = imap_session.uid_fetch(&uid_set, query).expect("fetch failed");
+    let messages = imap_session
+        .uid_fetch(&uid_set, query)
+        .expect("fetch failed");
     for message in messages.iter() {
         // extract the message's body
         let body = message.body().expect("message did not have a body!");
@@ -568,12 +696,14 @@ fn fetch(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStr
 
         // send it
         debug!("forwarding message...");
-        out.push(body.to_vec()).expect("could not push into OUT");    //TODO optimize Vec conversion - is it free?
+        out.push(body.to_vec()).expect("could not push into OUT"); //TODO optimize Vec conversion - is it free?
         out_wakeup.unpark();
         debug!("done");
 
         // delete from server
-        imap_session.uid_store(&uid_set, "+FLAGS (\\Deleted)").expect("delete failed");
+        imap_session
+            .uid_store(&uid_set, "+FLAGS (\\Deleted)")
+            .expect("delete failed");
         debug!("deleted messages {}", uid_set);
     }
 
@@ -585,11 +715,16 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(10);
 // Keep this bounded so stop() can drain quickly even while the idle command is in progress.
 
 //TODO handle connection lost case
-fn idle(imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>) -> Result<WaitOutcome, imap::Error> {
+fn idle(
+    imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
+) -> Result<WaitOutcome, imap::Error> {
     // wait for changed mailbox
     debug!("idling");
     //imap_session.idle()?.wait_with_timeout(timeout);
-    let res = imap_session.idle().expect("failed to idle").wait_with_timeout(IDLE_TIMEOUT);
+    let res = imap_session
+        .idle()
+        .expect("failed to idle")
+        .wait_with_timeout(IDLE_TIMEOUT);
     //TODO this is much more optimal:
     //imap_session.idle().expect("failed to idle").wait_keepalive().expect("failed to wait_keepalive");
     debug!("idling done");

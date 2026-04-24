@@ -1,5 +1,8 @@
-use flowd_component_api::{ProcessEdgeSource, ProcessEdgeSink, Component, ProcessSignalSink, ProcessSignalSource, GraphInportOutportHandle, ProcessInports, ProcessOutports, ComponentComponentPayload, ComponentPort};
-use log::{trace, debug, info};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
+    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+};
+use log::{debug, info, trace};
 
 // component-specific
 use regex::Regex;
@@ -14,11 +17,32 @@ pub struct RegexpExtractComponent {
 }
 
 impl Component for RegexpExtractComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self where Self: Sized {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
         RegexpExtractComponent {
-            conf: inports.remove("REGEXP").expect("found no CONF inport").pop().unwrap(),
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
-            out: outports.remove("OUT").expect("found no OUT outport").pop().unwrap(),
+            conf: inports
+                .remove("REGEXP")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
+            out: outports
+                .remove("OUT")
+                .expect("found no OUT outport")
+                .pop()
+                .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
@@ -30,7 +54,10 @@ impl Component for RegexpExtractComponent {
         let mut conf = self.conf;
         let mut inn = self.inn;
         let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
+        let out_wakeup = self
+            .out
+            .wakeup
+            .expect("got no wakeup handle for outport OUT");
 
         // read configuration
         trace!("read config IP");
@@ -39,10 +66,14 @@ impl Component for RegexpExtractComponent {
             thread::yield_now();
         }
         */
-        let Ok(regexp_vec) = conf.pop() else { trace!("no config IP received - exiting"); return; };
+        let Ok(regexp_vec) = conf.pop() else {
+            trace!("no config IP received - exiting");
+            return;
+        };
 
         // configure
-        let regexp = Regex::new(std::str::from_utf8(&regexp_vec).unwrap()).expect("failed to compile given regexp");
+        let regexp = Regex::new(std::str::from_utf8(&regexp_vec).unwrap())
+            .expect("failed to compile given regexp");
 
         // main loop
         loop {
@@ -52,9 +83,13 @@ impl Component for RegexpExtractComponent {
             //TODO optimize, there is also try_recv() and recv_timeout()
             if let Ok(ip) = self.signals_in.try_recv() {
                 //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
                 // stop signal
-                if ip == b"stop" {   //TODO optimize comparison
+                if ip == b"stop" {
+                    //TODO optimize comparison
                     info!("got stop signal, exiting");
                     break;
                 } else if ip == b"ping" {
@@ -72,7 +107,9 @@ impl Component for RegexpExtractComponent {
                     //TODO send each match to the according index on OUT port - number of match groups must be number of connections on OUT port
                     //TODO option for the future: send the matches as sexp object structure to the outport
                     // apply regexp
-                    if let Some(captures) = regexp.captures(std::str::from_utf8(&ip).expect("failed to parse IP as UTF-8")) {
+                    if let Some(captures) = regexp
+                        .captures(std::str::from_utf8(&ip).expect("failed to parse IP as UTF-8"))
+                    {
                         // get first capture
                         //captures.len() - TODO get all captures? put into object structure?
                         let capture = captures.get(1).expect("failed to get first capture");
@@ -80,7 +117,8 @@ impl Component for RegexpExtractComponent {
                         let capture_str = capture.as_str();
 
                         // send results
-                        out.push(capture_str.as_bytes().to_vec()).expect("could not push into OUT");
+                        out.push(capture_str.as_bytes().to_vec())
+                            .expect("could not push into OUT");
                         out_wakeup.unpark();
                         debug!("done");
                     } else {
@@ -90,7 +128,6 @@ impl Component for RegexpExtractComponent {
                         out_wakeup.unpark();
                         debug!("done");
                     }
-
                 } else {
                     break;
                 }
@@ -111,7 +148,10 @@ impl Component for RegexpExtractComponent {
         info!("exiting");
     }
 
-    fn get_metadata() -> ComponentComponentPayload where Self: Sized {
+    fn get_metadata() -> ComponentComponentPayload
+    where
+        Self: Sized,
+    {
         ComponentComponentPayload {
             name: String::from("RegexpExtract"),
             description: String::from("Applies given regexp to IPs from IN port and sends the matched results to OUT port."),

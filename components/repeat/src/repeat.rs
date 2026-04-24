@@ -1,4 +1,8 @@
-use flowd_component_api::{Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource};
+use flowd_component_api::{
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
+};
 use log::{debug, info, trace};
 
 pub struct RepeatComponent {
@@ -10,9 +14,19 @@ pub struct RepeatComponent {
 }
 
 impl Component for RepeatComponent {
-    fn new(mut inports: ProcessInports, mut outports: ProcessOutports, signals_in: ProcessSignalSource, signals_out: ProcessSignalSink, _graph_inout: GraphInportOutportHandle) -> Self {
+    fn new(
+        mut inports: ProcessInports,
+        mut outports: ProcessOutports,
+        signals_in: ProcessSignalSource,
+        signals_out: ProcessSignalSink,
+        _graph_inout: GraphInportOutportHandle,
+    ) -> Self {
         RepeatComponent {
-            inn: inports.remove("IN").expect("found no IN inport").pop().unwrap(),
+            inn: inports
+                .remove("IN")
+                .expect("found no IN inport")
+                .pop()
+                .unwrap(),
             out: outports
                 .remove("OUT")
                 .expect("found no OUT outport")
@@ -24,93 +38,66 @@ impl Component for RepeatComponent {
         }
     }
 
-    fn run(self) {
-        debug!("Repeat is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self.out.wakeup.expect("got no wakeup handle for outport OUT");
-        let mut stop_requested = false;
-        loop {
-            trace!("begin of iteration");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Repeat is now process()ing!");
+        let mut work_units = 0u32;
 
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
-                // stop signal
-                if ip == b"stop" { //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    stop_requested = true;
-                } else if ip == b"ping" {
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            }
+        }
+
+        // check in port within budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
+                trace!(
+                    "received signal ip: {}",
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
+                );
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
-            if stop_requested {
+
+            if let Ok(ip) = self.inn.pop() {
+                debug!("repeating packet...");
+                self.out.push(ip).expect("could not push into OUT");
+                debug!("done");
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
                 break;
             }
-
-            // check in port
-            loop {
-                // stay responsive to stop/ping even while draining a busy input buffer
-                if let Ok(sig) = self.signals_in.try_recv() {
-                    trace!("received signal ip: {}", std::str::from_utf8(&sig).expect("invalid utf-8"));
-                    if sig == b"stop" {
-                        info!("got stop signal while draining input, exiting");
-                        stop_requested = true;
-                        break;
-                    } else if sig == b"ping" {
-                        trace!("got ping signal, responding");
-                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                    }
-                }
-                if let Ok(ip) = inn.pop() {
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-
-                    // small benchmark
-                    // (2022-08-28) at commit 561927 currently at least 2x as fast as latest Go flowd, with perfect scheduling situation even 6x as fast
-                    /*
-                    info!("sending 1M packets...");
-                    let now1 = chrono::Utc::now();
-                    for n in 1..1000000 {
-                        while out.is_full() {
-                            // wait
-                            //out_wakeup.unpark();
-                            trace!("waiting");
-                            //thread::yield_now();
-                        }
-                        out.push(Vec::from("bla")).unwrap();
-                        if n % 100 == 0 { out_wakeup.unpark(); }
-                    }
-                    let now2 = chrono::Utc::now();
-                    info!("done");
-                    info!("time: {}ms", (now2 - now1).num_milliseconds());
-                    */
-                } else {
-                    break;
-                }
-            }
-            if stop_requested {
-                break;
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            // input closed, nothing more to do
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload {
