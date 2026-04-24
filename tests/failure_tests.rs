@@ -299,8 +299,11 @@ mod tests {
         // Give the scheduler time to execute the panicking component
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // The test passes if we reach here without panicking
+        // Check that the scheduler thread is still running (didn't crash)
+        assert!(!scheduler_handle.is_finished(), "Scheduler thread should still be running after component panic");
+
         // The scheduler should have caught the panic and continued running
+        // Test passes if we reach here without the scheduler thread panicking
     }
 
     #[test]
@@ -315,6 +318,10 @@ mod tests {
             node_id.to_string(),
         );
 
+        // Get initial metrics before execution
+        let initial_metrics = scheduler.metrics_snapshot();
+        let initial_executions = initial_metrics.executions_per_node.get(node_id).cloned().unwrap_or(0);
+
         // Signal the node as ready multiple times
         scheduler.signal_ready(node_id);
         scheduler.signal_ready(node_id);
@@ -328,8 +335,14 @@ mod tests {
         // Give the scheduler time to execute
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        // The test passes if we reach here - the scheduler should have caught
-        // the panic on the first execution and not tried to re-execute the component
+        // Check that the scheduler thread is still running
+        assert!(!scheduler_handle.is_finished(), "Scheduler should still be running");
+
+        // Note: We can't get final metrics because scheduler was moved into the thread
+        // But the key assertion is that the scheduler continues running and doesn't crash
+        // In a real implementation, we'd need to expose metrics via a different mechanism
+
+        // Test passes - scheduler continued running after panic, indicating proper handling
     }
 
     #[test]
@@ -354,6 +367,10 @@ mod tests {
 
         std::thread::sleep(std::time::Duration::from_millis(100));
 
+        // Verify first scheduler is still running after panic
+        assert!(!scheduler1_handle.is_finished(),
+            "First scheduler should still be running after component panic");
+
         // Now create a second scheduler with a working component
         let scheduler2 = flowd_rs::scheduler::Scheduler::new();
         let node_id2 = "working_restart_node";
@@ -365,13 +382,24 @@ mod tests {
         );
         scheduler2.signal_ready(node_id2);
 
+        // Get initial metrics before starting the second scheduler
+        let initial_metrics2 = scheduler2.metrics_snapshot();
+        let initial_executions2 = initial_metrics2.executions_per_node.get(node_id2).cloned().unwrap_or(0);
+
         let scheduler2_handle = std::thread::spawn(move || {
             scheduler2.run();
         });
 
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        // The test passes if both schedulers ran without crashing the process
+        // Verify second scheduler is also running
+        assert!(!scheduler2_handle.is_finished(),
+            "Second scheduler should be running with working component");
+
+        // Note: We can't get final metrics because scheduler2 was moved into the thread
+        // But the key assertion is that both schedulers continue running without crashing
+
+        // Test passes - both schedulers ran without crashing, demonstrating restart capability
     }
 
     #[test]
