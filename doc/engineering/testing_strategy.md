@@ -823,3 +823,361 @@ flowd tests are:
 > it is tested by participating in its execution and validating its behavior.
 
 ---
+
+
+
+
+
+## 13. Clarifications: Test Integration & System Boundaries
+
+
+### Scope Clarification
+
+Section 13 applies to:
+
+* pipeline-level tests
+* system-level tests
+* any test that validates behavior through the runtime
+
+It does NOT apply to:
+
+* component unit tests
+* engine-level tests (see Section 14)
+
+---
+
+### Interpretation
+
+Section 13 defines how tests interact with the runtime as external clients.
+
+It is only relevant when:
+
+* the scheduler is involved
+* components interact through message passing
+* system behavior is being validated
+
+---
+
+> Component-level tests remain isolated and do not use the runtime or test harness.
+
+---
+
+
+### Purpose
+
+This section clarifies how testing integrates with the flowd runtime and explicitly defines the boundary between:
+
+* the runtime system
+* the graph (components)
+* the test environment
+
+---
+
+## Core Principle
+
+> Tests are clients of the runtime, not components within the graph.
+
+---
+
+## Test Execution Model
+
+Tests interact with the system via a **runtime-level API**, not via embedded test components.
+
+Tests interact with the runtime via a local API that follows the same semantic model as FBP message passing, without requiring protocol-level implementation or network transport.
+
+---
+
+### Model
+
+```text id="test_boundary_model"
+Test Code (Client)
+    ↓
+Test Harness / Runtime API
+    ↓
+Runtime (Scheduler)
+    ↓
+Graph (Production Components Only)
+```
+
+---
+
+### Implication
+
+* tests MUST NOT be implemented as FBP components
+* tests MUST NOT be embedded into production graphs
+* tests MUST interact with the runtime externally
+
+---
+
+## Input Injection
+
+Tests inject data into the system via the runtime.
+
+---
+
+### Concept
+
+```text id="input_injection"
+test → inject(port, message) → runtime → graph
+```
+
+---
+
+### Requirements
+
+* injection MUST follow normal runtime semantics
+* injected messages MUST behave identically to production inputs
+
+---
+
+---
+
+## Output Observation
+
+Tests observe system behavior via runtime-level subscriptions.
+
+---
+
+### Concept
+
+```text id="output_observation"
+graph → runtime → test subscribes to port → receives messages
+```
+
+---
+
+### Requirements
+
+* observation MUST not bypass the runtime
+* all observed outputs MUST reflect real execution behavior
+
+---
+
+---
+
+## Scheduler Interaction
+
+Tests MAY control execution via the runtime:
+
+* run until idle
+* run a fixed number of scheduler steps
+* await outputs
+
+---
+
+### Examples
+
+```text id="scheduler_control"
+run_until_idle()
+run_steps(n)
+await_message(port)
+```
+
+---
+
+---
+
+## Separation of Concerns
+
+### Runtime
+
+* executes the system
+* manages scheduling
+* enforces backpressure
+
+---
+
+### Graph
+
+* contains production components only
+* performs actual data processing
+
+---
+
+### Test
+
+* injects input
+* observes output
+* performs assertions
+
+---
+
+> Tests must not become part of the system under test.
+
+---
+
+---
+
+## Rejected Approach: Test Components in Graph
+
+The idea of implementing tests as FBP components (e.g. `test_input_driver`, `test_output_validator`, `test_property_checker`) was considered.
+
+---
+
+### Rejected Because
+
+* mixes test logic with production graph
+* pollutes component ecosystem
+* introduces unnecessary complexity
+* makes tests harder to understand and maintain
+* creates implicit coupling between runtime and test behavior
+
+---
+
+> Test logic must remain external to the graph.
+
+---
+
+---
+
+## Rejected Approach: Multiple Test Components
+
+Splitting test logic into multiple specialized components was considered.
+
+---
+
+### Rejected Because
+
+* fragments test logic across nodes
+* reduces readability
+* increases boilerplate
+* introduces unnecessary abstraction
+
+---
+
+> A test must remain a single, coherent unit of behavior.
+
+---
+
+---
+
+## Relationship to FBP Protocol
+
+Tests conceptually behave like FBP protocol clients:
+
+* sending information packets (IPs)
+* receiving outputs
+* controlling execution
+
+---
+
+However:
+
+* tests are NOT required to use a networked protocol
+* a direct runtime API is preferred for efficiency and control
+
+---
+
+> The test harness is a local, programmatic equivalent of an FBP client.
+
+---
+
+---
+
+## Design Rule
+
+> The graph is the system under test.
+> The test is its external user.
+
+---
+
+---
+
+## Summary
+
+* tests interact via runtime API
+* tests are external to the graph
+* no test-specific components exist in production graphs
+* test harness acts as execution boundary
+* runtime evolution is isolated from test implementations
+
+---
+
+## Final Principle
+
+> A correct test setup mirrors real system usage —
+> not an artificial testing abstraction inside the system itself.
+
+---
+
+
+
+
+## 14. Engine-Level Testing
+
+### Purpose
+
+Engine-level tests validate internal runtime components in isolation.
+
+---
+
+## Scope
+
+Includes:
+
+* scheduler behavior
+* ringbuffer implementation
+* internal data structures
+* execution algorithms
+
+---
+
+## Principle
+
+> Engine tests validate implementation correctness, not system behavior.
+
+---
+
+## Allowed
+
+Engine tests MAY:
+
+* directly invoke internal APIs
+* test scheduler logic in isolation
+* simulate execution scenarios without full runtime
+
+---
+
+## Forbidden
+
+Engine tests MUST NOT:
+
+* replace pipeline-level tests
+* validate component interaction
+* simulate full graph execution
+
+---
+
+> System behavior MUST always be validated through the test harness.
+
+---
+
+## Rationale
+
+Some aspects of the system:
+
+* cannot be efficiently tested through full pipelines
+* require deterministic, isolated validation
+
+Separating engine tests from pipeline tests ensures:
+
+* fast feedback loops
+* clear responsibility boundaries
+* maintainable test structure
+
+---
+
+## Design Rule
+
+> If the test requires the scheduler to behave correctly in context,
+> it belongs in the harness.
+> If it validates how the scheduler works internally, it belongs here.
+
+---
+
+## Final Principle
+
+> Internal correctness is tested in isolation.
+> System correctness is tested through execution.
+
+---
