@@ -1043,3 +1043,274 @@ Additionally:
 - scheduler is the central execution engine, not an optional layer
 
 Once these constraints are applied, the implementation is aligned with the intended architecture.
+
+
+## 8. Real-Time Components
+
+#### Decision
+
+Real-time components are handled within the existing budget-based scheduling system.
+
+They:
+
+* receive a higher (but bounded) budget
+* are scheduled like all other components
+* MUST NOT bypass the scheduler
+
+There is no separate execution path or scheduling mechanism for real-time components.
+
+#### Rationale
+
+Introducing a separate mechanism would:
+
+* create a second scheduling model
+* break fairness guarantees
+* increase system complexity
+* make behavior unpredictable
+
+A unified scheduling model ensures:
+
+* consistency
+* debuggability
+* controlled execution
+
+> Real-time behavior is expressed through controlled prioritization, not special execution paths.
+
+#### Constraints
+
+* budgets for real-time components MUST be bounded
+* real-time components MUST NOT block the scheduler
+* real-time components MUST follow the same cooperative execution model
+
+#### Rejected Alternatives
+
+Unbounded execution (`budget = -1`):
+
+* allows system domination
+* breaks fairness
+* can stall the runtime
+
+Separate real-time scheduler or fast-path:
+
+* introduces dual execution semantics
+* increases complexity
+* difficult to reason about system behavior
+
+Priority-based bypass of scheduler:
+
+* breaks global scheduling guarantees
+* leads to starvation of other nodes
+
+#### In Summary
+
+Real-time components are not a separate mechanism.
+
+They are handled via the existing budget system using higher but bounded budgets.
+
+There is no special execution path, no bypass, and no second scheduler.
+
+
+## Final Implementation Decisions
+
+### 1. Budget Defaults
+
+#### Decision
+
+Start with **simple static defaults**, not user-configurable.
+
+Example:
+
+* Normal: 16–64 work units
+* Heavy: 4–16 work units
+* Realtime: 64–128 work units (bounded)
+
+Configuration MAY be introduced later, but is NOT part of the initial implementation.
+
+#### Rationale
+
+Static defaults:
+
+* reduce complexity
+* avoid premature tuning
+* ensure consistent system behavior
+
+Early configurability would:
+
+* increase cognitive load
+* create inconsistent deployments
+* complicate debugging
+
+> The system must behave predictably before it becomes configurable.
+
+#### Rejected Alternatives
+
+Fully configurable budgets from the start:
+
+* premature optimization
+* difficult to reason about
+* leads to misconfiguration
+
+### 2. Work Unit Definition (Batching)
+
+#### Decision
+
+Work unit is defined as:
+
+> processing of a single message (default)
+
+Batching:
+
+* MAY be implemented by components
+* MUST be bounded
+* MUST respect budget limits
+
+Batch size is:
+
+> component-controlled, but constrained by the runtime budget
+
+#### Rationale
+
+The runtime:
+
+* controls fairness via budgets
+
+The component:
+
+* controls internal efficiency (batching)
+
+This separation ensures:
+
+* scheduler simplicity
+* component flexibility
+
+#### Constraint
+
+* no unbounded loops inside `process()`
+* component MUST yield when budget is exhausted
+
+#### Rejected Alternatives
+
+Runtime-controlled batching:
+
+* requires deep knowledge of component internals
+* increases coupling
+
+Unbounded batching:
+
+* breaks fairness
+* leads to starvation
+
+### 3. Async Components Integration
+
+#### Decision
+
+Async components:
+
+* use internal async runtimes or threads (e.g. Tokio)
+* MUST NOT block the scheduler
+* MUST signal readiness back to the scheduler
+
+#### Pattern
+
+1. `process()` is called
+2. if no data → return `NoWork`
+3. if IO required → spawn async task
+4. async task produces data → pushes to edge
+5. edge signals scheduler → node becomes ready
+
+#### Rationale
+
+This ensures:
+
+* scheduler remains synchronous
+* IO runs concurrently
+* system remains deterministic
+
+#### Constraint
+
+* `process()` MUST be non-blocking
+* async work MUST signal readiness explicitly
+
+#### Rejected Alternatives
+
+Blocking inside process():
+
+* stalls scheduler
+* breaks entire runtime
+
+Making scheduler async:
+
+* increases complexity
+* reduces debuggability
+
+### 4. Transition Strategy
+
+#### Decision
+
+This change is a **breaking architectural change**.
+
+* it MUST be implemented as a **new major version**
+* the old model is removed
+* there is NO coexistence of models
+
+#### Rationale
+
+Maintaining both models would:
+
+* double complexity
+* introduce inconsistent behavior
+* create long-term maintenance issues
+
+> The execution model is a fundamental property, not a feature toggle.
+
+#### Rejected Alternatives
+
+Temporary dual-model support:
+
+* leads to code bloat
+* encourages incomplete migration
+* complicates debugging
+
+### 5. Observability
+
+#### Decision
+
+The scheduler MUST expose minimal but sufficient metrics.
+
+Required:
+
+* executions per node
+* processed work units per node
+* time since last execution per node
+
+Recommended:
+
+* queue length per node
+* scheduler loop iteration time
+* number of ready nodes
+
+#### Rationale
+
+Observability must:
+
+* support debugging
+* reveal fairness issues
+* enable performance tuning
+
+But:
+
+* must not introduce heavy overhead
+* must not require complex instrumentation
+
+#### Non-Goals
+
+* no full tracing system in initial implementation
+* no complex fairness scoring algorithms
+
+#### Rejected Alternatives
+
+Heavy observability / tracing from start:
+
+* high overhead
+* unnecessary complexity
+* distracts from core runtime behavior
