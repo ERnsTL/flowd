@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
 
@@ -10,6 +11,8 @@ pub struct OutputComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Internal buffer for handling backpressure
+    pending_packets: std::collections::VecDeque<Vec<u8>>,
 }
 
 impl Component for OutputComponent {
@@ -37,70 +40,108 @@ impl Component for OutputComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            pending_packets: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("Output is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Output is now process()ing!");
+        let mut work_units = 0u32;
+
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // First, try to send any pending packets that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_packets.is_empty() {
+            if let Some(pending_ip) = self.pending_packets.front() {
+                match self.out.push(pending_ip.clone()) {
+                    Ok(()) => {
+                        self.pending_packets.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent pending packet");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Then, check in port within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
                 }
             }
-            // check in port
-            //TODO while !inn.is_empty() {
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // output the packet data with newline
-                    debug!("got a packet, printing:");
-                    println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
 
-                    // repeat
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+            if let Ok(ip) = self.inn.pop() {
+                // output the packet data with newline
+                debug!("got a packet, printing:");
+                println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data"));
+
+                // repeat - handle backpressure
+                debug!("repeating packet...");
+                match self.out.push(ip.clone()) {
+                    Ok(()) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("done");
+                    }
+                    Err(PushError::Full(returned_ip)) => {
+                        // Output buffer full, buffer internally for later retry
+                        debug!("output buffer full, buffering packet internally");
+                        self.pending_packets.push_back(returned_ip);
+                        work_units += 1; // We did process the packet (printed it), just couldn't forward
+                        context.remaining_budget -= 1;
+                        // Continue processing more packets that might fit
+                    }
                 }
-            }
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     // modeled after https://github.com/noflo/noflo-core/blob/master/components/Output.js
