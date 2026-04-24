@@ -1,9 +1,9 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
-    PushError,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 
 pub struct EqualsComponent {
     cmp: ProcessEdgeSource,
@@ -13,6 +13,9 @@ pub struct EqualsComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    cmp_value: Option<Vec<u8>>,
+    pending_packets: std::collections::VecDeque<(Vec<u8>, bool)>, // (packet, route_to_true)
 }
 
 impl Component for EqualsComponent {
@@ -50,172 +53,147 @@ impl Component for EqualsComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            cmp_value: None,
+            pending_packets: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("Equals is now run()ning!");
-        let mut cmp = self.cmp;
-        let mut inn = self.inn;
-        let mut out_true = self.out_true.sink;
-        let out_true_wakeup = self
-            .out_true
-            .wakeup
-            .expect("got no wakeup handle for outport TRUE");
-        let mut out_false = self.out_false.sink;
-        let out_false_wakeup = self
-            .out_false
-            .wakeup
-            .expect("got no wakeup handle for outport FALSE");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Equals is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read cmp until we get a value
-        //TODO maybe support s-exprs here to support more complex comparisons
-        trace!("read config IIP");
-        let mut cmp_value = match cmp.pop() {
-            Ok(cmp) => cmp,
-            Err(_) => {
-                error!("no config IP received - exiting");
-                return;
+        // Read configuration if not yet configured
+        if self.cmp_value.is_none() {
+            if let Ok(cmp_data) = self.cmp.pop() {
+                trace!("got cmp value: {}", std::str::from_utf8(&cmp_data).expect("invalid utf-8"));
+                self.cmp_value = Some(cmp_data);
+            } else {
+                trace!("no cmp value available yet");
+                return ProcessResult::NoWork;
             }
-        };
+        }
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            let mut stop_requested = false;
+        let cmp_value = self.cmp_value.as_ref().unwrap();
 
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // First, try to send any pending packets that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_packets.is_empty() {
+            if let Some((pending_ip, route_to_true)) = self.pending_packets.front() {
+                let result = if *route_to_true {
+                    self.out_true.push(pending_ip.clone())
+                } else {
+                    self.out_false.push(pending_ip.clone())
+                };
+
+                match result {
+                    Ok(()) => {
+                        self.pending_packets.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        trace!("sent pending packet");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Then, check in port within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while draining a busy input buffer
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
                 }
             }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    trace!("checking if equals...");
-                    if ip == cmp_value {
-                        trace!("equality packet");
-                        // try to push into TRUE
-                        if let Err(PushError::Full(ip_ret)) = out_true.push(ip) {
-                            // full, so wake up output-side component
-                            out_true_wakeup.unpark();
-                            while out_true.is_full() {
-                                if let Ok(sig) = self.signals_in.try_recv() {
-                                    trace!(
-                                        "received signal ip while waiting for TRUE outport: {}",
-                                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                                    );
-                                    if sig == b"stop" {
-                                        stop_requested = true;
-                                        break;
-                                    } else if sig == b"ping" {
-                                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                                    } else {
-                                        warn!(
-                                            "received unknown signal ip: {}",
-                                            std::str::from_utf8(&sig).expect("invalid utf-8")
-                                        );
-                                    }
-                                }
-                                out_true_wakeup.unpark();
-                                // wait     //TODO optimize
-                                std::thread::yield_now();
-                            }
-                            if stop_requested {
-                                break;
-                            }
-                            // send nao
-                            out_true
-                                .push(ip_ret)
-                                .expect("could not push into TRUE - but said !is_full");
-                        }
-                        out_true_wakeup.unpark();
-                    } else {
-                        trace!("inequality packet");
-                        // try to push into FALSE
-                        if let Err(PushError::Full(ip_ret)) = out_false.push(ip) {
-                            // full, so wake up output-side component
-                            out_false_wakeup.unpark();
-                            while out_false.is_full() {
-                                if let Ok(sig) = self.signals_in.try_recv() {
-                                    trace!(
-                                        "received signal ip while waiting for FALSE outport: {}",
-                                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                                    );
-                                    if sig == b"stop" {
-                                        stop_requested = true;
-                                        break;
-                                    } else if sig == b"ping" {
-                                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                                    } else {
-                                        warn!(
-                                            "received unknown signal ip: {}",
-                                            std::str::from_utf8(&sig).expect("invalid utf-8")
-                                        );
-                                    }
-                                }
-                                out_false_wakeup.unpark();
-                                // wait     //TODO optimize
-                                std::thread::yield_now();
-                            }
-                            if stop_requested {
-                                break;
-                            }
-                            // send nao
-                            out_false
-                                .push(ip_ret)
-                                .expect("could not push into FALSE - but said !is_full");
-                        }
-                        out_false_wakeup.unpark();
-                    }
-                    trace!("done");
+            if let Ok(ip) = self.inn.pop() {
+                trace!("checking if equals...");
+                let route_to_true = ip == *cmp_value;
+
+                if route_to_true {
+                    trace!("equality packet");
                 } else {
-                    break;
+                    trace!("inequality packet");
                 }
-            }
-            if stop_requested {
-                info!("stop requested while waiting on full outport, exiting");
+
+                // Try to push to appropriate output
+                let result = if route_to_true {
+                    self.out_true.push(ip.clone())
+                } else {
+                    self.out_false.push(ip.clone())
+                };
+
+                match result {
+                    Ok(()) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        trace!("routed packet successfully");
+                    }
+                    Err(PushError::Full(returned_ip)) => {
+                        // Output buffer full, buffer internally for later retry
+                        trace!("output buffer full, buffering packet internally");
+                        self.pending_packets.push_back((returned_ip, route_to_true));
+                        work_units += 1; // We did process the packet, just couldn't forward
+                        context.remaining_budget -= 1;
+                        // Continue processing more packets that might fit
+                    }
+                }
+            } else {
                 break;
             }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out_true);
-                out_true_wakeup.unpark();
-                drop(out_false);
-                out_false_wakeup.unpark();
-                break;
-            }
-
-            // check for new cmp value
-            if let Ok(cmp) = cmp.pop() {
-                trace!(
-                    "got new cmp value: {}",
-                    std::str::from_utf8(&cmp).expect("invalid utf-8")
-                );
-                cmp_value = cmp;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check for new cmp value (runtime updates)
+        if let Ok(new_cmp) = self.cmp.pop() {
+            trace!(
+                "got new cmp value: {}",
+                std::str::from_utf8(&new_cmp).expect("invalid utf-8")
+            );
+            self.cmp_value = Some(new_cmp);
+        }
+
+        // are we done?
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
