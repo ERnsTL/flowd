@@ -11,7 +11,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+
 
 enum SubprocessState {
     Idle,
@@ -20,7 +20,6 @@ enum SubprocessState {
         stdin_thread: Option<std::thread::JoinHandle<()>>,
         stdout_rx: mpsc::Receiver<Vec<u8>>,
         stdout_thread: Option<std::thread::JoinHandle<()>>,
-        start_time: Instant,
     },
     Completed,
 }
@@ -51,8 +50,6 @@ enum Mode {
     One,
     Each,
 }
-const STDOUT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
-const STDIN_THREAD_JOIN_GRACE: Duration = Duration::from_secs(2);
 
 fn handoff_join(handle: std::thread::JoinHandle<()>, label: &'static str) {
     std::thread::Builder::new()
@@ -223,7 +220,6 @@ impl Component for CmdComponent {
                                     stdin_thread: Some(stdin_thread),
                                     stdout_rx,
                                     stdout_thread: Some(stdout_thread),
-                                    start_time: Instant::now(),
                                 };
                                 context.remaining_budget -= 1;
                                 return ProcessResult::DidWork(1);
@@ -233,7 +229,7 @@ impl Component for CmdComponent {
                     }
                 }
             }
-            SubprocessState::Running { child, stdin_thread, stdout_rx, stdout_thread, start_time: _ } => {
+            SubprocessState::Running { child, stdin_thread, stdout_rx, stdout_thread } => {
                 let mut work_done = 0u32;
 
                 // Check for output
@@ -400,12 +396,7 @@ mod tests {
         assert!(out_port_names.contains(&"OUT"));
     }
 
-    #[test]
-    fn test_constants() {
-        // Test that constants are defined and reasonable
-        assert!(STDOUT_THREAD_JOIN_GRACE.as_secs() > 0);
-        assert!(STDIN_THREAD_JOIN_GRACE.as_secs() > 0);
-    }
+
 
     #[test]
     fn test_shell_words_parsing_logic() {
