@@ -1,4 +1,4 @@
-use flowd_rs::test_harness::{TestHarness, create_linear_pipeline_test, create_mixed_pipeline_test, create_transformer_chain_test, create_filter_test};
+use flowd_rs::test_harness::{TestHarness, create_mixed_pipeline_test, create_transformer_chain_test, create_filter_test};
 use std::time::Duration;
 
 const SHORT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -156,19 +156,30 @@ fn test_set_based_validation() {
     }
 
     #[test]
-    fn test_backpressure_infrastructure() {
-        // Test that backpressure assertion infrastructure works correctly
-        // This validates the testing framework without requiring actual backpressure implementation
-        let harness = new_repeat_harness("backpressure_infrastructure_test");
+    fn test_backpressure_propagation() {
+        // Count is intentionally left without CONF input data. With CONF connected but
+        // empty, the component stays unconfigured and does not consume IN messages.
+        // This should eventually backpressure producer-side input injection.
+        let mut harness = TestHarness::new("backpressure_propagation_test");
+        harness
+            .add_component_under_test("Count", "count")
+            .add_graph_inport("IN", "count", "IN")
+            .add_graph_inport("CONF", "count", "CONF")
+            .add_graph_outport("OUT", "count", "OUT");
 
         harness
             .run_test_scenario(|h| {
-                // Send messages and verify the assertion method completes without timing issues
-                let test_data: Vec<&[u8]> = vec![b"msg1", b"msg2", b"msg3"];
-                h.assert_backpressure_behavior("IN", "OUT", &test_data);
+                // Use a very high "slow" threshold so this only passes when sends
+                // are actually blocked/timed out by backpressure.
+                h.assert_backpressure_propagation(
+                    "IN",
+                    10_000,
+                    Duration::from_secs(10),
+                    1,
+                )?;
                 Ok(())
             })
-            .expect("backpressure infrastructure test failed");
+            .expect("backpressure propagation test failed");
     }
 
     #[test]
@@ -241,8 +252,7 @@ fn test_set_based_validation() {
                 h.assert_event_within_window(
                     "OUT",
                     |outputs| outputs.len() >= 1,
-                    10, // max cycles
-                    MEDIUM_TIMEOUT,
+                    2000, // max scheduler/poll cycles
                 )?;
                 Ok(())
             })

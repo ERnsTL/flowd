@@ -1,6 +1,6 @@
 use crate::bench_api::BenchRuntimeHarness;
 use crate::*;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// High-level test harness for implementing the testing strategy
 /// Tests are external clients of the runtime, not components in the graph
@@ -216,30 +216,22 @@ impl TestHarness {
         outport: &str,
         condition: F,
         max_cycles: usize,
-        timeout: Duration
     ) -> std::result::Result<(), std::io::Error>
     where
         F: Fn(&[MessageBuf]) -> bool,
     {
-        let start = Instant::now();
-        let mut cycles = 0;
-
-        while cycles < max_cycles {
-            // Wait for some outputs to accumulate
-            if let Ok(_) = self.harness.wait_for_outport_data(outport, 1, timeout) {
-                let outputs = self.harness.collect_outputs(outport);
-                if condition(&outputs) {
-                    return Ok(());
-                }
+        for cycle in 0..max_cycles {
+            // A "cycle" here is one scheduler opportunity where we poll observed
+            // runtime outputs and then yield to allow further execution.
+            let outputs = self.harness.collect_outputs(outport);
+            if condition(&outputs) {
+                return Ok(());
             }
 
-            cycles += 1;
-
-            if start.elapsed() >= timeout {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("Condition not met within {} cycles and {} timeout", max_cycles, timeout.as_millis())
-                ));
+            if cycle + 1 < max_cycles {
+                let _ = self
+                    .harness
+                    .wait_for_outport_data(outport, 1, Duration::from_millis(1));
             }
         }
 
@@ -283,6 +275,44 @@ impl TestHarness {
 
         // Verify no message loss - this is the core backpressure invariant
         self.assert_no_message_loss(total_expected, output_port);
+    }
+
+    /// Assert that producer-side backpressure is observable when downstream is saturated.
+    /// This checks that input injection eventually blocks/times out under sustained load.
+    pub fn assert_backpressure_propagation(
+        &self,
+        input_port: &str,
+        probe_messages: usize,
+        slow_send_threshold: Duration,
+        min_slow_or_blocked_sends: usize,
+    ) -> std::result::Result<(), std::io::Error> {
+        let mut slow_or_blocked = 0usize;
+
+        for i in 0..probe_messages {
+            let payload = format!("bp_probe_{i}");
+            let send_started = std::time::Instant::now();
+            match self.send_input(input_port, payload.as_bytes()) {
+                Ok(()) => {
+                    if send_started.elapsed() >= slow_send_threshold {
+                        slow_or_blocked += 1;
+                    }
+                }
+                Err(err) => {
+                    if err.kind() == std::io::ErrorKind::TimedOut {
+                        slow_or_blocked += 1;
+                        break;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        assert!(
+            slow_or_blocked >= min_slow_or_blocked_sends,
+            "Expected backpressure (slow or blocked sends) but only observed {slow_or_blocked} / {min_slow_or_blocked_sends} slow-or-blocked sends"
+        );
+
+        Ok(())
     }
 
     /// Assert deterministic behavior - same inputs should produce same outputs

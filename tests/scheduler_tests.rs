@@ -3,11 +3,52 @@
 
 use flowd_rs::scheduler::Scheduler;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// Mock component for testing scheduler behavior
 struct MockComponent {
     process_count: Mutex<u32>,
     should_work: bool,
+}
+
+/// Panics from process() and increments a shared counter.
+struct PanicComponent {
+    panics: Arc<AtomicUsize>,
+}
+
+impl PanicComponent {
+    fn new(panics: Arc<AtomicUsize>) -> Self {
+        PanicComponent { panics }
+    }
+}
+
+impl flowd_component_api::Component for PanicComponent {
+    fn new(
+        _inports: flowd_component_api::ProcessInports,
+        _outports: flowd_component_api::ProcessOutports,
+        _signals_in: flowd_component_api::ProcessSignalSource,
+        _signals_out: flowd_component_api::ProcessSignalSink,
+        _graph_inout: flowd_component_api::GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        PanicComponent::new(Arc::new(AtomicUsize::new(0)))
+    }
+
+    fn process(
+        &mut self,
+        _context: &mut flowd_component_api::NodeContext,
+    ) -> flowd_component_api::ProcessResult {
+        self.panics.fetch_add(1, Ordering::SeqCst);
+        panic!("intentional test panic")
+    }
+
+    fn get_metadata() -> flowd_component_api::ComponentComponentPayload {
+        flowd_component_api::ComponentComponentPayload::default()
+    }
 }
 
 impl MockComponent {
@@ -166,5 +207,80 @@ mod tests {
         // Try to signal a non-existent node
         let was_signaled = scheduler.signal_ready("nonexistent");
         assert!(!was_signaled, "Non-existent node should not be signaled");
+    }
+
+    #[test]
+    fn test_scheduler_survives_component_panic() {
+        let scheduler = Arc::new(Scheduler::new());
+        let node_id = "panic_node".to_string();
+        let panic_count = Arc::new(AtomicUsize::new(0));
+
+        scheduler.add_node(node_id.clone(), flowd_component_api::BudgetClass::Normal);
+        scheduler.add_component(
+            Box::new(PanicComponent::new(Arc::clone(&panic_count))),
+            node_id.clone(),
+        );
+        scheduler.signal_ready(&node_id);
+
+        let runner = Arc::clone(&scheduler);
+        let handle = std::thread::spawn(move || runner.run());
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Scheduler should still be alive after component panic.
+        assert!(!handle.is_finished(), "scheduler thread should keep running");
+        assert!(
+            panic_count.load(Ordering::SeqCst) >= 1,
+            "panic component should have executed at least once"
+        );
+
+        scheduler.stop();
+        handle.join().expect("scheduler thread should join cleanly");
+    }
+
+    #[test]
+    fn test_scheduler_restarts_cleanly_after_panic_run() {
+        // First run with a panicking component.
+        let scheduler1 = Arc::new(Scheduler::new());
+        let node_id1 = "panic_restart_node".to_string();
+        scheduler1.add_node(node_id1.clone(), flowd_component_api::BudgetClass::Normal);
+        scheduler1.add_component(
+            Box::new(PanicComponent::new(Arc::new(AtomicUsize::new(0)))),
+            node_id1.clone(),
+        );
+        scheduler1.signal_ready(&node_id1);
+
+        let runner1 = Arc::clone(&scheduler1);
+        let handle1 = std::thread::spawn(move || runner1.run());
+        std::thread::sleep(Duration::from_millis(100));
+        scheduler1.stop();
+        handle1
+            .join()
+            .expect("first scheduler should stop cleanly");
+
+        // Second run with a healthy component should also work.
+        let scheduler2 = Arc::new(Scheduler::new());
+        let node_id2 = "healthy_restart_node".to_string();
+        scheduler2.add_node(node_id2.clone(), flowd_component_api::BudgetClass::Normal);
+        scheduler2.add_component(Box::new(MockComponent::new(true)), node_id2.clone());
+        scheduler2.signal_ready(&node_id2);
+
+        let runner2 = Arc::clone(&scheduler2);
+        let handle2 = std::thread::spawn(move || runner2.run());
+        std::thread::sleep(Duration::from_millis(100));
+        let metrics = scheduler2.metrics_snapshot();
+        assert!(
+            metrics
+                .executions_per_node
+                .get(&node_id2)
+                .copied()
+                .unwrap_or_default()
+                > 0,
+            "healthy component should execute after restart"
+        );
+
+        scheduler2.stop();
+        handle2
+            .join()
+            .expect("second scheduler should stop cleanly");
     }
 }

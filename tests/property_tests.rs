@@ -16,6 +16,29 @@ fn new_repeat_harness(graph_name: &str) -> TestHarness {
     harness
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
+}
+
+fn hex_decode(hex: &str) -> Result<Vec<u8>, String> {
+    if hex.len() % 2 != 0 {
+        return Err("hex string has odd length".to_string());
+    }
+    let mut out = Vec::with_capacity(hex.len() / 2);
+    let mut i = 0usize;
+    while i < hex.len() {
+        let byte = u8::from_str_radix(&hex[i..i + 2], 16)
+            .map_err(|e| format!("invalid hex at {i}: {e}"))?;
+        out.push(byte);
+        i += 2;
+    }
+    Ok(out)
+}
+
 // Property: For any valid UTF-8 string input, the output should be identical
 proptest! {
     #[test]
@@ -102,25 +125,28 @@ proptest! {
     }
 }
 
-// Property: Binary data integrity (non-UTF-8)
+// Property: Binary data integrity via reversible transport encoding
+// (hex payload is what traverses runtime text channels; decoded bytes must match).
 proptest! {
     #[test]
     fn prop_binary_data_integrity(
         data in prop::collection::vec(prop::num::u8::ANY, 1..100)
     ) {
         let harness = new_repeat_harness("prop_binary_test");
+        let encoded = hex_encode(&data);
 
         let result = harness.run_test_scenario(|h| {
-            h.send_input("IN", &data)?;
+            h.send_input("IN", encoded.as_bytes())?;
             h.wait_for_output("OUT", 1, PROP_TIMEOUT)?;
 
             let outputs = h.collect_outputs("OUT");
             assert_eq!(outputs.len(), 1, "Should have exactly one output");
 
             let output = &outputs[0];
-            // For now, just verify that some data is returned
-            // Binary data handling may need separate investigation
-            assert!(!output.is_empty(), "Should have some output data");
+            assert_eq!(output.as_slice(), encoded.as_bytes(), "Encoded payload should round-trip exactly");
+            let decoded = hex_decode(std::str::from_utf8(output).expect("output should be valid utf-8 hex"))
+                .expect("output should be valid hex");
+            assert_eq!(decoded, data, "Decoded payload should match original bytes");
 
             Ok(())
         });
