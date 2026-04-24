@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
 
@@ -15,6 +16,8 @@ pub struct XzCompressComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    pending_packets: std::collections::VecDeque<Vec<u8>>, // packets to send, buffered for backpressure
 }
 
 const COMPRESSION_LEVEL: u32 = 9; //TODO maybe make configurable
@@ -45,99 +48,121 @@ impl Component for XzCompressComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            pending_packets: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("XzCompress is now run()ning!");
-        //let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("XzCompress is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read configuration
-        //trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
         }
-        */
-        //let Ok(opts) = conf.pop() else { trace!("no config IP received - exiting"); return; };
 
-        // configure
-        // NOTE: nothing to be done here
+        // First, try to send any pending packets that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_packets.is_empty() {
+            if let Some(pending_packet) = self.pending_packets.front() {
+                match self.out.push(pending_packet.clone()) {
+                    Ok(()) => {
+                        self.pending_packets.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent pending compressed packet");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
+        // Then, process new packets within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while processing packets
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
                 }
             }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // prepare packet
-                    debug!("got a packet, compressing...");
-                    // nothing to do
+            if let Ok(ip) = self.inn.pop() {
+                // prepare packet
+                debug!("got a packet, compressing...");
+                // nothing to do
 
-                    // compress
-                    //TODO optimize - currently, every packet is processed with a new Encoder instance
-                    //TODO support for chunks via open bracket, closing bracket
-                    let vec_buf = Vec::new();
-                    let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
-                    compressor.write(&ip).expect("failed to write into encoder");
-                    //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
-                    debug!(
-                        "compression: {} bytes in, {} bytes out",
-                        compressor.total_in(),
-                        compressor.total_out()
-                    );
-                    let vec_out = compressor.finish().expect("failed to finish encoding");
+                // compress
+                //TODO optimize - currently, every packet is processed with a new Encoder instance
+                //TODO support for chunks via open bracket, closing bracket
+                let vec_buf = Vec::new();
+                let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
+                compressor.write(&ip).expect("failed to write into encoder");
+                //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
+                debug!(
+                    "compression: {} bytes in, {} bytes out",
+                    compressor.total_in(),
+                    compressor.total_out()
+                );
+                let vec_out = compressor.finish().expect("failed to finish encoding");
 
-                    // send it
-                    debug!("sending...");
-                    out.push(vec_out).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+                // Try to send it
+                debug!("sending...");
+                match self.out.push(vec_out) {
+                    Ok(()) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("done");
+                    }
+                    Err(PushError::Full(returned_packet)) => {
+                        // Output buffer full, buffer internally for later retry
+                        debug!("output buffer full, buffering compressed packet internally");
+                        self.pending_packets.push_back(returned_packet);
+                        work_units += 1; // We processed the packet, just couldn't send
+                        context.remaining_budget -= 1;
+                    }
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() && self.pending_packets.is_empty() {
+            info!("EOF on inport and all packets processed, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -197,6 +222,8 @@ pub struct XzDecompressComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    pending_packets: std::collections::VecDeque<Vec<u8>>, // packets to send, buffered for backpressure
 }
 
 impl Component for XzDecompressComponent {
@@ -225,101 +252,122 @@ impl Component for XzDecompressComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            pending_packets: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("XzDecompress is now run()ning!");
-        //let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("XzDecompress is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read configuration
-        //trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
         }
-        */
-        //let Ok(opts) = conf.pop() else { trace!("no config IP received - exiting"); return; };
 
-        // configure
-        // NOTE: nothing to be done here
+        // First, try to send any pending packets that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_packets.is_empty() {
+            if let Some(pending_packet) = self.pending_packets.front() {
+                match self.out.push(pending_packet.clone()) {
+                    Ok(()) => {
+                        self.pending_packets.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent pending decompressed packet");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
+        // Then, process new packets within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while processing packets
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
                 }
             }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // prepare packet
-                    debug!("got a packet, decompressing...");
-                    // nothing to do
+            if let Ok(ip) = self.inn.pop() {
+                // prepare packet
+                debug!("got a packet, decompressing...");
+                // nothing to do
 
-                    // decompress
-                    //TODO optimize - currently, every packet is processed with a new Decoder instance
-                    //TODO support for chunks via open bracket, closing bracket
-                    let vec_buf = Vec::new();
-                    let mut decompressor = XzDecoder::new(vec_buf);
-                    decompressor
-                        .write(&ip)
-                        .expect("failed to write into decoder");
-                    debug!(
-                        "decompression: {} bytes in, {} bytes out",
-                        decompressor.total_in(),
-                        decompressor.total_out()
-                    );
-                    let vec_out = decompressor.finish().expect("failed to finish decoding");
+                // decompress
+                //TODO optimize - currently, every packet is processed with a new Decoder instance
+                //TODO support for chunks via open bracket, closing bracket
+                let vec_buf = Vec::new();
+                let mut decompressor = XzDecoder::new(vec_buf);
+                decompressor
+                    .write(&ip)
+                    .expect("failed to write into decoder");
+                debug!(
+                    "decompression: {} bytes in, {} bytes out",
+                    decompressor.total_in(),
+                    decompressor.total_out()
+                );
+                let vec_out = decompressor.finish().expect("failed to finish decoding");
 
-                    // send it
-                    debug!("sending...");
-                    //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(vec_out).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+                // Try to send it
+                debug!("sending...");
+                match self.out.push(vec_out) {
+                    Ok(()) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("done");
+                    }
+                    Err(PushError::Full(returned_packet)) => {
+                        // Output buffer full, buffer internally for later retry
+                        debug!("output buffer full, buffering decompressed packet internally");
+                        self.pending_packets.push_back(returned_packet);
+                        work_units += 1; // We processed the packet, just couldn't send
+                        context.remaining_budget -= 1;
+                    }
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.inn.is_abandoned() && self.pending_packets.is_empty() {
+            info!("EOF on inport and all packets processed, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
