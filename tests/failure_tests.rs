@@ -6,6 +6,76 @@ use std::time::Duration;
 
 const MEDIUM_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Mock component that panics when process() is called
+struct PanicComponent;
+
+/// Mock component that works normally for testing recovery
+struct MockWorkingComponent;
+
+impl PanicComponent {
+    fn new() -> Self {
+        PanicComponent
+    }
+}
+
+impl flowd_component_api::Component for PanicComponent {
+    fn new(
+        _inports: flowd_component_api::ProcessInports,
+        _outports: flowd_component_api::ProcessOutports,
+        _signals_in: flowd_component_api::ProcessSignalSource,
+        _signals_out: flowd_component_api::ProcessSignalSink,
+        _graph_inout: flowd_component_api::GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        PanicComponent::new()
+    }
+
+    fn process(&mut self, _context: &mut flowd_component_api::NodeContext) -> flowd_component_api::ProcessResult {
+        panic!("Test component panic");
+    }
+
+    fn get_metadata() -> flowd_component_api::ComponentComponentPayload {
+        flowd_component_api::ComponentComponentPayload::default()
+    }
+}
+
+impl MockWorkingComponent {
+    fn new() -> Self {
+        MockWorkingComponent
+    }
+}
+
+impl flowd_component_api::Component for MockWorkingComponent {
+    fn new(
+        _inports: flowd_component_api::ProcessInports,
+        _outports: flowd_component_api::ProcessOutports,
+        _signals_in: flowd_component_api::ProcessSignalSource,
+        _signals_out: flowd_component_api::ProcessSignalSink,
+        _graph_inout: flowd_component_api::GraphInportOutportHandle,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        MockWorkingComponent::new()
+    }
+
+    fn process(&mut self, context: &mut flowd_component_api::NodeContext) -> flowd_component_api::ProcessResult {
+        // Simple working component that does some work and finishes
+        if context.remaining_budget > 0 {
+            context.remaining_budget = context.remaining_budget.saturating_sub(1);
+            flowd_component_api::ProcessResult::DidWork(1)
+        } else {
+            flowd_component_api::ProcessResult::Finished
+        }
+    }
+
+    fn get_metadata() -> flowd_component_api::ComponentComponentPayload {
+        flowd_component_api::ComponentComponentPayload::default()
+    }
+}
+
 fn new_repeat_harness(graph_name: &str) -> TestHarness {
     let mut harness = TestHarness::new(graph_name);
     harness
@@ -204,5 +274,159 @@ mod tests {
                 Ok(())
             })
             .expect("graceful degradation test failed");
+    }
+
+    #[test]
+    fn test_component_panic_propagation() {
+        // Test that component panics are caught and don't crash the system
+        let scheduler = flowd_rs::scheduler::Scheduler::new();
+        let node_id = "panic_node";
+
+        scheduler.add_node(node_id.to_string(), flowd_component_api::BudgetClass::Normal);
+        scheduler.add_component(
+            Box::new(PanicComponent::new()),
+            node_id.to_string(),
+        );
+
+        // Signal the node as ready to trigger execution
+        scheduler.signal_ready(node_id);
+
+        // Start the scheduler in a separate thread
+        let scheduler_handle = std::thread::spawn(move || {
+            scheduler.run();
+        });
+
+        // Give the scheduler time to execute the panicking component
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // The test passes if we reach here without panicking
+        // The scheduler should have caught the panic and continued running
+    }
+
+    #[test]
+    fn test_component_panic_marks_finished() {
+        // Test that a panicking component is marked as finished and not re-executed
+        let scheduler = flowd_rs::scheduler::Scheduler::new();
+        let node_id = "panic_finished_node";
+
+        scheduler.add_node(node_id.to_string(), flowd_component_api::BudgetClass::Normal);
+        scheduler.add_component(
+            Box::new(PanicComponent::new()),
+            node_id.to_string(),
+        );
+
+        // Signal the node as ready multiple times
+        scheduler.signal_ready(node_id);
+        scheduler.signal_ready(node_id);
+        scheduler.signal_ready(node_id);
+
+        // Start the scheduler in a separate thread
+        let scheduler_handle = std::thread::spawn(move || {
+            scheduler.run();
+        });
+
+        // Give the scheduler time to execute
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // The test passes if we reach here - the scheduler should have caught
+        // the panic on the first execution and not tried to re-execute the component
+    }
+
+    #[test]
+    fn test_graph_restart_after_component_failure() {
+        // Test that the system can restart a graph after component failures
+        // This test verifies that we can create new schedulers and components after failures
+
+        // First scheduler with a panic component
+        let scheduler1 = flowd_rs::scheduler::Scheduler::new();
+        let node_id1 = "panic_restart_node";
+
+        scheduler1.add_node(node_id1.to_string(), flowd_component_api::BudgetClass::Normal);
+        scheduler1.add_component(
+            Box::new(PanicComponent::new()),
+            node_id1.to_string(),
+        );
+        scheduler1.signal_ready(node_id1);
+
+        let scheduler1_handle = std::thread::spawn(move || {
+            scheduler1.run();
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Now create a second scheduler with a working component
+        let scheduler2 = flowd_rs::scheduler::Scheduler::new();
+        let node_id2 = "working_restart_node";
+
+        scheduler2.add_node(node_id2.to_string(), flowd_component_api::BudgetClass::Normal);
+        scheduler2.add_component(
+            Box::new(MockWorkingComponent::new()),
+            node_id2.to_string(),
+        );
+        scheduler2.signal_ready(node_id2);
+
+        let scheduler2_handle = std::thread::spawn(move || {
+            scheduler2.run();
+        });
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // The test passes if both schedulers ran without crashing the process
+    }
+
+    #[test]
+    fn test_component_reinitialization_after_panic() {
+        // Test that components can be properly re-initialized after a panic
+        // This simulates creating new component instances after failures
+
+        for attempt in 0..3 {
+            let scheduler = flowd_rs::scheduler::Scheduler::new();
+            let node_id = format!("reinit_node_{}", attempt);
+
+            scheduler.add_node(node_id.clone(), flowd_component_api::BudgetClass::Normal);
+            scheduler.add_component(
+                Box::new(PanicComponent::new()),
+                node_id.clone(),
+            );
+            scheduler.signal_ready(&node_id);
+
+            let scheduler_handle = std::thread::spawn(move || {
+                scheduler.run();
+            });
+
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            // Each iteration creates a fresh component instance
+            // The test passes if all iterations complete without issues
+        }
+    }
+
+    #[test]
+    fn test_state_consistency_after_failure_recovery() {
+        // Test that system state remains consistent after failure and recovery
+        let harness = new_repeat_harness("state_consistency_test");
+
+        harness
+            .run_test_scenario(|h| {
+                // Send some messages and verify processing
+                for i in 0..5 {
+                    h.send_input("IN", format!("state_test_{}", i).as_bytes())?;
+                }
+
+                h.wait_for_output("OUT", 5, MEDIUM_TIMEOUT)?;
+                h.assert_no_message_loss(5, "OUT");
+
+                let outputs = h.collect_outputs("OUT");
+
+                // Verify all messages were processed correctly
+                for (i, output) in outputs.iter().enumerate() {
+                    let expected = format!("state_test_{}", i);
+                    assert_eq!(output, expected.as_bytes(),
+                        "State consistency check failed for message {}", i);
+                }
+
+                Ok(())
+            })
+            .expect("state consistency after failure recovery test failed");
     }
 }

@@ -52,6 +52,7 @@ struct ExecutionOutcome {
     finished: bool,
     executions: u64,
     work_units: u64,
+    panicked: bool,
 }
 
 #[derive(Debug)]
@@ -238,8 +239,21 @@ impl Scheduler {
 
             let budget_before = context.remaining_budget;
             let call_started = Instant::now();
-            let process_result = component.process(context);
+            let process_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                component.process(context)
+            }));
             enforce_non_blocking_process_contract(&context.node_id, call_started.elapsed());
+
+            let process_result = match process_result {
+                Ok(result) => result,
+                Err(_) => {
+                    // Component panicked - mark as finished and don't re-execute
+                    outcome.panicked = true;
+                    context.ready_signal.store(false, Ordering::Release);
+                    outcome.finished = true;
+                    break;
+                }
+            };
 
             match process_result {
                 ProcessResult::DidWork(units) => {
