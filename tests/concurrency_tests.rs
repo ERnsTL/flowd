@@ -114,8 +114,6 @@ mod tests {
                         let message = format!("fairness_batch{}_msg{}", batch, msg);
                         h.send_input("IN", message.as_bytes())?;
                     }
-                    // Small delay between batches
-                    thread::sleep(Duration::from_millis(1));
                 }
 
                 let expected_total = 5 * batch_size;
@@ -172,8 +170,6 @@ mod tests {
                         h.send_input("IN", format!("burst{}_msg{}", burst, msg).as_bytes())?;
                     }
 
-                    // Wait between bursts
-                    thread::sleep(Duration::from_millis(50));
                 }
 
                 let total_messages = 3 * burst_size;
@@ -223,8 +219,6 @@ mod tests {
                         h.send_input("IN", format!("stable_batch{}_msg{}", batch, msg).as_bytes())?;
                     }
 
-                    // Small delay between batches to prevent overwhelming the system
-                    thread::sleep(Duration::from_millis(10));
                 }
 
                 // Wait for all outputs to be processed

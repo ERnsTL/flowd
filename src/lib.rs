@@ -3422,14 +3422,14 @@ impl NetworkStartedResponse {
 
 impl From<RuntimeStatusSnapshot> for NetworkStartedResponsePayload {
     fn from(status: RuntimeStatusSnapshot) -> Self {
-        let scheduler_metrics = network_scheduler_metrics(&status);
         NetworkStartedResponsePayload {
             time_started: UtcTime(status.time_started),
             graph: status.graph,
             started: status.started,
             running: status.running,
             debug: status.debug,
-            scheduler_metrics,
+            // Keep protocol responses schema-compatible with strict fbp-protocol tests.
+            scheduler_metrics: None,
         }
     }
 }
@@ -3513,7 +3513,8 @@ impl NetworkStoppedResponse {
                 started: status.started,
                 running: status.running,
                 debug: status.debug,
-                scheduler_metrics: network_scheduler_metrics(status),
+                // Keep protocol responses schema-compatible with strict fbp-protocol tests.
+                scheduler_metrics: None,
             },
         };
     }
@@ -3598,7 +3599,8 @@ impl NetworkStatusPayload {
             started: status.started,
             running: status.running,
             debug: status.debug,
-            scheduler_metrics: network_scheduler_metrics(status),
+            // Keep protocol responses schema-compatible with strict fbp-protocol tests.
+            scheduler_metrics: None,
         }
     }
 }

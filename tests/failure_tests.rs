@@ -179,27 +179,11 @@ mod tests {
                         let msg_str = format!("batch{}_msg{}", batch_size, msg);
                         h.send_input("IN", msg_str.as_bytes())?;
                     }
-
-                    // Give some time for processing
-                    std::thread::sleep(Duration::from_millis(10));
                 }
 
-                // Wait for final processing
-                // Note: We don't assert exact count since this is testing degradation,
-                // not exact message processing
-                let result = h.wait_for_output("OUT", 1, Duration::from_secs(5));
-
-                // System should either process messages or fail gracefully
-                match result {
-                    Ok(_) => {
-                        let outputs = h.collect_outputs("OUT");
-                        assert!(!outputs.is_empty(), "Should process at least some messages");
-                    }
-                    Err(_) => {
-                        // Graceful failure is also acceptable
-                        // (In real implementation, we'd check for proper error handling)
-                    }
-                }
+                // Under stress, we still expect eventual forward progress without
+                // timing-sensitive sleeps.
+                h.assert_event_within_window("OUT", |outputs| !outputs.is_empty(), 2_000)?;
 
                 Ok(())
             })
@@ -207,31 +191,73 @@ mod tests {
     }
 
     #[test]
-    fn test_state_consistency_after_failure_recovery() {
-        // Test that system state remains consistent after failure and recovery
-        let harness = new_repeat_harness("state_consistency_test");
+    fn test_component_failure_is_stable() {
+        // Invalid Cmd config should trigger component failure while runtime remains controllable.
+        let mut harness = TestHarness::new("component_failure_stability_test");
+        harness
+            .add_component_under_test("Cmd", "cmd")
+            .add_component_under_test("Repeat", "repeat")
+            .connect("cmd", "OUT", "repeat", "IN")
+            .add_graph_inport("IN", "cmd", "IN")
+            .add_graph_outport("OUT", "repeat", "OUT")
+            .add_iip("cmd", "CMD", "cat")
+            .add_iip("cmd", "CONF", "--mode=invalid");
 
         harness
             .run_test_scenario(|h| {
-                // Send some messages and verify processing
+                h.send_input("IN", b"should_not_pass_through")?;
+                h.assert_no_output_within_window("OUT", 200)?;
+                Ok(())
+            })
+            .expect("component failure stability test failed");
+    }
+
+    #[test]
+    fn test_state_consistency_after_restart_recovery() {
+        // Verify state consistency across explicit restart/recovery cycles.
+        let harness_phase1 = new_repeat_harness("state_consistency_restart_test_phase1");
+
+        harness_phase1
+            .run_test_scenario(|h| {
                 for i in 0..5 {
                     h.send_input("IN", format!("state_test_{}", i).as_bytes())?;
                 }
 
                 h.wait_for_output("OUT", 5, MEDIUM_TIMEOUT)?;
-                h.assert_no_message_loss(5, "OUT");
-
-                let outputs = h.collect_outputs("OUT");
-
-                // Verify all messages were processed correctly
-                for (i, output) in outputs.iter().enumerate() {
-                    let expected = format!("state_test_{}", i);
-                    assert_eq!(output, expected.as_bytes(),
-                        "State consistency check failed for message {}", i);
-                }
-
+                h.assert_outputs_sequence_equal(
+                    "OUT",
+                    &[
+                        b"state_test_0",
+                        b"state_test_1",
+                        b"state_test_2",
+                        b"state_test_3",
+                        b"state_test_4",
+                    ],
+                );
                 Ok(())
             })
-            .expect("state consistency after failure recovery test failed");
+            .expect("first recovery cycle failed");
+
+        let harness_phase2 = new_repeat_harness("state_consistency_restart_test_phase2");
+        harness_phase2
+            .run_test_scenario(|h| {
+                for i in 5..10 {
+                    h.send_input("IN", format!("state_test_{}", i).as_bytes())?;
+                }
+
+                h.wait_for_output("OUT", 5, MEDIUM_TIMEOUT)?;
+                h.assert_outputs_sequence_equal(
+                    "OUT",
+                    &[
+                        b"state_test_5",
+                        b"state_test_6",
+                        b"state_test_7",
+                        b"state_test_8",
+                        b"state_test_9",
+                    ],
+                );
+                Ok(())
+            })
+            .expect("second recovery cycle failed");
     }
 }

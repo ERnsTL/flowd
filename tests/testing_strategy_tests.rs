@@ -125,17 +125,14 @@ fn test_set_based_validation() {
     fn test_transformer_chain() {
         let harness = create_transformer_chain_test();
 
-        // Manually control the harness to ensure proper sequencing
-        harness.start().expect("failed to start harness");
-        harness.send_input("IN", b"line1\nline2\nline3").expect("failed to send input");
-        // Give time for processing
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        harness.stop().expect("failed to stop harness");
-
-        // After harness stopped, check outputs
-        let outputs = harness.collect_outputs("OUT");
-        assert_eq!(outputs.len(), 1, "Count should output one packet");
-        assert_eq!(outputs[0], b"3", "Count should output '3' (number of lines)");
+        harness
+            .run_test_scenario(|h| {
+                h.send_input("IN", b"line1\nline2\nline3")?;
+                h.wait_for_output("OUT", 1, MEDIUM_TIMEOUT)?;
+                h.assert_outputs_sequence_equal("OUT", &[b"3"]);
+                Ok(())
+            })
+            .expect("transformer chain test failed");
     }
 
     #[test]
@@ -145,11 +142,8 @@ fn test_set_based_validation() {
         harness
             .run_test_scenario(|h| {
                 h.send_input("IN", b"  test data  ")?;
-                // Drop component should drop all messages, so no output expected
-                // Wait a short time to ensure processing completes, then check no output
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                let outputs = h.collect_outputs("OUT");
-                assert_eq!(outputs.len(), 0, "Drop component should filter all messages");
+                // Drop component should emit no messages for this input.
+                h.assert_no_output_within_window("OUT", 200)?;
                 Ok(())
             })
             .expect("filter pipeline test failed");

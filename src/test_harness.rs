@@ -241,6 +241,34 @@ impl TestHarness {
         ))
     }
 
+    /// Assert that no output is observed for a given scheduler/poll window.
+    pub fn assert_no_output_within_window(
+        &self,
+        outport: &str,
+        max_cycles: usize,
+    ) -> std::result::Result<(), std::io::Error> {
+        for cycle in 0..max_cycles {
+            let outputs = self.harness.collect_outputs(outport);
+            if !outputs.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Unexpected output observed on port '{}' at cycle {}",
+                        outport, cycle
+                    ),
+                ));
+            }
+
+            if cycle + 1 < max_cycles {
+                let _ = self
+                    .harness
+                    .wait_for_outport_data(outport, 1, Duration::from_millis(1));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Assert property-based invariants
     pub fn assert_property<F>(&self, property_name: &str, validator: F)
     where
