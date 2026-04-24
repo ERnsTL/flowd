@@ -3,8 +3,6 @@
 
 use flowd_rs::test_harness::TestHarness;
 use std::time::Duration;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 const STRESS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -58,31 +56,38 @@ mod tests {
                 let messages_per_thread = 20;
                 let thread_count = 10;
 
-                let sent_count = Arc::new(AtomicUsize::new(0));
+                use std::sync::mpsc;
+
+                // Channel for threads to send messages to main thread
+                let (tx, rx) = mpsc::channel();
 
                 // Spawn multiple threads sending messages concurrently
                 let mut handles = vec![];
 
                 for thread_id in 0..thread_count {
-                    let harness_ref = h as *const _ as usize; // Unsafe but for testing
-                    let sent_count_clone = Arc::clone(&sent_count);
+                    let tx_clone = tx.clone();
 
                     let handle = thread::spawn(move || {
-                        // Note: In real implementation, we'd need thread-safe harness access
-                        // For now, this demonstrates the test structure
-                        sent_count_clone.fetch_add(messages_per_thread, Ordering::SeqCst);
+                        // Each thread sends its share of messages
+                        for msg_id in 0..messages_per_thread {
+                            let message = format!("concurrent_msg_thread{}_msg{}", thread_id, msg_id);
+                            tx_clone.send(message).expect("Failed to send message through channel");
+                        }
                     });
                     handles.push(handle);
+                }
+
+                // Drop the original sender so the receiver knows when all threads are done
+                drop(tx);
+
+                // Receive messages from threads and send them to harness
+                for received_msg in rx {
+                    h.send_input("IN", received_msg.as_bytes())?;
                 }
 
                 // Wait for all threads to complete
                 for handle in handles {
                     handle.join().expect("Thread panicked");
-                }
-
-                // Send the messages from main thread (simplified)
-                for i in 0..total_messages {
-                    h.send_input("IN", format!("concurrent_msg_{}", i).as_bytes())?;
                 }
 
                 // Wait for processing
