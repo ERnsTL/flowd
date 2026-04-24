@@ -356,11 +356,6 @@ Rejected for core runtime; async allowed only at boundaries
 
 ## Resolved Questions
 
-OK die Resolved Decisions ad ADR-002 Scheduler finde ich gut, aber ich brauche auch eine Begründung je Punkt (1 bis 6) zu den Entscheidungen und was die verworfenen gefahrvollen Alternativen gewesen wären.
-
-
-## Resolved Decisions
-
 1. Scheduler is single-threaded per subgraph
 2. Budget exhaustion yields after completing current work unit
 3. Default budgets are static and simple (small set of classes)
