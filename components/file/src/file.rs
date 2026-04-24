@@ -7,7 +7,6 @@ use log::{debug, info, trace, warn};
 
 // component-specific for FileTailer
 use staart::TailedFile;
-use std::time::Duration;
 // component-specific for FileWriter
 use std::fs::File;
 use std::io::prelude::*;
@@ -222,12 +221,10 @@ pub struct FileTailerComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    filename: Option<String>,
-    file: Option<TailedFile>,
+    filename: Option<&'static str>,
+    file: Option<TailedFile<&'static str>>,
     pending_lines: std::collections::VecDeque<Vec<u8>>, // lines to send, buffered for backpressure
 }
-
-const READ_TIMEOUT: Duration = Duration::from_millis(500);
 
 impl Component for FileTailerComponent {
     fn new(
@@ -267,12 +264,16 @@ impl Component for FileTailerComponent {
         // Read configuration if not yet configured
         if self.filename.is_none() {
             if let Ok(file_name_bytes) = self.conf.pop() {
-                let file_name = std::str::from_utf8(&file_name_bytes).expect("failed to parse filename as UTF-8");
+                let file_name = std::str::from_utf8(&file_name_bytes)
+                    .expect("failed to parse filename as UTF-8");
                 trace!("got filename: {}", file_name);
-                self.filename = Some(file_name.to_string());
+                // staart::TailedFile currently requires a `Copy` path type.
+                // Keep one leaked &'static str for the lifetime of this component instance.
+                let leaked_name: &'static str = Box::leak(file_name.to_owned().into_boxed_str());
+                self.filename = Some(leaked_name);
 
                 // Open the file
-                match TailedFile::new(file_name) {
+                match TailedFile::new(leaked_name) {
                     Ok(file) => {
                         self.file = Some(file);
                         trace!("opened file for tailing");
