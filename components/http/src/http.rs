@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
 
@@ -40,6 +41,10 @@ pub struct HTTPClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+    // Runtime state
+    client: reqwest::blocking::Client,
+    pending_responses: std::collections::VecDeque<Vec<u8>>, // responses to send, buffered for backpressure
+    pending_errors: std::collections::VecDeque<Vec<u8>>,    // errors to send, buffered for backpressure
 }
 
 impl Component for HTTPClientComponent {
@@ -53,6 +58,12 @@ impl Component for HTTPClientComponent {
     where
         Self: Sized,
     {
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(HTTP_CONNECT_TIMEOUT)
+            .timeout(HTTP_REQUEST_TIMEOUT)
+            .build()
+            .expect("failed to build HTTP client");
+
         HTTPClientComponent {
             req: inports
                 .remove("REQ")
@@ -72,109 +83,177 @@ impl Component for HTTPClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            client,
+            pending_responses: std::collections::VecDeque::new(),
+            pending_errors: std::collections::VecDeque::new(),
         }
     }
 
-    fn run(self) {
-        debug!("HTTPClient is now run()ning!");
-        let mut requests = self.req;
-        let mut out_resp = self.out_resp.sink;
-        let out_resp_wakeup = self
-            .out_resp
-            .wakeup
-            .expect("got no wakeup handle for outport RESP");
-        let mut out_err = self.out_err.sink;
-        let out_err_wakeup = self
-            .out_err
-            .wakeup
-            .expect("got no wakeup handle for outport ERR");
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(HTTP_CONNECT_TIMEOUT)
-            .timeout(HTTP_REQUEST_TIMEOUT)
-            .build()
-            .expect("failed to build HTTP client");
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("HTTPClient is now process()ing!");
+        let mut work_units = 0u32;
+
+        // check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
+        }
+
+        // First, try to send any pending responses that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_responses.is_empty() {
+            if let Some(pending_response) = self.pending_responses.front() {
+                match self.out_resp.push(pending_response.clone()) {
+                    Ok(()) => {
+                        self.pending_responses.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent pending HTTP response");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Then, try to send any pending errors that were buffered due to backpressure
+        while context.remaining_budget > 0 && !self.pending_errors.is_empty() {
+            if let Some(pending_error) = self.pending_errors.front() {
+                match self.out_err.push(pending_error.clone()) {
+                    Ok(()) => {
+                        self.pending_errors.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent pending HTTP error");
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Still can't send, stop trying for now
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Then, process new URLs within remaining budget
+        while context.remaining_budget > 0 {
+            // stay responsive to stop/ping even while making HTTP requests
+            if let Ok(sig) = self.signals_in.try_recv() {
                 trace!(
                     "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                    std::str::from_utf8(&sig).expect("invalid utf-8")
                 );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
+                if sig == b"stop" {
+                    info!("got stop signal while processing, finishing");
+                    return ProcessResult::Finished;
+                } else if sig == b"ping" {
                     trace!("got ping signal, responding");
                     let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            // check in port
-            //TODO while !inn.is_empty() {
-            loop {
-                if let Ok(ip) = requests.pop() {
-                    // read filename on inport
-                    //TODO support POST etc.
-                    //TODO support sending a body
-                    let file_path = std::str::from_utf8(&ip).expect("non utf-8 data");
-                    debug!("got a request: {}", &file_path);
-
-                    // make HTTP request
-                    //TODO may be big file - add chunking
-                    //TODO enclose files in brackets to know where its stream of chunks start and end
-                    //TODO enable use of async and/or timeout
-                    debug!("making HTTP request...");
-                    match client.get(file_path).send() {
-                        Ok(resp) => {
-                            // send it
-                            //TODO forward response headers? useful?
-                            debug!("forwarding HTTP results...");
-                            let body = resp
-                                .bytes()
-                                .expect("should have been able to read the HTTP response");
-                            out_resp
-                                .push(body.to_vec())
-                                .expect("could not push into RESP"); //TODO optimize conversion
-                            out_resp_wakeup.unpark();
-                        }
-                        Err(err) => {
-                            // send error
-                            debug!("got HTTP error, sending...");
-                            out_err
-                                .push(err.to_string().into())
-                                .expect("could not push into RESP"); //TODO optimize conversion
-                            out_err_wakeup.unpark();
-                        }
-                    };
-                    debug!("done");
-                } else {
-                    break;
                 }
             }
 
-            // are we done?
-            if requests.is_abandoned() {
-                info!("EOF on inport REQ, shutting down");
-                drop(out_resp);
-                out_resp_wakeup.unpark();
-                drop(out_err);
-                out_err_wakeup.unpark();
+            if let Ok(ip) = self.req.pop() {
+                let url = std::str::from_utf8(&ip).expect("non utf-8 data");
+                debug!("got a request: {}", &url);
+
+                // make HTTP request
+                //TODO may be big file - add chunking
+                //TODO enclose files in brackets to know where its stream of chunks start and end
+                //TODO enable use of async and/or timeout
+                debug!("making HTTP request...");
+                match self.client.get(url).send() {
+                    Ok(resp) => {
+                        debug!("forwarding HTTP results...");
+                        match resp.bytes() {
+                            Ok(body_bytes) => {
+                                let body = body_bytes.to_vec();
+                                // Try to send response
+                                match self.out_resp.push(body) {
+                                    Ok(()) => {
+                                        work_units += 1;
+                                        context.remaining_budget -= 1;
+                                        debug!("sent HTTP response successfully");
+                                    }
+                                    Err(PushError::Full(returned_body)) => {
+                                        // Output buffer full, buffer internally for later retry
+                                        debug!("response output buffer full, buffering internally");
+                                        self.pending_responses.push_back(returned_body);
+                                        work_units += 1; // We processed the request, just couldn't send
+                                        context.remaining_budget -= 1;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let error_msg = format!("Failed to read response body: {}", e);
+                                warn!("{}", error_msg);
+                                match self.out_err.push(error_msg.into_bytes()) {
+                                    Ok(()) => {
+                                        work_units += 1;
+                                        context.remaining_budget -= 1;
+                                        debug!("sent HTTP error successfully");
+                                    }
+                                    Err(PushError::Full(returned_error)) => {
+                                        debug!("error output buffer full, buffering internally");
+                                        self.pending_errors.push_back(returned_error);
+                                        work_units += 1;
+                                        context.remaining_budget -= 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        // send error
+                        debug!("got HTTP error, sending...");
+                        let error_msg = err.to_string();
+                        match self.out_err.push(error_msg.into_bytes()) {
+                            Ok(()) => {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                                debug!("sent HTTP error successfully");
+                            }
+                            Err(PushError::Full(returned_error)) => {
+                                // Output buffer full, buffer internally for later retry
+                                debug!("error output buffer full, buffering internally");
+                                self.pending_errors.push_back(returned_error);
+                                work_units += 1; // We processed the request, just couldn't send
+                                context.remaining_budget -= 1;
+                            }
+                        }
+                    }
+                };
+                debug!("done processing request");
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // are we done?
+        if self.req.is_abandoned() && self.pending_responses.is_empty() && self.pending_errors.is_empty() {
+            info!("EOF on inport REQ and all requests processed, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
