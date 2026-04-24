@@ -1023,3 +1023,23 @@ Migration strategy (if needed) is:
 * not runtime coexistence
 
 > There is always exactly one scheduler model per runtime.
+
+
+## Further Clarifications
+
+We need to make a few strict decisions to avoid architectural drift:
+
+1. The Component API must be changed immediately. We do NOT maintain backward compatibility with the thread-per-node model. This is a full execution model replacement.
+
+2. Work signaling must be implemented via ProcessEdgeSink notifying the scheduler. Components must not directly interact with scheduler internals.
+
+3. The scheduler must remain synchronous. Components may use async/IO internally, but process() must be non-blocking and return immediately if no work is available.
+
+4. The transition is all-at-once. There must not be multiple execution models in the system, and no runtime switching.
+
+Additionally:
+- ProcessResult should be an explicit enum (DidWork / NoWork / Finished)
+- process() must never block
+- scheduler is the central execution engine, not an optional layer
+
+Once these constraints are applied, the implementation is aligned with the intended architecture.
