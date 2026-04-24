@@ -6,7 +6,7 @@ Accepted
 
 ## Purpose
 
-This document defines the testing strategy for the flowd runtime.
+This document defines the testing strategy (what to test) and implementation (how to test it) for the flowd runtime.
 
 The goals are:
 
@@ -333,3 +333,493 @@ flowd testing ensures:
 ## Final Principle
 
 > A system like flowd is only as good as its behavior under stress, not its behavior in ideal conditions.
+
+
+## 11. Test Harness & Execution Model
+
+### Purpose
+
+To ensure consistency, maintainability, and correctness of pipeline-level tests, all runtime-based tests MUST be executed through a centralized test harness.
+
+---
+
+### Core Principle
+
+> Tests MUST NOT construct or manage the runtime manually.
+
+---
+
+### Test Harness
+
+A shared test harness MUST be provided that:
+
+* instantiates the runtime
+* loads component configurations
+* executes graphs
+* captures outputs
+* validates expected behavior
+
+---
+
+### Responsibilities
+
+The test harness is responsible for:
+
+* creating a runtime instance
+* wiring components into a graph
+* feeding input data
+* executing the scheduler
+* collecting outputs
+* applying assertions
+
+---
+
+### Execution Model
+
+All pipeline-level tests MUST:
+
+* run through the real runtime
+* use the scheduler
+* use real components
+* avoid direct component invocation
+
+---
+
+> The test harness is the only entry point for runtime-based tests.
+
+---
+
+### Graph Definition
+
+Tests SHOULD define pipelines as:
+
+* FBP graph definitions (preferred)
+* or programmatically constructed graphs via the harness
+
+---
+
+### Expected Behavior Definition
+
+Expected outcomes MUST be defined as:
+
+* output message sequences
+* state transitions
+* invariants (e.g. no message loss)
+
+---
+
+Declarative expectations MAY be used, but MUST be:
+
+* deterministic
+* verifiable without timing assumptions
+
+---
+
+---
+
+### Parameterized Testing
+
+The harness MUST support:
+
+* data-driven test scenarios
+* multiple graph configurations
+* varying input datasets
+
+---
+
+Examples:
+
+* linear pipelines
+* fan-out / fan-in
+* mixed component chains
+* edge cases
+
+---
+
+---
+
+### Property-Based Testing Integration
+
+The harness SHOULD integrate with property-based testing frameworks.
+
+Properties MUST be validated via:
+
+* repeated randomized execution
+* invariant checking
+
+---
+
+---
+
+### Component Discovery & Registration
+
+Components SHOULD be registered via a central configuration (e.g. `flowd.build.json`).
+
+The harness MAY:
+
+* dynamically load components
+* generate test scenarios based on available components
+
+---
+
+> Test infrastructure must reflect the actual system configuration.
+
+---
+
+---
+
+### Separation of Concerns
+
+Component tests:
+
+* test logic in isolation
+* DO NOT use the runtime
+
+Pipeline tests:
+
+* test behavior in context
+* MUST use the harness
+
+---
+
+---
+
+### Stability Requirement
+
+Changes to the runtime API MUST:
+
+* NOT require rewriting all tests
+* be absorbed by the test harness
+
+---
+
+> The harness acts as a stability layer between tests and runtime evolution.
+
+---
+
+---
+
+### Anti-Patterns
+
+The following are explicitly forbidden:
+
+* tests manually constructing runtime internals
+* tests spawning their own scheduler
+* tests directly invoking component internals in pipeline scenarios
+* duplicating runtime logic inside tests
+
+---
+
+> If tests reimplement the runtime, they are invalid.
+
+---
+
+
+
+
+## 12. Test Implementation Model (Active Testing & Harness-Based Execution)
+
+### Purpose
+
+This section defines how the testing strategy is implemented in practice.
+
+While the previous sections define **what must be tested**, this section defines:
+
+> how tests are structured, executed, and validated in a flowd system.
+
+---
+
+## Core Principle
+
+> Tests are active participants in the system, not passive observers.
+
+---
+
+## Active Test Driver Model
+
+### Concept
+
+Tests are implemented as **active drivers inside the runtime**, not as external assertions over static outputs.
+
+A test:
+
+* injects messages into the system
+* observes outputs
+* evaluates behavior
+* determines completion
+
+---
+
+### Architecture
+
+```text id="active_test_model"
+Test Harness
+    ↓
+Runtime (Scheduler)
+    ↓
+Graph (Components + Test Driver)
+```
+
+---
+
+### Flow
+
+```text id="test_flow"
+Test Driver → sends input → graph executes → outputs produced
+           → observes outputs → performs assertions → completes test
+```
+
+---
+
+## Test Harness Responsibilities
+
+The central test harness:
+
+* creates runtime instances
+* loads and executes graphs
+* integrates test drivers
+* provides utilities for:
+
+  * input injection
+  * output capture
+  * scheduler execution control
+
+---
+
+> The harness provides execution. Tests provide validation.
+
+---
+
+## Test Driver Responsibilities
+
+A test driver is responsible for:
+
+* generating input messages
+* collecting output messages
+* evaluating expected behavior
+* signaling test completion
+
+---
+
+### Example Responsibilities
+
+* send initial messages into graph
+* accumulate outputs from downstream nodes
+* assert invariants or expected outputs
+* terminate when conditions are met
+
+---
+
+## Output Validation Strategies
+
+### 1. Set-Based Assertions (Preferred)
+
+Used when ordering is not guaranteed.
+
+```text id="set_assertion"
+Expected: {A, B, C}
+Actual:   {C, A, B} → valid
+```
+
+---
+
+#### Rationale
+
+* robust against scheduling variation
+* compatible with parallel execution
+* avoids brittle tests
+
+---
+
+---
+
+### 2. Sequence Assertions (When Required)
+
+Used only when ordering is semantically required.
+
+```text id="sequence_assertion"
+Expected: A → B → C
+```
+
+---
+
+#### Constraint
+
+* MUST only be used where ordering is guaranteed by design
+* MUST NOT assume incidental ordering
+
+---
+
+---
+
+### 3. Window-Based Assertions
+
+Used for asynchronous or delayed behavior.
+
+```text id="window_assertion"
+Event must occur within N scheduler cycles
+```
+
+---
+
+#### Purpose
+
+* avoid hard timing dependencies
+* ensure eventual correctness
+
+---
+
+---
+
+### 4. Property-Based Assertions
+
+Used for system invariants.
+
+Examples:
+
+* no message loss
+* no unintended duplication
+* ordering constraints (where applicable)
+* backpressure correctness
+
+---
+
+---
+
+## Handling Non-Determinism
+
+flowd tests MUST assume:
+
+* non-deterministic execution order (unless explicitly constrained)
+* asynchronous input arrival
+* variable scheduling interleavings
+
+---
+
+### Implication
+
+Tests MUST:
+
+* avoid strict ordering assumptions
+* prefer invariant-based validation
+* use robust comparison strategies
+
+---
+
+---
+
+## Integration with External Event Sources
+
+For components using async IO or external event loops:
+
+* events MUST be injected into the system via message queues
+* test drivers MUST observe outputs through the same mechanisms as production
+
+---
+
+> External systems are treated as message sources, not test-controlled flows.
+
+---
+
+---
+
+## Component Testing vs Pipeline Testing
+
+### Component Tests
+
+* test isolated logic
+* do NOT use runtime
+* fast and deterministic
+
+---
+
+### Pipeline Tests
+
+* test real execution behavior
+* MUST use runtime + scheduler
+* MUST use test harness
+
+---
+
+---
+
+## Rejected Approach: Declarative Flow Test Formats
+
+The idea of a declarative “flow test format” (e.g. JSON-based expected input/output) was considered.
+
+---
+
+### Rejected Because:
+
+* cannot express non-deterministic behavior reliably
+* brittle under concurrency and scheduling variation
+* difficult to represent timing and ordering constraints
+* leads to fragile, over-specified tests
+
+---
+
+> Static test definitions do not scale to dynamic dataflow systems.
+
+---
+
+---
+
+## Rejected Approach: Direct Output Assertions Outside Runtime
+
+Example:
+
+```text id="bad_test"
+run graph → collect outputs → assert externally
+```
+
+---
+
+### Rejected Because:
+
+* breaks encapsulation of execution model
+* ignores scheduling behavior
+* cannot express incremental or temporal assertions
+
+---
+
+---
+
+## Benefits of Active Test Driver Model
+
+* tests run in real execution environment
+* no duplication of runtime logic
+* flexible assertion strategies
+* robust against concurrency effects
+* scalable to complex pipelines
+
+---
+
+---
+
+## Design Rule
+
+> Only the scheduler decides when execution happens.
+> Tests must adapt to this model, not bypass it.
+
+---
+
+---
+
+## Summary
+
+flowd tests are:
+
+* runtime-driven
+* behavior-focused
+* resilient to non-determinism
+* executed via a centralized harness
+* validated through active participation
+
+---
+
+## Final Principle
+
+> A dataflow system is not tested by comparing outputs —
+> it is tested by participating in its execution and validating its behavior.
+
+---
