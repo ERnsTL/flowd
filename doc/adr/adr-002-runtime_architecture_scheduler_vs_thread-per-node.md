@@ -553,3 +553,478 @@ Per-node schedulers:
 * excessive overhead
 * no global fairness within a graph
 * reintroduces problems of thread-per-node model
+
+
+## Implementation Clarifications
+
+The following clarifications refine the scheduler behavior defined above.
+They are binding for all implementations and remove ambiguity in critical areas.
+
+### 1. Budget Values Are Non-Semantic Defaults
+
+#### Clarification
+
+Budget values (e.g. Normal, Heavy, Realtime) are:
+
+* provisional defaults
+* implementation-level tuning parameters
+* NOT part of the semantic model
+
+In particular:
+
+* “realtime” MUST NOT be interpreted as unbounded execution
+* no budget value guarantees uninterrupted execution
+
+#### Rationale
+
+Budgets are a control mechanism, not a semantic contract.
+
+Treating them as semantic would:
+
+* make behavior unpredictable across systems
+* encourage misuse (e.g. abusing “realtime” for priority)
+* tightly couple components to runtime internals
+
+> Budgets express execution limits, not importance.
+
+#### Rejected Alternatives
+
+Semantic budget classes (e.g. “realtime means always run”):
+
+* breaks fairness guarantees
+* introduces hidden priority systems
+* leads to starvation and instability
+
+### 2. Scheduler Must Ensure Fair Re-queuing
+
+#### Clarification
+
+The scheduler MUST ensure fair execution across nodes.
+
+Specifically:
+
+* nodes are re-queued after execution if work remains
+* execution MUST follow a fair rotation model (e.g. round-robin behavior)
+* strict FIFO without rebalancing is NOT sufficient
+
+#### Rationale
+
+Pure FIFO scheduling is vulnerable to:
+
+* starvation
+* dominance by high-frequency producers
+* instability under fan-out scenarios
+
+Fair re-queuing ensures:
+
+* bounded execution per node
+* predictable distribution of processing time
+
+> Fairness is enforced by rotation, not queue order alone.
+
+#### Rejected Alternatives
+
+Strict FIFO scheduling:
+
+* allows hot nodes to dominate
+* can starve slower or intermittent nodes
+* does not provide fairness guarantees
+
+### 3. Readiness Signaling Is Level-Triggered
+
+#### Clarification
+
+Readiness signaling MUST be level-triggered.
+
+This means:
+
+* a node is considered ready as long as work is available
+* readiness MUST NOT be lost if a node remains non-empty
+* duplicate suppression MUST NOT suppress required re-scheduling
+
+#### Rationale
+
+Edge-triggered signaling is insufficient because:
+
+* it can miss subsequent work
+* it depends on precise timing
+* it introduces race conditions
+
+Level-triggered signaling ensures:
+
+* no work is lost
+* scheduler state reflects actual system state
+
+> Readiness represents state, not events.
+
+#### Rejected Alternatives
+
+Edge-triggered readiness (signal once per event):
+
+* risks lost wakeups
+* fragile under concurrency
+* leads to silent stalls
+
+### 4. Work Unit Definition Must Be Explicit
+
+#### Clarification
+
+A work unit MUST be explicitly defined.
+
+Default definition:
+
+* one work unit = processing of a single message
+
+Optional:
+
+* bounded batch processing MAY be allowed
+* batch size MUST be explicitly defined and limited
+
+#### Rationale
+
+Undefined work units lead to:
+
+* unpredictable execution time
+* unfair scheduling
+* inability to reason about performance
+
+Explicit units ensure:
+
+* consistent budget application
+* predictable execution slices
+* fair comparison between nodes
+
+> The scheduler operates on units of work, not arbitrary execution time.
+
+#### Rejected Alternatives
+
+Implicit or variable work units:
+
+* breaks fairness assumptions
+* makes performance tuning impossible
+* leads to inconsistent behavior
+
+### 5. Scheduler Idle Behavior Must Be Non-Busy
+
+#### Clarification
+
+When no work is available, the scheduler MUST NOT busy-wait.
+
+Instead, it MUST:
+
+* block, sleep, or wait for a signal
+* resume immediately when work becomes available
+
+#### Rationale
+
+Busy-waiting:
+
+* wastes CPU resources
+* reduces system efficiency
+* interferes with other workloads
+
+Proper idle handling ensures:
+
+* efficient resource usage
+* predictable latency under load
+
+> Idle systems must not consume active resources.
+
+#### Rejected Alternatives
+
+Busy-loop / spin-wait scheduler:
+
+* high CPU usage
+* poor system behavior under low load
+* unnecessary contention
+
+### 6. Scheduler Is Isolated from Component Execution Resources
+
+#### Clarification
+
+The scheduler MUST execute in an isolated execution context.
+
+This means:
+
+* it MUST NOT compete with component workloads
+* it MUST NOT share execution scheduling with component thread pools
+* it MUST remain logically and operationally independent
+
+#### Rationale
+
+If the scheduler competes with components:
+
+* fairness guarantees degrade
+* scheduling becomes unpredictable
+* system behavior depends on external load
+
+Isolation ensures:
+
+* consistent scheduling decisions
+* stable system behavior
+
+> The scheduler must control execution, not compete for it.
+
+#### Rejected Alternatives
+
+Running scheduler inside shared thread pool (e.g. async runtime):
+
+* introduces contention
+* breaks control over execution
+* reduces determinism
+
+### 7. Scheduler Does Not Interpret Backpressure
+
+#### Clarification
+
+Backpressure remains exclusively managed by ring buffers.
+
+The scheduler:
+
+* MUST NOT override backpressure
+* MUST NOT attempt to bypass full queues
+* MUST treat buffer state as authoritative
+
+#### Rationale
+
+Backpressure is:
+
+* local
+* physical
+* deterministic
+
+Scheduler-level interference would:
+
+* break system invariants
+* introduce hidden behavior
+* complicate reasoning
+
+> Backpressure is enforced by transport, not by scheduling.
+
+#### Rejected Alternatives
+
+Scheduler-driven flow control:
+
+* duplicates responsibility
+* introduces hidden coupling
+* weakens system guarantees
+
+
+## Implementation Decisions (Follow-up Clarifications)
+
+The following decisions resolve remaining ambiguities in the scheduler design.
+
+### 1. Work Unit Granularity
+
+#### Decision
+
+Default:
+
+> One work unit = processing of a single message.
+
+Optional:
+
+* bounded batching is allowed
+* batching MUST be explicitly limited (e.g. max N messages)
+* batching MUST still respect budget limits
+
+#### Rationale
+
+Single-message units:
+
+* maximize fairness
+* simplify reasoning
+* avoid long execution slices
+
+Bounded batching is allowed for:
+
+* throughput optimization
+* reducing scheduling overhead
+
+But:
+
+* batching must not undermine fairness
+
+> Fairness-first, batching as controlled optimization.
+
+#### Constraint
+
+* No unbounded batching
+* No implicit batching
+* Batch size MUST be small and explicit
+
+### 2. Idle Blocking Mechanism
+
+#### Decision
+
+> Use a blocking mechanism with explicit wakeup signaling.
+
+Preferred options:
+
+* `std::sync::Condvar`
+* or equivalent low-level signaling primitive
+
+#### Rationale
+
+The scheduler must:
+
+* NOT busy-wait
+* resume immediately when work is available
+* avoid unnecessary latency
+
+Condvar-style signaling provides:
+
+* efficient sleep
+* low overhead wakeup
+* predictable behavior
+
+#### Not Recommended
+
+Channels as primary blocking mechanism:
+
+* introduce unnecessary abstraction
+* may hide wakeup semantics
+* less explicit control over scheduler loop
+
+> The scheduler should use explicit signaling, not implicit queue semantics.
+
+### 3. Fairness Metrics
+
+#### Decision
+
+The scheduler SHOULD expose basic fairness observability, but not enforce complex policies.
+
+Minimum metrics:
+
+* executions per node
+* total work units processed per node
+* time since last execution per node
+
+Optional:
+
+* average latency between executions
+* queue depth / backlog per node
+
+#### Rationale
+
+Fairness must be:
+
+* observable
+* debuggable
+* tunable
+
+But:
+
+* not over-engineered
+* not dependent on complex runtime feedback loops
+
+> Measure fairness first. Optimize later if needed.
+
+#### Non-Goals
+
+* No strict fairness guarantees (e.g. real-time scheduling)
+* No complex priority-based scheduling
+
+### 4. Transition Strategy
+
+#### Decision
+
+> Introduce the scheduler as a complete replacement per subgraph, not partially within a subgraph.
+
+#### Rationale
+
+Mixing models inside a subgraph (thread-per-node + scheduler):
+
+* creates undefined behavior
+* breaks scheduling guarantees
+* makes debugging extremely difficult
+
+Subgraphs provide a natural boundary:
+
+* clean separation
+* controlled rollout
+* safe experimentation
+
+#### Rejected Alternatives
+
+Gradual per-node migration within a subgraph:
+
+* inconsistent execution model
+* unpredictable scheduling
+* high debugging complexity
+
+> The execution model must be consistent within a scheduling domain.
+
+#### Decision
+
+> The scheduler defined in this ADR is the single execution model for flowd.
+
+Specifically:
+
+* there MUST NOT be multiple scheduler implementations in the system
+* there MUST NOT be a runtime switch between scheduling models
+* all subgraphs MUST use the same scheduler implementation
+* no hybrid execution models are allowed within the same runtime
+
+#### Rationale
+
+Allowing multiple scheduling models would:
+
+* introduce undefined behavior at graph boundaries
+* make performance and correctness non-deterministic
+* significantly increase system complexity
+* create long-term maintenance burden (code duplication, feature drift)
+
+The scheduler is a **core runtime primitive**, not a pluggable feature.
+
+> Execution semantics must be globally consistent across the system.
+
+#### On Subgraphs as Scheduling Domains
+
+Subgraphs define **isolation domains**, not alternative execution models.
+
+This means:
+
+* each subgraph has its own scheduler instance
+* all scheduler instances follow the same implementation and semantics
+* isolation is for scalability and fault containment, not configurability
+
+#### Rejected Alternatives
+
+Multiple scheduler implementations (e.g. legacy + new):
+
+* leads to code bloat
+* introduces divergent behavior
+* complicates testing and debugging
+
+Runtime switch between scheduling models:
+
+* creates inconsistent system semantics
+* hard to reason about correctness
+* increases operational complexity
+
+Two models of scheduling within a graph:
+
+* unpredictable execution ordering
+* broken fairness guarantees
+* extremely difficult to debug
+
+Pluggable scheduler architecture (at this stage):
+
+* premature abstraction
+* unclear interface boundaries
+* risks fragmentation of execution semantics
+
+#### Future Evolution
+
+If the scheduling model evolves in the future:
+
+* it MUST replace the existing model
+* not coexist with it
+
+Migration strategy (if needed) is:
+
+* version-level change (e.g. major version)
+* not runtime coexistence
+
+> There is always exactly one scheduler model per runtime.
