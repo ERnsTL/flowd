@@ -1,20 +1,22 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-//use tungstenite::client::connect;
-use std::collections::HashMap;
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::thread::{self};
-use std::time::{Duration, Instant};
+use std::net::{TcpListener, TcpStream};
+use std::time::Duration;
 use tungstenite::protocol::Message;
-use tungstenite::util::NonBlockingError;
-use tungstenite::WebSocket;
+
+#[derive(Debug)]
+enum WSClientState {
+    WaitingForConfig,
+    Connecting { url: String, connect_start: std::time::Instant },
+    Connected { client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>> },
+    Finished,
+}
 
 pub struct WSClientComponent {
     conf: ProcessEdgeSource,
@@ -22,26 +24,15 @@ pub struct WSClientComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: WSClientState,
     //graph_inout: GraphInportOutportHandle,
 }
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
-const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
-const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
-const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
 
-fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    thread::Builder::new()
-        .name(format!("ws-join-{}", label))
-        .spawn(move || {
-            if let Err(err) = handle.join() {
-                warn!("{}: deferred thread join returned error: {:?}", label, err);
-            }
-        })
-        .expect("failed to spawn ws deferred join thread");
-}
+
 
 impl Component for WSClientComponent {
     fn new(
@@ -72,188 +63,166 @@ impl Component for WSClientComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: WSClientState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("WSClient is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("WSClient process() called, state: {:?}", self.state);
 
-        // read configuration
-        trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-
-        // prepare connection arguments
-        // NOTE: currently no options implemented
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        //let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        //let mut query_pairs = url.query_pairs();
-        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
-        // get buffer size from URL
-        /*
-        let _read_buffer_size;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
-            _read_buffer_size = value.to_string().parse::<usize>().expect("failed to parse query pair value for read buffer as integer");
-        } else {
-            _read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
-        }
-        */
-
-        // configure
-        let (connect_tx, connect_rx) =
-            std::sync::mpsc::sync_channel::<Result<_, tungstenite::Error>>(1);
-        let url_owned = url_str.to_owned();
-        thread::Builder::new()
-            .name(format!(
-                "{}/WS-connect",
-                thread::current().name().unwrap_or("WSClient")
-            ))
-            .spawn(move || {
-                let _ = connect_tx.send(tungstenite::client::connect(url_owned.as_str()));
-            })
-            .expect("failed to spawn WebSocket connect thread");
-        let (mut client, _) = match connect_rx.recv_timeout(CONNECT_TIMEOUT) {
-            Ok(Ok(ok)) => ok,
-            Ok(Err(err)) => {
-                error!("failed to connect to WebSocket server: {}", err);
-                return;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                error!(
-                    "timed out connecting to WebSocket server after {:?}",
-                    CONNECT_TIMEOUT
-                );
-                return;
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                error!("WebSocket connect helper thread disconnected unexpectedly");
-                return;
-            }
-        };
-        if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
-            warn!("failed to set client socket timeouts: {}", err);
-        }
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = WSClientState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
+                )
+            }
+        }
+
+        match &mut self.state {
+            WSClientState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(url_vec) = self.conf.pop() {
+                    let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                    debug!("got config URL: {}", url_str);
+                    self.state = WSClientState::Connecting {
+                        url: url_str.to_owned(),
+                        connect_start: std::time::Instant::now(),
+                    };
+                    return ProcessResult::DidWork(1);
                 }
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
             }
 
-            // send
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                debug!("got {} packets, sending into WebSocket...", inn.slots());
-                let chunk = inn
-                    .read_chunk(inn.slots())
-                    .expect("receive as chunk failed");
-
-                for ip in chunk.into_iter() {
-                    //TODO add support for Text messages
-                    if let Err(err) = client.write(Message::Binary(ip)) {
-                        error!("failed to write into WebSocket client: {}", err);
-                        break;
+            WSClientState::Connecting { url, connect_start } => {
+                // Try to connect (this is blocking, but we limit attempts)
+                match tungstenite::client::connect(url.as_str()) {
+                    Ok((mut client, _)) => {
+                        debug!("WebSocket connection established");
+                        if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
+                            warn!("failed to set client socket timeouts: {}", err);
+                        }
+                        self.state = WSClientState::Connected { client };
+                        return ProcessResult::DidWork(1);
                     }
-                }
-
-                if let Err(err) = client.flush() {
-                    error!("failed to flush WebSocket client: {}", err);
-                    break;
-                }
-            }
-
-            // receive
-            //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
-            while client.can_read() {
-                debug!("got message from WebSocket, repeating...");
-                match client.read() {
-                    Ok(msg) => {
-                        out.push(msg.into_data()).expect("could not push into OUT");
-                        out_wakeup.unpark();
-                        debug!("done");
-                    }
-                    Err(tungstenite::Error::Io(err))
-                        if err.kind() == std::io::ErrorKind::WouldBlock
-                            || err.kind() == std::io::ErrorKind::TimedOut =>
-                    {
-                        break;
-                    }
-                    Err(tungstenite::Error::ConnectionClosed)
-                    | Err(tungstenite::Error::AlreadyClosed) => {
-                        info!("WebSocket connection closed");
-                        drop(out);
-                        out_wakeup.unpark();
-                        return;
+                    Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        // Connection in progress, check timeout
+                        if connect_start.elapsed() > CONNECT_TIMEOUT {
+                            error!("timed out connecting to WebSocket server after {:?}", CONNECT_TIMEOUT);
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                        // Yield if no budget left
+                        if context.remaining_budget == 0 {
+                            return ProcessResult::NoWork;
+                        }
+                        context.remaining_budget -= 1;
+                        return ProcessResult::NoWork;
                     }
                     Err(err) => {
-                        error!("failed to read from WebSocket: {}", err);
-                        drop(out);
-                        out_wakeup.unpark();
-                        return;
+                        error!("failed to connect to WebSocket server: {}", err);
+                        self.state = WSClientState::Finished;
+                        return ProcessResult::Finished;
                     }
                 }
             }
 
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                //TODO close socket
-                drop(out);
-                out_wakeup.unpark();
-                break;
+            WSClientState::Connected { ref mut client } => {
+                let mut work_units = 0;
+
+                // Send data
+                while !self.inn.is_empty() && context.remaining_budget > 0 {
+                    debug!("got {} packets, sending into WebSocket...", self.inn.slots());
+                    let chunk = self.inn
+                        .read_chunk(self.inn.slots())
+                        .expect("receive as chunk failed");
+
+                    for ip in chunk.into_iter() {
+                        //TODO add support for Text messages
+                        if let Err(err) = client.write(Message::Binary(ip)) {
+                            error!("failed to write into WebSocket client: {}", err);
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+
+                    if let Err(err) = client.flush() {
+                        error!("failed to flush WebSocket client: {}", err);
+                        self.state = WSClientState::Finished;
+                        return ProcessResult::Finished;
+                    }
+
+                    work_units += 1;
+                    context.remaining_budget -= 1;
+                }
+
+                // Receive data
+                while client.can_read() && context.remaining_budget > 0 {
+                    debug!("got message from WebSocket, repeating...");
+                    match client.read() {
+                        Ok(msg) => {
+                            self.out.sink.push(msg.into_data()).expect("could not push into OUT");
+                            if let Some(wakeup) = &self.out.wakeup {
+                                wakeup.unpark();
+                            }
+                            debug!("done");
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        }
+                        Err(tungstenite::Error::Io(err))
+                            if err.kind() == std::io::ErrorKind::WouldBlock
+                                || err.kind() == std::io::ErrorKind::TimedOut =>
+                        {
+                            break; // No more data available
+                        }
+                        Err(tungstenite::Error::ConnectionClosed)
+                        | Err(tungstenite::Error::AlreadyClosed) => {
+                            info!("WebSocket connection closed");
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                        Err(err) => {
+                            error!("failed to read from WebSocket: {}", err);
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                }
+
+                // Check if input is abandoned
+                if self.inn.is_abandoned() {
+                    info!("EOF on inport, shutting down");
+                    self.state = WSClientState::Finished;
+                    return ProcessResult::Finished;
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
+                } else {
+                    ProcessResult::NoWork
+                }
             }
 
-            trace!("-- end of iteration");
-            //TODO optimize - hacky way to avoid busy waiting;
-            //  better to use a separate thread for WebSocket read and close the connection when the inport is abandoned, leading to the read thread exiting
-            //std::thread::park();
-            std::thread::sleep(READ_TIMEOUT);
+            WSClientState::Finished => ProcessResult::Finished,
         }
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -317,12 +286,24 @@ fn set_client_stream_timeouts(
     Ok(())
 }
 
+#[derive(Debug)]
+enum WSServerState {
+    WaitingForConfig,
+    Listening {
+        listener: TcpListener,
+        connections: std::collections::HashMap<u32, tungstenite::WebSocket<TcpStream>>,
+        next_connection_id: u32,
+    },
+    Finished,
+}
+
 pub struct WSServerComponent {
     conf: ProcessEdgeSource,
     resp: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: WSServerState,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -355,268 +336,193 @@ impl Component for WSServerComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: WSServerState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(mut self) {
-        debug!("WSServer is now run()ning!");
-        let mut conf = self.conf;
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("WSServer process() called, state: {:?}", self.state);
 
-        // get configuration IP
-        trace!("spinning for configuration IP...");
-        loop {
-            if !conf.is_empty() {
-                break;
-            }
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = WSServerState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                if ip == b"stop" {
-                    info!("got stop signal while waiting for CONF, exiting");
-                    return;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
-            thread::yield_now();
         }
-        //TODO optimize string conversions to on an address
-        let config = conf.pop().expect("not empty but still got an error on pop");
-        let listen_addr =
-            std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
-        trace!("got listen address {}", listen_addr);
 
-        // set configuration
-        let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
-        listener
-            .set_nonblocking(true)
-            .expect("failed to set non-blocking on tcp listener socket");
-        let resp = &mut self.resp;
-        let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        let shutdown = Arc::new(AtomicBool::new(false));
+        match &mut self.state {
+            WSServerState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(config_vec) = self.conf.pop() {
+                    let listen_addr = std::str::from_utf8(&config_vec).expect("invalid utf-8");
+                    debug!("got listen address: {}", listen_addr);
 
-        // prepare variables for listen thread
-        let sockets: Arc<Mutex<HashMap<u32, WebSocket<TcpStream>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let sockets_ref = sockets.clone();
-        let out_ref = out.clone();
-        let out_wakeup_ref = out_wakeup.clone();
-        let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let connection_threads_ref = connection_threads.clone();
-        let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
-            // listener loop
-            let mut socketnum: u32 = 0;
-            loop {
-                if shutdown_listen.load(Ordering::Relaxed) {
-                    debug!("listener got shutdown signal, exiting");
-                    break;
+                    let listener = TcpListener::bind(listen_addr)
+                        .map_err(|e| {
+                            error!("failed to bind tcp listener socket: {}", e);
+                            e
+                        })
+                        .expect("failed to bind tcp listener socket");
+
+                    listener
+                        .set_nonblocking(true)
+                        .expect("failed to set non-blocking on tcp listener socket");
+
+                    self.state = WSServerState::Listening {
+                        listener,
+                        connections: std::collections::HashMap::new(),
+                        next_connection_id: 1,
+                    };
+                    return ProcessResult::DidWork(1);
                 }
-                debug!("listening for a client");
-                match listener.accept() {
-                    Ok((socket, addr)) => {
-                        println!("handling client: {addr:?}");
-                        socketnum += 1;
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
 
-                        // set options on socket
-                        socket.set_read_timeout(Some(READ_TIMEOUT)).expect("failed to set read timeout on socket");
-                        socket.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on socket");
-                        // upgrade to WebSocket
-                        let websocket = tungstenite::accept(socket).expect("failed to accept/upgrade to WebSocket connection");
+            WSServerState::Listening { listener, connections, next_connection_id } => {
+                let mut work_units = 0;
 
-                        // add to list of known/open sockets resp. socket handlers
-                        sockets_ref.lock().expect("lock poisoned").insert(socketnum, websocket);
+                // Accept new connections
+                if context.remaining_budget > 0 {
+                    match listener.accept() {
+                        Ok((socket, addr)) => {
+                            debug!("handling client: {:?}", addr);
 
-                        // prepare variables for connection handler thread
-                        let sockets_ref2 = sockets_ref.clone();
-                        let out_ref2 = out_ref.clone();
-                        let out_wakeup_ref2 = out_wakeup_ref.clone();
-                        let shutdown_conn = shutdown_listen.clone();
-
-                        // handle the connection in a separate thread
-                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
-                            let socketnum_inner = socketnum;
-
-                            // receive loop and send to component OUT tagged with socketnum
-                            debug!("handling client connection");
-                            loop {
-                                if shutdown_conn.load(Ordering::Relaxed) {
-                                    debug!("connection handler got shutdown signal, exiting");
-                                    break;
-                                }
-                                // read from client
-                                debug!("reading from client");  //TODO fix - without the debug message, Rust will keep the lock forever even when it should only be kept for the match block and not the whole loop
-                                // Read from this handler's own connection.
-                                let read_result = {
-                                    let mut sockets_locked = sockets_ref2.lock().expect("lock poisoned");
-                                    match sockets_locked.get_mut(&socketnum_inner) {
-                                        Some(socket) => socket.read(),
-                                        None => {
-                                            debug!("socket {} already removed, exiting connection handler", socketnum_inner);
-                                            break;
-                                        }
-                                    }
-                                };
-                                match read_result {
-                                    Ok(message) => {
-                                        debug!("got message from client, pushing data to OUT");
-                                        out_ref2.lock().expect("lock poisoned").push(message.into_data()).expect("could not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
-
-                                        trace!("unparking OUT thread");
-                                        out_wakeup_ref2.unpark();
-                                        debug!("done");
-                                    },
-                                    Err(e) => {
-                                        // ignore WouldBlock "errors" - they are not errors, just information that there is no data to read resp. timeout on read()
-                                        if let Some(real_error) = e.into_non_blocking() {
-                                            debug!("failed to read from client: {real_error:?} - exiting connection handler");
-                                            break;
-                                        }
-                                    },
-                                };
-                                debug!("-- end of iteration");
+                            // Set socket options
+                            if let Err(e) = socket.set_read_timeout(Some(READ_TIMEOUT)) {
+                                warn!("failed to set read timeout on socket: {}", e);
+                            }
+                            if let Err(e) = socket.set_write_timeout(WRITE_TIMEOUT) {
+                                warn!("failed to set write timeout on socket: {}", e);
                             }
 
-                            // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
-                            debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
-                        }).expect("could not start connection handler thread");
-                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
-                    },
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::WouldBlock {
-                            thread::sleep(LISTENER_POLL_SLEEP);
-                            continue;
+                            // Upgrade to WebSocket
+                            match tungstenite::accept(socket) {
+                                Ok(websocket) => {
+                                    let conn_id = *next_connection_id;
+                                    *next_connection_id += 1;
+                                    connections.insert(conn_id, websocket);
+                                    debug!("WebSocket connection {} established", conn_id);
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                Err(e) => {
+                                    error!("failed to accept/upgrade to WebSocket connection: {}", e);
+                                }
+                            }
                         }
-                        error!("accept failed: {e:?} - exiting");
+                        Err(e) => {
+                            if e.kind() != std::io::ErrorKind::WouldBlock {
+                                error!("accept failed: {:?}", e);
+                                self.state = WSServerState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                            // WouldBlock is normal - no connections waiting
+                        }
+                    }
+                }
+
+                // Process existing connections
+                let mut closed_connections = Vec::new();
+                for (conn_id, websocket) in connections.iter_mut() {
+                    if context.remaining_budget == 0 {
                         break;
-                    },
-                }
-            }
-        }).expect("could not start listener thread");
+                    }
 
-        // main loop
-        debug!("entering main loop");
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-
-            // check in port
-            //TODO while !inn.is_empty() {
-            loop {
-                if let Ok(ip) = resp.pop() {
-                    debug!("got a packet, writing into client socket...");
-
-                    // send into client socket
-                    {
-                        //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                        //TODO optimize - lots of locking and indirection here
-                        if let Some((_, socket)) =
-                            sockets.lock().expect("lock poisoned").iter_mut().next()
+                    // Read from this connection
+                    match websocket.read() {
+                        Ok(message) => {
+                            debug!("got message from connection {}, pushing to OUT", conn_id);
+                            self.out.sink.push(message.into_data()).expect("could not push IP into OUT");
+                            if let Some(wakeup) = &self.out.wakeup {
+                                wakeup.unpark();
+                            }
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        }
+                        Err(tungstenite::Error::Io(err))
+                            if err.kind() == std::io::ErrorKind::WouldBlock
+                                || err.kind() == std::io::ErrorKind::TimedOut =>
                         {
-                            socket.write(Message::binary(ip)).expect("could not send data from FBP network into client socket connection"); //TODO harden write_timeout() //TODO optimize
-                                                                                                                                            //TODO optimize - flush only when necessary. read chunks from FBP network and flush when all IPs in the chunk are sent
-                            socket.flush().expect("failed to flush WebSocket to client");
+                            // No data available, continue to next connection
+                        }
+                        Err(tungstenite::Error::ConnectionClosed)
+                        | Err(tungstenite::Error::AlreadyClosed) => {
+                            debug!("connection {} closed", conn_id);
+                            closed_connections.push(*conn_id);
+                        }
+                        Err(err) => {
+                            error!("failed to read from connection {}: {}", conn_id, err);
+                            closed_connections.push(*conn_id);
+                        }
+                    }
+                }
+
+                // Remove closed connections
+                for conn_id in closed_connections {
+                    connections.remove(&conn_id);
+                    debug!("removed closed connection {}", conn_id);
+                }
+
+                // Send responses to clients
+                while !self.resp.is_empty() && context.remaining_budget > 0 {
+                    if let Ok(ip) = self.resp.pop() {
+                        debug!("got response packet, sending to first available client");
+
+                        // Send to first available connection
+                        if let Some((_, websocket)) = connections.iter_mut().next() {
+                            if let Err(err) = websocket.write(Message::Binary(ip)) {
+                                error!("failed to write to WebSocket: {}", err);
+                                // Connection might be broken, but we'll handle it on next read
+                            } else if let Err(err) = websocket.flush() {
+                                error!("failed to flush WebSocket: {}", err);
+                            } else {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
                         } else {
                             debug!("no connected clients, dropping response packet");
                         }
+                    } else {
+                        break;
                     }
-                    debug!("done");
+                }
+
+                // Check if RESP input is abandoned
+                if self.resp.is_abandoned() {
+                    info!("RESP input abandoned, finishing");
+                    self.state = WSServerState::Finished;
+                    return ProcessResult::Finished;
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
                 } else {
-                    break;
+                    ProcessResult::NoWork
                 }
             }
 
-            // check socket
-            //NOTE: happens in connection handler threads, see above
-
-            trace!("end of iteration");
-            std::thread::park();
+            WSServerState::Finished => ProcessResult::Finished,
         }
-        shutdown.store(true, Ordering::Relaxed);
-        {
-            let mut sockets_locked = sockets.lock().expect("lock poisoned");
-            for socket in sockets_locked.values_mut() {
-                let _ = socket.get_mut().shutdown(Shutdown::Both);
-            }
-        }
-        let listen_join_started = Instant::now();
-        while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if listen_thread.is_finished() {
-            if let Err(err) = listen_thread.join() {
-                warn!("failed to join websocket listener thread: {:?}", err);
-            }
-        } else {
-            warn!(
-                "wsserver: listener thread did not exit within {:?}, handing off to join reaper",
-                LISTENER_JOIN_GRACE
-            );
-            handoff_join(listen_thread, "wsserver-listener");
-        }
-
-        let handles = {
-            let mut handles_guard = connection_threads.lock().expect("lock poisoned");
-            handles_guard.drain(..).collect::<Vec<_>>()
-        };
-        for handle in handles {
-            let conn_join_started = Instant::now();
-            while !handle.is_finished() && conn_join_started.elapsed() < CONNECTION_JOIN_GRACE {
-                thread::sleep(Duration::from_millis(10));
-            }
-            if handle.is_finished() {
-                if let Err(err) = handle.join() {
-                    warn!(
-                        "failed to join websocket connection handler thread: {:?}",
-                        err
-                    );
-                }
-            } else {
-                warn!(
-                    "wsserver: connection handler thread did not exit within {:?}, handing off to join reaper",
-                    CONNECTION_JOIN_GRACE
-                );
-                handoff_join(handle, "wsserver-connection");
-            }
-        }
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
