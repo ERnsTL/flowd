@@ -4,15 +4,12 @@ use flowd_component_api::{
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread::{self};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 pub struct TCPClientComponent {
@@ -32,20 +29,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 4096;
-const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
-const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
-const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
-
-fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    thread::Builder::new()
-        .name(format!("tcp-join-{}", label))
-        .spawn(move || {
-            if let Err(err) = handle.join() {
-                warn!("{}: deferred thread join returned error: {:?}", label, err);
-            }
-        })
-        .expect("failed to spawn tcp deferred join thread");
-}
 
 impl Component for TCPClientComponent {
     fn new(
@@ -107,7 +90,7 @@ impl Component for TCPClientComponent {
 
                 // Try to connect
                 match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-                    Ok(mut stream) => {
+                    Ok(stream) => {
                         stream
                             .set_read_timeout(READ_TIMEOUT)
                             .expect("failed to set read timeout on TCP client");
@@ -242,7 +225,7 @@ impl Component for TCPClientComponent {
                                     context.remaining_budget -= 1;
                                     debug!("sent received data to output");
                                 }
-                                Err(PushError::Full(returned_data)) => {
+                                Err(PushError::Full(_returned_data)) => {
                                     // Output buffer full - for TCP, we might want to buffer or drop
                                     // For now, we'll drop since TCP is streaming
                                     debug!("output buffer full, dropping received data");
@@ -338,6 +321,17 @@ impl Component for TCPClientComponent {
     }
 }
 
+#[derive(Debug)]
+enum ConnectionState {
+    Active { last_active: Instant },
+}
+
+#[derive(Debug)]
+struct Connection {
+    state: ConnectionState,
+    sock: TcpStream,
+}
+
 pub struct TCPServerComponent {
     conf: ProcessEdgeSource,
     resp: ProcessEdgeSource,
@@ -345,6 +339,13 @@ pub struct TCPServerComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Cooperative server state
+    listen_addr: Option<String>,
+    listener: Option<TcpListener>,
+    connections: HashMap<u32, Connection>,
+    next_client_id: u32,
+    pending_responses: HashMap<u32, Vec<u8>>, // client_id -> response data
 }
 
 impl Component for TCPServerComponent {
@@ -377,269 +378,273 @@ impl Component for TCPServerComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            listen_addr: None,
+            listener: None,
+            connections: HashMap::new(),
+            next_client_id: 0,
+            pending_responses: HashMap::new(),
         }
     }
 
-    fn run(mut self) {
-        debug!("TCPServer is now run()ning!");
-        let mut conf = self.conf;
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("TCPServer is now process()ing!");
+        let mut work_units = 0u32;
 
-        // get configuration IP
-        trace!("spinning for configuration IP...");
-        loop {
-            if !conf.is_empty() {
-                break;
-            }
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                if ip == b"stop" {
-                    info!("got stop signal while waiting for CONF, exiting");
-                    return;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            thread::yield_now();
-        }
-        //TODO optimize string conversions to on an address
-        let config = conf.pop().expect("not empty but still got an error on pop");
-        let listen_addr =
-            std::str::from_utf8(&config).expect("could not parse listen_addr as utf-8");
-        trace!("got listen address {}", listen_addr);
+        // Read configuration if not yet configured
+        if self.listener.is_none() {
+            if let Ok(listen_addr_bytes) = self.conf.pop() {
+                let listen_addr = std::str::from_utf8(&listen_addr_bytes)
+                    .expect("invalid utf-8 listen address")
+                    .to_owned();
+                self.listen_addr = Some(listen_addr.clone());
+                trace!("got listen address: {}", listen_addr);
 
-        // set configuration
-        let listener = TcpListener::bind(listen_addr).expect("failed to bind tcp listener socket");
-        listener
-            .set_nonblocking(true)
-            .expect("failed to set non-blocking on tcp listener socket");
-        let resp = &mut self.resp;
-        let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        let shutdown = Arc::new(AtomicBool::new(false));
-
-        // prepare variables for listen thread
-        let sockets: Arc<Mutex<HashMap<u32, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
-        let sockets_ref = Arc::clone(&sockets);
-        let out_ref = Arc::clone(&out);
-        let out_wakeup_ref = out_wakeup.clone();
-        let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let connection_threads_ref = connection_threads.clone();
-        let listen_thread = thread::Builder::new().name(format!("{}_listen", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
-            // listener loop
-            let mut socketnum: u32 = 0;
-            loop {
-                if shutdown_listen.load(Ordering::Relaxed) {
-                    debug!("listener got shutdown signal, exiting");
-                    break;
-                }
-                debug!("listening for a client");
-                match listener.accept() {
-                    Ok((mut socket, addr)) => {
-                        println!("handling client: {addr:?}");
-                        socketnum += 1;
-                        socket.set_read_timeout(READ_TIMEOUT).expect("failed to set read timeout on client socket");
-                        socket.set_write_timeout(WRITE_TIMEOUT).expect("failed to set write timeout on client socket");
-                        sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
-                        let sockets_ref2 = Arc::clone(&sockets_ref);
-                        let out_ref2 = Arc::clone(&out_ref);
-                        let out_wakeup_ref2 = out_wakeup_ref.clone();
-                        let shutdown_conn = shutdown_listen.clone();
-                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
-                            let socketnum_inner = socketnum;
-
-                            // receive loop and send to component OUT tagged with socketnum
-                            debug!("handling client connection");
-                            loop {
-                                if shutdown_conn.load(Ordering::Relaxed) {
-                                    debug!("connection handler got shutdown signal, exiting");
-                                    break;
-                                }
-                                // read from client
-                                trace!("reading from client");
-                                let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
-                                match socket.read(&mut buf) {
-                                    Ok(bytes) => {
-                                        if bytes == 0 {
-                                            // correctly closed (or given buffer had size 0)
-                                            debug!("connection closed ok, exiting connection handler");
-                                            break;
-                                        }
-
-                                        debug!("got data from client, pushing data to OUT");
-                                        buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
-                                        //TODO optimize ^ do not truncate, but re-use the buffer and copy the bytes into a new Vec = the output IP
-                                        out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
-
-                                        trace!("unparking OUT thread");
-                                        out_wakeup_ref2.unpark();
-                                    }
-                                    Err(err) => {
-                                        if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
-                                            continue;
-                                        }
-                                        debug!("connection non-ok result, exiting connection handler");
-                                        break;
-                                    }
-                                }
-                                trace!("-- end of iteration")
-                            }
-
-                            // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
-                            debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
-                        }).expect("could not start connection handler thread");
-                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
-                    },
+                // Set up the listener
+                match TcpListener::bind(&listen_addr) {
+                    Ok(listener) => {
+                        listener
+                            .set_nonblocking(true)
+                            .expect("failed to set non-blocking on TCP listener");
+                        self.listener = Some(listener);
+                        debug!("TCP server listening on {}", listen_addr);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
                     Err(e) => {
-                        if e.kind() == ErrorKind::WouldBlock {
-                            thread::sleep(LISTENER_POLL_SLEEP);
-                            continue;
-                        }
-                        error!("accept failed: {e:?} - exiting");
-                        break;
-                    },
+                        warn!("failed to bind TCP listener on {}: {}", listen_addr, e);
+                        return ProcessResult::NoWork;
+                    }
                 }
+            } else {
+                trace!("waiting for listen address configuration");
+                return ProcessResult::NoWork;
             }
-        }).expect("could not start listener thread");
+        }
 
-        // main loop
-        debug!("entering main loop");
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
+                )
+            }
+        }
+
+        // Accept new connections (within budget)
+        if context.remaining_budget > 0 {
+            if let Some(listener) = &self.listener {
+                match listener.accept() {
+                    Ok((sock, addr)) => {
+                        debug!("accepted new TCP connection from {}", addr);
+
+                        // Set up timeouts
+                        let sock = sock;
+                        sock.set_read_timeout(READ_TIMEOUT)
+                            .expect("failed to set read timeout on client socket");
+                        sock.set_write_timeout(WRITE_TIMEOUT)
+                            .expect("failed to set write timeout on client socket");
+
+                        let client_id = self.next_client_id;
+                        self.next_client_id += 1;
+
+                        let connection = Connection {
+                            state: ConnectionState::Active {
+                                last_active: Instant::now(),
+                            },
+                            sock,
+                        };
+
+                        self.connections.insert(client_id, connection);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("new TCP connection {} in active state", client_id);
+                    }
+                    Err(e) => {
+                        if e.kind() != ErrorKind::WouldBlock {
+                            warn!("failed to accept TCP connection: {}", e);
+                        }
+                        // WouldBlock is normal, no work done
+                    }
                 }
             }
+        }
 
-            // check in port
-            //TODO while !inn.is_empty() {
-            loop {
-                if let Ok(ip) = resp.pop() {
-                    //TODO normally the IP should be immutable and forwarded as-is into the component library
-                    // output the packet data with newline
-                    debug!("got a packet, writing into client socket...");
+        // Process existing connections (within remaining budget)
+        let mut connections_to_remove = Vec::new();
 
-                    // send into client socket
-                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    let mut sockets_locked = sockets.lock().expect("lock poisoned");
-                    if let Some(socket_id) = sockets_locked.keys().next().copied() {
-                        let write_res = sockets_locked
-                            .get_mut(&socket_id)
-                            .expect("socket id vanished unexpectedly while writing")
-                            .write_all(&ip);
-                        match write_res {
-                            Ok(_) => {}
-                            Err(err) => {
-                                match err.kind() {
-                                    ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                                        warn!("tcpserver: timed out writing response to client {}, dropping packet", socket_id);
-                                    }
-                                    ErrorKind::BrokenPipe
-                                    | ErrorKind::ConnectionReset
-                                    | ErrorKind::NotConnected => {
-                                        warn!("tcpserver: dropping disconnected client {} after write error: {}", socket_id, err);
-                                        let _ = sockets_locked.remove(&socket_id);
-                                    }
-                                    _ => {
-                                        warn!("tcpserver: write to client {} failed: {}, dropping client", socket_id, err);
-                                        let _ = sockets_locked.remove(&socket_id);
-                                    }
-                                }
+        for (client_id, connection) in self.connections.iter_mut() {
+            if context.remaining_budget == 0 {
+                break; // No more budget
+            }
+
+            // All connections are active, try to read data from this connection
+            let mut buf = [0; READ_BUFFER];
+            match connection.sock.read(&mut buf) {
+                Ok(bytes_read) => {
+                    if bytes_read > 0 {
+                        debug!("got {} bytes from TCP client {}", bytes_read, client_id);
+                        let data = Vec::from(&buf[0..bytes_read]);
+
+                        // Update last active time
+                        let ConnectionState::Active { ref mut last_active } = connection.state;
+                        *last_active = Instant::now();
+
+                        match self.out.push(data) {
+                            Ok(()) => {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                                debug!("sent received data from client {} to output", client_id);
+                            }
+                            Err(PushError::Full(_)) => {
+                                // Output buffer full, drop the data for now
+                                debug!("output buffer full, dropping received data from client {}", client_id);
+                                work_units += 1; // Count as work even if dropped
+                                context.remaining_budget -= 1;
                             }
                         }
                     } else {
-                        debug!("no connected clients, dropping response packet");
+                        // Connection closed by client
+                        debug!("TCP connection {} closed by client", client_id);
+                        connections_to_remove.push(*client_id);
                     }
-                    debug!("done");
-                } else {
-                    break;
+                }
+                Err(e) => {
+                    match e.kind() {
+                        ErrorKind::WouldBlock => {
+                            // No data available, continue to next connection
+                        }
+                        _ => {
+                            warn!("failed to read from TCP client {}: {}", client_id, e);
+                            connections_to_remove.push(*client_id);
+                        }
+                    }
                 }
             }
-
-            // check socket
-            //NOTE: happens in connection handler threads, see above
-
-            trace!("end of iteration");
-            std::thread::park();
-        }
-        shutdown.store(true, Ordering::Relaxed);
-        {
-            let mut sockets_locked = sockets.lock().expect("lock poisoned");
-            for socket in sockets_locked.values_mut() {
-                let _ = socket.shutdown(Shutdown::Both);
-            }
-        }
-        let listen_join_started = Instant::now();
-        while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if listen_thread.is_finished() {
-            if let Err(err) = listen_thread.join() {
-                warn!("failed to join tcp listener thread: {:?}", err);
-            }
-        } else {
-            warn!(
-                "tcpserver: listener thread did not exit within {:?}, handing off to join reaper",
-                LISTENER_JOIN_GRACE
-            );
-            handoff_join(listen_thread, "tcpserver-listener");
         }
 
-        let handles = {
-            let mut handles_guard = connection_threads.lock().expect("lock poisoned");
-            handles_guard.drain(..).collect::<Vec<_>>()
-        };
-        for handle in handles {
-            let conn_join_started = Instant::now();
-            while !handle.is_finished() && conn_join_started.elapsed() < CONNECTION_JOIN_GRACE {
-                thread::sleep(Duration::from_millis(10));
-            }
-            if handle.is_finished() {
-                if let Err(err) = handle.join() {
-                    warn!("failed to join tcp connection handler thread: {:?}", err);
+        // Send responses to connections (within remaining budget)
+        while context.remaining_budget > 0 {
+            if let Ok(response_data) = self.resp.pop() {
+                // For now, send to the first available connection
+                // TODO: Implement proper client targeting based on framing/metadata
+                if let Some((client_id, connection)) = self.connections.iter_mut().find(|(_, conn)| {
+                    let ConnectionState::Active { .. } = &conn.state;
+                    true
+                }) {
+                    match connection.sock.write_all(&response_data) {
+                        Ok(()) => {
+                            debug!("sent response to TCP client {}", client_id);
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+
+                            // Update last active time
+                            let ConnectionState::Active { ref mut last_active } = connection.state;
+                            *last_active = Instant::now();
+                        }
+                        Err(e) => {
+                            match e.kind() {
+                                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                    // Would block, buffer for later retry
+                                    self.pending_responses.insert(*client_id, response_data);
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                    debug!("buffered response for client {} (would block)", client_id);
+                                }
+                                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
+                                    warn!("connection to client {} broken, removing", client_id);
+                                    connections_to_remove.push(*client_id);
+                                }
+                                _ => {
+                                    warn!("failed to write to TCP client {}: {}", client_id, e);
+                                    connections_to_remove.push(*client_id);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    debug!("no active connections, dropping response packet");
+                    // Could buffer responses, but for now we'll drop them
                 }
             } else {
-                warn!(
-                    "tcpserver: connection handler thread did not exit within {:?}, handing off to join reaper",
-                    CONNECTION_JOIN_GRACE
-                );
-                handoff_join(handle, "tcpserver-connection");
+                break; // No more responses
             }
         }
-        info!("exiting");
+
+        // Send any buffered responses (within remaining budget)
+        let mut responses_to_remove = Vec::new();
+        for (client_id, response_data) in &self.pending_responses {
+            if context.remaining_budget == 0 {
+                break;
+            }
+
+            if let Some(connection) = self.connections.get_mut(client_id) {
+                let ConnectionState::Active { .. } = &connection.state;
+                match connection.sock.write_all(response_data) {
+                    Ok(()) => {
+                        debug!("sent buffered response to TCP client {}", client_id);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        responses_to_remove.push(*client_id);
+
+                        // Update last active time
+                        let ConnectionState::Active { ref mut last_active } = connection.state;
+                        *last_active = Instant::now();
+                    }
+                    Err(e) => {
+                        match e.kind() {
+                            ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                // Still would block, leave in buffer
+                            }
+                            _ => {
+                                warn!("failed to write buffered response to TCP client {}: {}", client_id, e);
+                                connections_to_remove.push(*client_id);
+                                responses_to_remove.push(*client_id);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Connection no longer exists, remove buffered response
+                responses_to_remove.push(*client_id);
+            }
+        }
+
+        // Clean up sent responses
+        for client_id in responses_to_remove {
+            self.pending_responses.remove(&client_id);
+        }
+
+        // Clean up closed connections
+        for client_id in connections_to_remove {
+            self.connections.remove(&client_id);
+            self.pending_responses.remove(&client_id);
+            work_units += 1; // Count cleanup as work
+            debug!("cleaned up TCP connection {}", client_id);
+        }
+
+        // Check for abandoned input ports
+        if self.resp.is_abandoned() && self.pending_responses.is_empty() {
+            info!("RESP input abandoned and no pending responses, finishing");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
