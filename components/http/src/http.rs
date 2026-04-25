@@ -78,7 +78,11 @@ enum HttpResponseState {
 #[derive(Debug)]
 #[allow(unused)]
 enum ConnectionState {
-    ReadingRequest { parse_state: HttpParseState, buffer: Vec<u8> },
+    ReadingRequest {
+        parse_state: HttpParseState,
+        buffer: Vec<u8>,
+        request: Option<HttpRequest>,
+    },
     ProcessingRequest { request: HttpRequest, client_id: u32 },
     WritingResponse { request_id: u64, response_state: HttpResponseState, client_id: u32 },
     KeepAlive,
@@ -788,19 +792,16 @@ impl Component for HTTPServerComponent {
             }
         }
 
-        // Accept new connections (within budget)
-        if context.remaining_budget > 0 {
-            if let Some(listener) = &self.listener {
+        // Accept all currently pending connections (within budget)
+        if let Some(listener) = &self.listener {
+            while context.remaining_budget > 0 {
                 match listener.accept() {
                     Ok((sock, addr)) => {
                         debug!("accepted new HTTP connection from {}", addr);
 
-                        // Set up timeouts
-                        let sock = sock;
-                        sock.set_read_timeout(Some(Duration::from_millis(500)))
-                            .expect("failed to set read timeout on client socket");
-                        sock.set_write_timeout(Some(Duration::from_millis(500)))
-                            .expect("failed to set write timeout on client socket");
+                        // Keep client sockets non-blocking so one slow client does not stall others.
+                        sock.set_nonblocking(true)
+                            .expect("failed to set non-blocking on client socket");
 
                         let client_id = self.next_client_id;
                         self.next_client_id += 1;
@@ -809,6 +810,7 @@ impl Component for HTTPServerComponent {
                             state: ConnectionState::ReadingRequest {
                                 parse_state: HttpParseState::RequestLine,
                                 buffer: Vec::new(),
+                                request: None,
                             },
                             last_active: Instant::now(),
                             sock,
@@ -824,7 +826,8 @@ impl Component for HTTPServerComponent {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
                             warn!("failed to accept HTTP connection: {}", e);
                         }
-                        // WouldBlock is normal, no work done
+                        // No more pending accepts at the moment.
+                        break;
                     }
                 }
             }
@@ -840,7 +843,11 @@ impl Component for HTTPServerComponent {
             }
 
             match &mut connection.state {
-                ConnectionState::ReadingRequest { parse_state, buffer: conn_buffer } => {
+                ConnectionState::ReadingRequest {
+                    parse_state,
+                    buffer: conn_buffer,
+                    request: current_request,
+                } => {
                     // Try to read more data from the socket
                     let mut temp_buf = [0; 1024];
                     match connection.sock.read(&mut temp_buf) {
@@ -851,7 +858,6 @@ impl Component for HTTPServerComponent {
 
                                 // Try to parse the HTTP request incrementally
                                 let mut parsing_complete = false;
-                                let mut request = None;
 
                                 while !parsing_complete && context.remaining_budget > 0 {
                                     match parse_state {
@@ -950,7 +956,7 @@ impl Component for HTTPServerComponent {
                                                 };
                                                 conn_buffer.drain(0..line_end + 2);
 
-                                                request = Some(HttpRequest {
+                                                *current_request = Some(HttpRequest {
                                                     method,
                                                     path,
                                                     query_params,
@@ -972,7 +978,7 @@ impl Component for HTTPServerComponent {
                                                     // Empty line - end of headers
                                                     conn_buffer.drain(0..2); // Remove the CRLF
 
-                                                    if let Some(ref mut req) = request {
+                                                    if let Some(ref mut req) = current_request {
                                                         req.headers = headers.clone();
 
                                                         // Check for Transfer-Encoding or Content-Length
@@ -1092,7 +1098,7 @@ impl Component for HTTPServerComponent {
 
                                                 if *received >= *content_length {
                                                     // Body complete
-                                                    if let Some(ref mut req) = request {
+                                                    if let Some(ref mut req) = current_request {
                                                         req.body = body_buffer.clone();
                                                     }
                                                     parsing_complete = true;
@@ -1190,7 +1196,7 @@ impl Component for HTTPServerComponent {
 
                                         HttpParseState::Trailers { headers: _, chunks } => {
                                             // Combine chunks into body and complete parsing
-                                            if let Some(ref mut req) = request {
+                                            if let Some(ref mut req) = current_request {
                                                 let mut body = Vec::new();
                                                 for chunk in chunks {
                                                     body.extend_from_slice(chunk);
@@ -1215,7 +1221,7 @@ impl Component for HTTPServerComponent {
                                         });
 
                                         if !parse_error_queued {
-                                            if let Some(req) = request {
+                                            if let Some(req) = current_request.take() {
                                                 let new_state = ConnectionState::ProcessingRequest {
                                                     request: req.clone(),
                                                     client_id: *client_id,
@@ -1231,6 +1237,7 @@ impl Component for HTTPServerComponent {
                                                 debug!("parsed complete HTTP request from client {}", client_id);
                                             }
                                         } else {
+                                            *current_request = None;
                                             debug!(
                                                 "HTTP parse error for client {}, request will not be forwarded",
                                                 client_id
@@ -1330,6 +1337,7 @@ impl Component for HTTPServerComponent {
                         let new_state = ConnectionState::ReadingRequest {
                             parse_state: HttpParseState::RequestLine,
                             buffer: Vec::new(),
+                            request: None,
                         };
                         state_changes.push((*client_id, new_state));
                         work_units += 1;
@@ -1464,7 +1472,7 @@ impl Component for HTTPServerComponent {
         }
 
         // Read responses from FBP network
-        if context.remaining_budget > 0 {
+        while context.remaining_budget > 0 {
             if let Ok(response_body) = self.resp.pop() {
                 if let Some(request_id) = self.response_wait_queue.pop_front() {
                     let response = HttpResponse {
@@ -1479,7 +1487,10 @@ impl Component for HTTPServerComponent {
                     debug!("received response from FBP network for request {}", request_id);
                 } else {
                     warn!("received response from FBP network but no request is waiting for a response");
+                    break;
                 }
+            } else {
+                break;
             }
         }
 

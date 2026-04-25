@@ -602,6 +602,44 @@ mod http_tests {
             );
         }
     }
+
+    fn read_http_response(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+        let mut response = Vec::new();
+        let mut buffer = [0; 1024];
+
+        loop {
+            let bytes_read = stream.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            response.extend_from_slice(&buffer[..bytes_read]);
+
+            if let Some(header_end) = response.windows(4).position(|w| w == b"\r\n\r\n") {
+                let body_start = header_end + 4;
+                let headers_text = String::from_utf8_lossy(&response[..header_end]).to_lowercase();
+
+                if let Some(cl_line) = headers_text
+                    .lines()
+                    .find(|line| line.starts_with("content-length:"))
+                {
+                    if let Some(value) = cl_line.split(':').nth(1) {
+                        if let Ok(content_length) = value.trim().parse::<usize>() {
+                            if response.len() >= body_start + content_length {
+                                break;
+                            }
+                            continue;
+                        }
+                    }
+                }
+
+                // If Content-Length is absent, headers-only is enough for these tests.
+                break;
+            }
+        }
+
+        Ok(response)
+    }
+
     #[test]
     fn test_http_client_basic_get_request() {
         let Some(mut harness) = maybe_http_client_harness() else { return; };
@@ -813,6 +851,74 @@ mod http_tests {
             }
         }
         assert!(responses_received >= 1, "At least one response should be received");
+    }
+
+    #[test]
+    fn test_http_server_idle_client_does_not_block_other_clients() {
+        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        if !try_start_http_server(&mut harness, "/fast") {
+            return;
+        }
+
+        let port = harness.server_port();
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+
+        // Connect an idle client and keep it open without sending a request.
+        let _idle_client = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+            .expect("failed to connect idle client");
+
+        // Connect an active client and send a request.
+        let mut active_client = TcpStream::connect_timeout(&addr, Duration::from_secs(1))
+            .expect("failed to connect active client");
+        active_client
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("failed to set active client read timeout");
+        active_client
+            .set_write_timeout(Some(Duration::from_secs(1)))
+            .expect("failed to set active client write timeout");
+        active_client
+            .write_all(b"GET /fast HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .expect("failed to write active client request");
+
+        // The active request should still be observed quickly despite the idle client.
+        let started = Instant::now();
+        let mut observed = Vec::new();
+        while started.elapsed() < Duration::from_millis(300) {
+            match harness.process() {
+                ProcessResult::DidWork(_) => {}
+                ProcessResult::NoWork => thread::sleep(Duration::from_millis(5)),
+                ProcessResult::Finished => break,
+            }
+            observed.extend(harness.collect_requests());
+            if !observed.is_empty() {
+                break;
+            }
+        }
+
+        assert!(
+            !observed.is_empty(),
+            "active client request was delayed by idle client (elapsed: {:?})",
+            started.elapsed()
+        );
+        assert_payload_has(&observed[0], &["METHOD=GET", "PATH=/fast"]);
+
+        // Respond and verify the client receives data.
+        harness.send_response(b"fast-ok").unwrap();
+        harness.process_cycles(20);
+
+        let mut response = Vec::new();
+        let mut buffer = [0; 1024];
+        while let Ok(bytes_read) = active_client.read(&mut buffer) {
+            if bytes_read == 0 {
+                break;
+            }
+            response.extend_from_slice(&buffer[..bytes_read]);
+            if response.windows(4).any(|w| w == b"\r\n\r\n") && response.ends_with(b"fast-ok") {
+                break;
+            }
+        }
+        let response_text = String::from_utf8_lossy(&response);
+        assert!(response_text.contains("fast-ok"), "unexpected response: {}", response_text);
     }
 
     #[test]
@@ -1207,36 +1313,26 @@ mod http_tests {
                     // First request
                     let request1 = b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n";
                     let _ = stream.write_all(request1);
-
-                    let mut response1 = Vec::new();
-                    let mut buffer = [0; 1024];
-                    while let Ok(bytes_read) = stream.read(&mut buffer) {
-                        if bytes_read == 0 {
-                            break;
+                    let response1 = match read_http_response(&mut stream) {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e.to_string()));
+                            return;
                         }
-                        response1.extend_from_slice(&buffer[..bytes_read]);
-                        if response1.windows(4).any(|w| w == b"\r\n\r\n") {
-                            // Read a bit more to get the body
-                            thread::sleep(Duration::from_millis(10));
-                            if let Ok(extra_bytes) = stream.read(&mut buffer) {
-                                response1.extend_from_slice(&buffer[..extra_bytes]);
-                            }
-                            break;
-                        }
-                    }
+                    };
                     responses.push(String::from_utf8_lossy(&response1).to_string());
 
                     // Second request on same connection
                     let request2 = b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
                     let _ = stream.write_all(request2);
 
-                    let mut response2 = Vec::new();
-                    while let Ok(bytes_read) = stream.read(&mut buffer) {
-                        if bytes_read == 0 {
-                            break;
+                    let response2 = match read_http_response(&mut stream) {
+                        Ok(resp) => resp,
+                        Err(e) => {
+                            let _ = response_tx.send(Err(e.to_string()));
+                            return;
                         }
-                        response2.extend_from_slice(&buffer[..bytes_read]);
-                    }
+                    };
                     responses.push(String::from_utf8_lossy(&response2).to_string());
 
                     let _ = response_tx.send(Ok(responses));
