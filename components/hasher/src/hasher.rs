@@ -119,7 +119,7 @@ impl Component for HasherComponent {
         ComponentComponentPayload {
             name: String::from("Hasher"),
             description: String::from(
-                "Hashes each IP from IN port, sendig the hash value to the OUT port.",
+                "Hashes each IP from IN port, sending the hash value to the OUT port.",
             ),
             icon: String::from("check"),
             subgraph: false,
