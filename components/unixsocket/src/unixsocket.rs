@@ -1,28 +1,13 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-/*
-use std::os::unix::net::UnixDatagram;
-use std::os::unix::net::UnixStream;
-use std::io::prelude::*;
-use std::str::FromStr;
-use std::os::unix::net::SocketAddr;
-use std::os::linux::net::SocketAddrExt;
-use std::io::ErrorKind;
-use std::io::BufReader;
-use uds::{UnixSeqpacketConn, UnixDatagramExt, UnixListenerExt, UnixStreamExt};
-*/
-use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
-use std::net::Shutdown;
-use std::thread::{self};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use uds::UnixSocketAddr;
 
 pub struct UnixSocketClientComponent {
@@ -32,18 +17,16 @@ pub struct UnixSocketClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Runtime state for cooperative unix socket client
+    socket_address: Option<UnixSocketAddr>,
+    socket_type: Option<SocketType>,
+    client_seqpacket: Option<uds::UnixSeqpacketConn>,
+    read_timeout: Duration,
+    read_buffer: [u8; DEFAULT_READ_BUFFER_SIZE],
 }
 
-fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    thread::Builder::new()
-        .name(format!("unixsocket-join-{}", label))
-        .spawn(move || {
-            if let Err(err) = handle.join() {
-                warn!("{}: deferred thread join returned error: {:?}", label, err);
-            }
-        })
-        .expect("failed to spawn unixsocket deferred join thread");
-}
+
 
 /*
 Situation 2024-04:
@@ -70,9 +53,7 @@ enum SocketType {
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
 const DEFAULT_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
-const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
-const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
-const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
+
 
 impl Component for UnixSocketClientComponent {
     fn new(
@@ -104,269 +85,220 @@ impl Component for UnixSocketClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            socket_address: None,
+            socket_type: None,
+            client_seqpacket: None,
+            read_timeout: DEFAULT_READ_TIMEOUT,
+            read_buffer: [0u8; DEFAULT_READ_BUFFER_SIZE],
         }
     }
 
-    fn run(self) {
-        debug!("UnixSocketClient is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("UnixSocketClient is now process()ing!");
+        let mut work_units = 0u32;
 
-        // read configuration
-        trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
+        // Initialize connection if not already done
+        if self.socket_address.is_none() {
+            // Try to read configuration
+            if let Ok(url_vec) = self.conf.pop() {
+                // Parse configuration URL
+                let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                let url = url::Url::parse(&url_str).expect("failed to parse URL");
 
-        // prepare connection arguments
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        //let mut query_pairs = url.query_pairs();
-        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
-        // get abstract y/n
-        let address_is_abstract: bool;
-        if url.has_host() {
-            address_is_abstract = true;
-        } else if url.path().len() > 0 {
-            address_is_abstract = false;
-        } else {
-            panic!("failed to determine if socket address is abstract or path-based");
-        };
-        debug!("got abstract socket address: {}", address_is_abstract);
-        // get address from URL
-        let address_str;
-        if address_is_abstract {
-            // get abstract socket address from URL host
-            address_str = url
-                .host_str()
-                .expect("failed to get abstract socket address from URL host");
-        } else {
-            // get path-based socket address from URL path
-            address_str = url.path();
-            if address_str.is_empty() || address_str == "/" {
-                error!("no socket address given in config URL path, exiting");
-                return;
-            }
-        }
-        debug!("got socket address: {}", &address_str);
-        // get buffer size from URL
-        //TODO implement - currently variables are not used
-        let _read_buffer_size;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rbuffer") {
-            _read_buffer_size = value
-                .to_string()
-                .parse::<usize>()
-                .expect("failed to parse query pair value for read buffer as integer");
-        } else {
-            _read_buffer_size = DEFAULT_READ_BUFFER_SIZE;
-        }
-        // get read timeout from URL
-        //TODO differentiate internal read timeout and read timeout when connection has to be reconnected
-        let read_timeout: Duration;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rtimeout") {
-            read_timeout = Duration::from_millis(
-                value
-                    .to_string()
-                    .parse::<u64>()
-                    .expect("failed to parse query pair value for read timeout as integer"),
-            );
-        } else {
-            read_timeout = DEFAULT_READ_TIMEOUT;
-        }
-        // get socket type from URL
-        let socket_type: SocketType;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "socket_type") {
-            socket_type = match value.to_string().as_str() {
-                "seqpacket" => SocketType::SeqPacket,
-                "stream" => SocketType::Stream,
-                "dgram" | "datagram" => SocketType::Datagram,
-                _ => {
-                    panic!("failed to parse query pair value for key socket_type into dgram|datagram|stream|seqpacket");
-                }
-            };
-        } else {
-            // NOTE: not setting a default type, because this may produce "unable to connect" errors because of unexpected socket type (and the default might change in the future)
-            error!("failed to get socket type from config URL, missing query key socket_type");
-            return;
-        }
-
-        // configure
-
-        // prepare socket address
-        let socket_address;
-        if address_is_abstract {
-            // std variant
-            //socket_address = SocketAddr::from_abstract_name(address_str).expect("failed to parse abstract socket address into SocketAddr");
-            // uds variant
-            socket_address = UnixSocketAddr::from_abstract(address_str)
-                .expect("failed to parse abstract socket address into UnixSocketAddr");
-        } else {
-            // std variant
-            //socket_address = SocketAddr::from_pathname(address_str).expect("failed to parse path-based socket address into SocketAddr");
-            // uds variant
-            socket_address = UnixSocketAddr::from_path(address_str)
-                .expect("failed to parse path-based socket address into UnixSocketAddr");
-        };
-
-        // prepare socket client
-        //TODO implement - support stream and datagram sockets
-        let client_seqpacket;
-        //let client_stream;
-        //let client_dgram;
-        match socket_type {
-            SocketType::SeqPacket => {
-                client_seqpacket = uds::UnixSeqpacketConn::connect_unix_addr(&socket_address)
-                    .expect("failed to connect");
-            }
-            SocketType::Stream => {
-                unimplemented!();
-            } //client_stream = UnixStream::connect_addr(&socket_address).expect("failed to connect"); },
-            SocketType::Datagram => {
-                unimplemented!();
-            } //client_dgram = UnixDatagram::connect_addr(&socket_address).expect("failed to bind"); },
-        };
-
-        // prepare buffered reader
-        // NOTE: this is needed because POSIX does not have a function to give the available bytes, therefore must read 2x at least. I would prefer 1 call for number of bytes and 2nd call to all available bytes in one exactly-fitting buffer.
-        //let bufreader = BufReader::with_capacity(DEFAULT_READ_BUFFER_SIZE, &client_seqpacket);
-        let mut buf = [0u8; DEFAULT_READ_BUFFER_SIZE];
-
-        // set read timeout to avoid blocking forever and watchdog thread marking the process as non-responding
-        client_seqpacket
-            .set_read_timeout(Some(read_timeout))
-            .expect("failed to set socket read timeout");
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                // Determine if address is abstract or path-based
+                let address_is_abstract = url.has_host();
+                let address_str = if address_is_abstract {
+                    url.host_str().expect("failed to get abstract socket address from URL host")
                 } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
+                    let path = url.path();
+                    if path.is_empty() || path == "/" {
+                        error!("no socket address given in config URL path");
+                        return ProcessResult::NoWork;
+                    }
+                    path
+                };
 
-            // check in port
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                //_ = inn.pop().ok();
-                //debug!("got a packet, dropping it.");
-
-                debug!("got {} packets, sending into socket...", inn.slots());
-                let chunk = inn
-                    .read_chunk(inn.slots())
-                    .expect("receive as chunk failed");
-
-                for ip in chunk.into_iter() {
-                    match client_seqpacket.send(ip.as_ref()) {
-                        Ok(_) => {}
-                        Err(err) => {
-                            //TODO handle disconnection and reconnection here
-                            //TODO automatic reconnection - reconnect timeout of 30s, then error out.
-                            //TODO which io error is returned for "connection closed because server going offline"?
-                            //TODO which io error is returned for "server unreachable"?
-                            error!("{:?}: {}", err.kind(), err);
-                            /*
-                            match err.kind() {
-                                ErrorKind::AddrInUse
-                                EndOfFile => break,
-                                SomeOtherError => do_something(),
-                                _ => panic!("Can't read from file: {}, err {}", filename, e),
-                            };
-                            */
+                // Parse socket type from URL
+                let socket_type = if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "socket_type") {
+                    match value.to_string().as_str() {
+                        "seqpacket" => SocketType::SeqPacket,
+                        "stream" => SocketType::Stream,
+                        "dgram" | "datagram" => SocketType::Datagram,
+                        _ => {
+                            error!("invalid socket type in config URL");
+                            return ProcessResult::NoWork;
                         }
                     }
+                } else {
+                    error!("missing socket_type in config URL");
+                    return ProcessResult::NoWork;
+                };
 
-                    //TODO stream
-                    /*
-                    let mut stream = UnixStream::connect("/path/to/my/socket")?;
-                    stream.write_all(b"hello world")?;
-                    let mut response = String::new();
-                    stream.read_to_string(&mut response)?;
-                    println!("{response}");
-                    */
+                // Create socket address
+                let socket_address = if address_is_abstract {
+                    UnixSocketAddr::from_abstract(address_str).expect("failed to parse abstract socket address")
+                } else {
+                    UnixSocketAddr::from_path(address_str).expect("failed to parse path socket address")
+                };
+
+                // Store configuration
+                self.socket_address = Some(socket_address);
+                self.socket_type = Some(socket_type);
+
+                // Parse read timeout
+                if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "rtimeout") {
+                    if let Ok(timeout_ms) = value.to_string().parse::<u64>() {
+                        self.read_timeout = Duration::from_millis(timeout_ms);
+                    }
+                }
+
+                debug!("configured unix socket client for address: {}", address_str);
+                work_units += 1;
+            } else {
+                trace!("waiting for configuration");
+                return ProcessResult::NoWork;
+            }
+        }
+
+        // Connect if not already connected
+        if self.client_seqpacket.is_none() && self.socket_address.is_some() {
+            if let (Some(socket_address), Some(socket_type)) = (&self.socket_address, &self.socket_type) {
+                match socket_type {
+                    SocketType::SeqPacket => {
+                        match uds::UnixSeqpacketConn::connect_unix_addr(socket_address) {
+                            Ok(conn) => {
+                                if let Err(e) = conn.set_read_timeout(Some(self.read_timeout)) {
+                                    error!("failed to set read timeout: {}", e);
+                                    return ProcessResult::NoWork;
+                                }
+                                self.client_seqpacket = Some(conn);
+                                debug!("connected to unix socket server");
+                                work_units += 1;
+                            }
+                            Err(e) => {
+                                error!("failed to connect to unix socket: {}", e);
+                                return ProcessResult::NoWork;
+                            }
+                        }
+                    }
+                    SocketType::Stream => {
+                        error!("stream sockets not yet implemented");
+                        return ProcessResult::NoWork;
+                    }
+                    SocketType::Datagram => {
+                        error!("datagram sockets not yet implemented");
+                        return ProcessResult::NoWork;
+                    }
                 }
             }
+        }
 
-            // receive
-            //TODO optimize - better to send or receive first? and send|receive first on FBP or on socket?
-            //let mut ip_out = Vec::with_capacity(DEFAULT_READ_BUFFER_SIZE);
-            //TODO handle case of message longer than read buffer using while loop; how to detect continuing seqpacket?
-            match client_seqpacket.recv(&mut buf) {
-                Ok(bytes_in) => {
-                    debug!("got packet with {} bytes, repeating...", bytes_in);
-                    debug!("repeating packet...");
-                    out.push(Vec::from(&buf[0..bytes_in]))
-                        .expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                }
-                Err(err) => {
-                    //TODO handle disconnection and reconnection here
-                    //TODO automatic reconnection - reconnect timeout of 30s, then error out.
-                    //TODO which io error is returned for "connection closed because server going offline"?
-                    //TODO which io error is returned for "server unreachable"?
-                    error!("{:?}: {}", err.kind(), err);
-                    /*
-                    match err.kind() {
-                        ErrorKind::AddrInUse
-                        EndOfFile => break,
-                        SomeOtherError => do_something(),
-                        _ => panic!("Can't read from file: {}, err {}", filename, e),
-                    };
-                    */
-                }
-            };
+        // Check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            }
+        }
 
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                //TODO close socket
-                drop(out);
-                out_wakeup.unpark();
+        // Send data within budget
+        while context.remaining_budget > 0 {
+            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
+                if chunk.is_empty() {
+                    break; // No more data
+                }
+
+                debug!("got {} packets, sending into socket...", chunk.len());
+
+                for ip in chunk.into_iter() {
+                    if let Some(conn) = &mut self.client_seqpacket {
+                        match conn.send(ip.as_ref()) {
+                            Ok(_) => {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                                debug!("sent data to unix socket server");
+                            }
+                            Err(err) => {
+                                error!("failed to send to unix socket: {:?}", err);
+                                // Connection error, clear connection to force reconnection
+                                self.client_seqpacket = None;
+                                break;
+                            }
+                        }
+                    } else {
+                        // No connection, can't send
+                        break;
+                    }
+                }
+            } else {
+                break; // No more data
+            }
+        }
+
+        // Receive data within remaining budget
+        while context.remaining_budget > 0 {
+            if let Some(conn) = &mut self.client_seqpacket {
+                match conn.recv(&mut self.read_buffer) {
+                    Ok(bytes_in) => {
+                        if bytes_in > 0 {
+                            debug!("got packet with {} bytes from unix socket server", bytes_in);
+                            let data = Vec::from(&self.read_buffer[0..bytes_in]);
+                            match self.out.push(data) {
+                                Ok(()) => {
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                    debug!("sent received data to output");
+                                }
+                                Err(_) => {
+                                    // Output buffer full, drop data
+                                    debug!("output buffer full, dropping received data");
+                                    work_units += 1; // Count as work even if dropped
+                                    context.remaining_budget -= 1;
+                                }
+                            }
+                        } else {
+                            // Connection closed by server
+                            debug!("unix socket connection closed by server");
+                            self.client_seqpacket = None;
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        if err.kind() == ErrorKind::WouldBlock {
+                            // No data available
+                            break;
+                        } else {
+                            error!("failed to read from unix socket: {:?}", err);
+                            self.client_seqpacket = None;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // No connection, can't receive
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned (EOF)
+        if self.inn.is_abandoned() {
+            info!("EOF on inport IN, finishing");
+            return ProcessResult::Finished;
+        }
+
+        // Return appropriate result based on work done
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -422,6 +354,13 @@ pub struct UnixSocketServerComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Runtime state for cooperative unix socket server
+    listen_path: Option<String>,
+    listener: Option<std::os::unix::net::UnixListener>,
+    connections: std::collections::HashMap<u32, std::os::unix::net::UnixStream>,
+    next_client_id: u32,
+    read_buffer: [u8; DEFAULT_READ_BUFFER_SIZE],
 }
 
 impl Component for UnixSocketServerComponent {
@@ -454,261 +393,187 @@ impl Component for UnixSocketServerComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            listen_path: None,
+            listener: None,
+            connections: std::collections::HashMap::new(),
+            next_client_id: 0,
+            read_buffer: [0u8; DEFAULT_READ_BUFFER_SIZE],
         }
     }
 
-    fn run(mut self) {
-        debug!("UnixSocketServer is now run()ning!");
-        let mut conf = self.conf;
-        trace!("spinning for configuration IP...");
-        loop {
-            if !conf.is_empty() {
-                break;
-            }
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                if ip == b"stop" {
-                    info!("got stop signal while waiting for CONF, exiting");
-                    return;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            thread::yield_now();
-        }
-        //TODO optimize string conversions to listen on a path
-        let config = conf.pop().expect("not empty but still got an error on pop");
-        let listenpath = std::str::from_utf8(&config).expect("could not parse listenpath as utf8");
-        trace!("got path {}", listenpath);
-        std::fs::remove_file(&listenpath).ok();
-        let listener = std::os::unix::net::UnixListener::bind(std::path::Path::new(listenpath))
-            .expect("bind unix listener socket");
-        listener
-            .set_nonblocking(true)
-            .expect("set listen socket to non-blocking");
-        let resp = &mut self.resp;
-        let out = Arc::new(Mutex::new(self.out.sink));
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        let shutdown = Arc::new(AtomicBool::new(false));
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("UnixSocketServer is now process()ing!");
+        let mut work_units = 0u32;
 
-        let sockets: Arc<Mutex<HashMap<u32, std::os::unix::net::UnixStream>>> =
-            Arc::new(Mutex::new(HashMap::new()));
-        let sockets_ref = Arc::clone(&sockets);
-        let out_ref = Arc::clone(&out);
-        let out_wakeup_ref = out_wakeup.clone();
-        let shutdown_listen = shutdown.clone();
-        let connection_threads: Arc<Mutex<Vec<thread::JoinHandle<()>>>> =
-            Arc::new(Mutex::new(Vec::new()));
-        let connection_threads_ref = connection_threads.clone();
-        let listen_thread = thread::Builder::new().name(format!("{}_handler", thread::current().name().expect("could not get component thread name"))).spawn(move || {   //TODO optimize better way to get the current thread's name as String?
-            let mut socketnum: u32 = 0;
-            loop {
-                if shutdown_listen.load(Ordering::Relaxed) {
-                    debug!("listener got shutdown signal, exiting");
-                    break;
-                }
-                debug!("listening for a client");
-                match listener.accept() {
-                    Ok((mut socket, addr)) => {
-                        println!("handling client: {addr:?}");
-                        socketnum += 1;
-                        socket.set_read_timeout(Some(DEFAULT_READ_TIMEOUT)).expect("failed to set read timeout on unix socket");
-                        socket.set_write_timeout(DEFAULT_WRITE_TIMEOUT).expect("failed to set write timeout on unix socket");
-                        sockets_ref.as_ref().lock().expect("lock poisoned").insert(socketnum, socket.try_clone().expect("cloud not clone socket"));
-                        let sockets_ref2 = Arc::clone(&sockets_ref);
-                        let out_ref2 = Arc::clone(&out_ref);
-                        let out_wakeup_ref2 = out_wakeup_ref.clone();
-                        let shutdown_conn = shutdown_listen.clone();
-                        let connection_thread = thread::Builder::new().name(format!("{}_{}", thread::current().name().expect("could not get component thread name"), socketnum)).spawn(move || {
-                            let socketnum_inner = socketnum;
-                            // receive loop and send to component OUT tagged with socketnum
-                            debug!("handling client connection");
-                            loop {
-                                if shutdown_conn.load(Ordering::Relaxed) {
-                                    debug!("connection handler got shutdown signal, exiting");
-                                    break;
-                                }
-                                trace!("reading from client");
-                                let mut buf = vec![0; 1024];   //TODO optimize with_capacity(1024);
-                                match socket.read(&mut buf) {
-                                    Ok(bytes) => {
-                                        if bytes == 0 {
-                                            // correctly closed (or given buffer had size 0)
-                                            debug!("connection closed ok, exiting connection handler");
-                                            break;
-                                        }
-                                        debug!("got data from client, pushing data to OUT");
-                                        buf.truncate(bytes);    // otherwise we always hand over the full size of the buffer with many nul bytes
-                                        out_ref2.lock().expect("lock poisoned").push(buf).expect("cloud not push IP into FBP network");   //TODO optimize really consume here? well, it makes sense since we are not responsible and never will be again for this IP; it is really handed over to the next process
-                                        trace!("unparking OUT thread");
-                                        out_wakeup_ref2.unpark();
-                                    }
-                                    Err(err) => {
-                                        if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
-                                            continue;
-                                        }
-                                        debug!("connection non-ok result, exiting connection handler");
-                                        break;
-                                    }
-                                }
-                                trace!("-- end of iteration")
-                            }
-                            // when socket closed, remove myself from list of known/open sockets resp. socket handlers
-                            let _ = sockets_ref2.lock().expect("lock poisoned").remove(&socketnum_inner);
-                            debug!("connections left: {}", sockets_ref2.lock().expect("lock poisoned").len());
-                        }).expect("could not start connection handler thread");
-                        connection_threads_ref.lock().expect("lock poisoned").push(connection_thread);
-                    },
-                    Err(e) => {
-                        if e.kind() == ErrorKind::WouldBlock {
-                            thread::sleep(LISTENER_POLL_SLEEP);
-                            continue;
+        // Initialize listener if not already done
+        if self.listener.is_none() {
+            // Try to read configuration
+            if let Ok(config_bytes) = self.conf.pop() {
+                let listen_path = std::str::from_utf8(&config_bytes)
+                    .expect("could not parse listen path as utf8")
+                    .to_owned();
+
+                // Remove existing socket file if it exists
+                std::fs::remove_file(&listen_path).ok();
+
+                // Create listener
+                match std::os::unix::net::UnixListener::bind(std::path::Path::new(&listen_path)) {
+                    Ok(listener) => {
+                        if let Err(e) = listener.set_nonblocking(true) {
+                            error!("failed to set listener to non-blocking: {}", e);
+                            return ProcessResult::NoWork;
                         }
-                        error!("accept failed: {e:?} - exiting");
-                        break;
-                    },
-                }
-            }
-        }).expect("could not start listener thread");
-        debug!("entering main loop");
-
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-
-            // check in port
-            //TODO while !inn.is_empty() {
-            loop {
-                if let Ok(ip) = resp.pop() {
-                    //TODO normally the IP should be immutable and forwarded as-is into the component library
-                    // output the packet data with newline
-                    debug!("got a packet, writing into unix socket...");
-
-                    // send into unix socket to peer
-                    //TODO add support for multiple client connections - TODO need way to hand over metadata -> IP framing
-                    let mut sockets_locked = sockets.lock().expect("lock poisoned");
-                    if let Some(socket_id) = sockets_locked.keys().next().copied() {
-                        let write_res = sockets_locked
-                            .get_mut(&socket_id)
-                            .expect("socket id vanished unexpectedly while writing")
-                            .write_all(&ip);
-                        match write_res {
-                            Ok(_) => {}
-                            Err(err) => match err.kind() {
-                                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                                    warn!("unixsocketserver: timed out writing response to client {}, dropping packet", socket_id);
-                                }
-                                ErrorKind::BrokenPipe
-                                | ErrorKind::ConnectionReset
-                                | ErrorKind::NotConnected => {
-                                    warn!("unixsocketserver: dropping disconnected client {} after write error: {}", socket_id, err);
-                                    let _ = sockets_locked.remove(&socket_id);
-                                }
-                                _ => {
-                                    warn!("unixsocketserver: write to client {} failed: {}, dropping client", socket_id, err);
-                                    let _ = sockets_locked.remove(&socket_id);
-                                }
-                            },
-                        }
-                    } else {
-                        debug!("no connected clients, dropping response packet");
+                        self.listener = Some(listener);
+                        self.listen_path = Some(listen_path.clone());
+                        debug!("unix socket server listening on {}", listen_path);
+                        work_units += 1;
                     }
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-
-            // check socket
-            //NOTE: happens in connection handler threads, see above
-
-            trace!("end of iteration");
-            std::thread::park();
-        }
-        shutdown.store(true, Ordering::Relaxed);
-        {
-            let mut sockets_locked = sockets.lock().expect("lock poisoned");
-            for socket in sockets_locked.values_mut() {
-                let _ = socket.shutdown(Shutdown::Both);
-            }
-        }
-        let listen_join_started = Instant::now();
-        while !listen_thread.is_finished() && listen_join_started.elapsed() < LISTENER_JOIN_GRACE {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if listen_thread.is_finished() {
-            if let Err(err) = listen_thread.join() {
-                warn!("failed to join unixsocket listener thread: {:?}", err);
-            }
-        } else {
-            warn!(
-                "unixsocketserver: listener thread did not exit within {:?}, handing off to join reaper",
-                LISTENER_JOIN_GRACE
-            );
-            handoff_join(listen_thread, "unixsocketserver-listener");
-        }
-
-        let handles = {
-            let mut handles_guard = connection_threads.lock().expect("lock poisoned");
-            handles_guard.drain(..).collect::<Vec<_>>()
-        };
-        for handle in handles {
-            let conn_join_started = Instant::now();
-            while !handle.is_finished() && conn_join_started.elapsed() < CONNECTION_JOIN_GRACE {
-                thread::sleep(Duration::from_millis(10));
-            }
-            if handle.is_finished() {
-                if let Err(err) = handle.join() {
-                    warn!(
-                        "failed to join unixsocket connection handler thread: {:?}",
-                        err
-                    );
+                    Err(e) => {
+                        error!("failed to bind unix listener socket: {}", e);
+                        return ProcessResult::NoWork;
+                    }
                 }
             } else {
-                warn!(
-                    "unixsocketserver: connection handler thread did not exit within {:?}, handing off to join reaper",
-                    CONNECTION_JOIN_GRACE
-                );
-                handoff_join(handle, "unixsocketserver-connection");
+                trace!("waiting for configuration");
+                return ProcessResult::NoWork;
             }
         }
-        debug!("cleaning up");
-        std::fs::remove_file(listenpath).ok();
-        info!("exiting");
+
+        // Check signals
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            }
+        }
+
+        // Accept new connections within budget
+        if context.remaining_budget > 0 {
+            if let Some(listener) = &self.listener {
+                match listener.accept() {
+                    Ok((socket, addr)) => {
+                        debug!("accepted new unix socket connection from {:?}", addr);
+
+                        // Set timeouts on the socket
+                        if let Err(e) = socket.set_read_timeout(Some(DEFAULT_READ_TIMEOUT)) {
+                            error!("failed to set read timeout on client socket: {}", e);
+                            return ProcessResult::NoWork;
+                        }
+                        if let Err(e) = socket.set_write_timeout(DEFAULT_WRITE_TIMEOUT) {
+                            error!("failed to set write timeout on client socket: {}", e);
+                            return ProcessResult::NoWork;
+                        }
+
+                        let client_id = self.next_client_id;
+                        self.next_client_id += 1;
+                        self.connections.insert(client_id, socket);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("new unix socket connection {} established", client_id);
+                    }
+                    Err(e) => {
+                        if e.kind() != ErrorKind::WouldBlock {
+                            error!("failed to accept unix socket connection: {}", e);
+                        }
+                        // WouldBlock is normal, no work done
+                    }
+                }
+            }
+        }
+
+        // Process existing connections within remaining budget
+        let mut connections_to_remove = Vec::new();
+
+        for (client_id, socket) in self.connections.iter_mut() {
+            if context.remaining_budget == 0 {
+                break; // No more budget
+            }
+
+            // Read data from client
+            match socket.read(&mut self.read_buffer) {
+                Ok(bytes_in) => {
+                    if bytes_in > 0 {
+                        debug!("got {} bytes from unix socket client {}", bytes_in, client_id);
+                        let data = Vec::from(&self.read_buffer[0..bytes_in]);
+                        match self.out.push(data) {
+                            Ok(()) => {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                                debug!("sent received data to output");
+                            }
+                            Err(_) => {
+                                // Output buffer full, drop data
+                                debug!("output buffer full, dropping received data from client {}", client_id);
+                                work_units += 1; // Count as work even if dropped
+                                context.remaining_budget -= 1;
+                            }
+                        }
+                    } else {
+                        // Connection closed by client
+                        debug!("unix socket connection closed by client {}", client_id);
+                        connections_to_remove.push(*client_id);
+                    }
+                }
+                Err(err) => {
+                    if err.kind() == ErrorKind::WouldBlock {
+                        // No data available, continue to next connection
+                        continue;
+                    } else {
+                        error!("failed to read from unix socket client {}: {}", client_id, err);
+                        connections_to_remove.push(*client_id);
+                    }
+                }
+            }
+        }
+
+        // Send responses within remaining budget
+        if context.remaining_budget > 0 {
+            if let Ok(response_data) = self.resp.pop() {
+                debug!("got response packet, writing to unix socket...");
+
+                // Send to first available connection
+                if let Some((client_id, socket)) = self.connections.iter_mut().next() {
+                    match socket.write_all(&response_data) {
+                        Ok(_) => {
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                            debug!("sent response to unix socket client {}", client_id);
+                        }
+                        Err(err) => {
+                            if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
+                                warn!("timed out writing response to client {}, dropping packet", client_id);
+                            } else {
+                                warn!("failed to write response to client {}: {}, dropping client", client_id, err);
+                                connections_to_remove.push(*client_id);
+                            }
+                        }
+                    }
+                } else {
+                    debug!("no connected clients, dropping response packet");
+                }
+            }
+        }
+
+        // Clean up closed connections
+        for client_id in connections_to_remove {
+            self.connections.remove(&client_id);
+            work_units += 1; // Count cleanup as work
+            debug!("cleaned up unix socket connection {}", client_id);
+        }
+
+        // Return appropriate result based on work done
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
