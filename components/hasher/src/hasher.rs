@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace};
 
@@ -44,72 +45,71 @@ impl Component for HasherComponent {
         }
     }
 
-    fn run(self) {
-        debug!("Hasher is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Hasher is now process()ing!");
+        let mut work_units = 0u32;
+
         //TODO support for multiple hashing algorithms, needs OPTS inport
         //  fnv = good for small inputs (a few bytes) otherwise xx is better for large inputs, siphash (default Rust) is mediocrebust stable overall
         //  comparison:  https://cglab.ca/~abeinges/blah/hash-rs/ resp. https://github.com/Gankra/hash-rs
         //TODO support for output format selection (hex or binary or decimal)
         let hasher_factory: RandomXxHashBuilder64 = Default::default();
         let mut hasher = hasher_factory.build_hasher();
-        loop {
-            trace!("begin of iteration");
 
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            // stop signal
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
             }
+        }
 
-            // check in port
-            //TODO support for brackets option
-            loop {
-                //TODO optimize, as to unpark only once
-                if let Ok(ip) = inn.pop() {
-                    debug!("hashing packet...");
-                    hasher.write(&ip);
-                    let _ = hasher.finish();
-                    let outip = format!("{:016x}", hasher.finish()).into_bytes();
-                    out.push(outip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+        // Process input messages within budget
+        while context.remaining_budget > 0 {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("hashing packet...");
+                hasher.write(&ip);
+                let hash_value = hasher.finish();
+                let outip = format!("{:016x}", hash_value).into_bytes();
+
+                match self.out.push(outip) {
+                    Ok(_) => {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("hashed and sent packet");
+                    }
+                    Err(_) => {
+                        // Output buffer full, yield control back to scheduler
+                        debug!("output buffer full, yielding to scheduler");
+                        break;
+                    }
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
+                // No more input available
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned (EOF)
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        // Return appropriate result based on work done
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
