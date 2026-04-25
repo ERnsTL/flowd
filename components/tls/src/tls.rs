@@ -3,18 +3,15 @@ use flowd_component_api::{
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
-use log::{debug, error, info, trace, warn};
+use log::{debug, info, trace, warn};
 
 // component-specific
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 //use std::net::SocketAddr;
-use rustls::{RootCertStore, ServerConnection};
-use std::collections::HashMap;
+use rustls::RootCertStore;
 use std::io::{BufReader, Read, Write};
 use std::net::ToSocketAddrs;
-use std::net::{Shutdown, TcpListener, TcpStream};
-use std::thread::{self};
+use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 pub struct TLSClientComponent {
@@ -36,27 +33,16 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 65536; // is allocated once and re-used for each read() call
-const LISTENER_POLL_SLEEP: Duration = Duration::from_millis(50);
-const LISTENER_JOIN_GRACE: Duration = Duration::from_secs(2);
-const CONNECTION_JOIN_GRACE: Duration = Duration::from_secs(2);
-
-fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    thread::Builder::new()
-        .name(format!("tls-join-{}", label))
-        .spawn(move || {
-            if let Err(err) = handle.join() {
-                warn!("{}: deferred thread join returned error: {:?}", label, err);
-            }
-        })
-        .expect("failed to spawn tls deferred join thread");
-}
 
 // Connection state machine for cooperative TLS server
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ConnectionState {
     Handshaking { conn: rustls::ServerConnection, sock: TcpStream },
     Active { conn: rustls::ServerConnection, sock: TcpStream, client_id: u32 },
+    #[allow(dead_code)]
     Writing { conn: rustls::ServerConnection, sock: TcpStream, client_id: u32, data: Vec<u8> },
+    #[allow(dead_code)]
     Closed,
 }
 
@@ -130,7 +116,7 @@ impl Component for TLSClientComponent {
 
                 // Try to connect
                 match TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT) {
-                    Ok(mut sock) => {
+                    Ok(sock) => {
                         sock.set_read_timeout(READ_TIMEOUT)
                             .expect("failed to set read timeout on TCP client");
                         sock.set_write_timeout(WRITE_TIMEOUT)
@@ -331,7 +317,7 @@ impl Component for TLSClientComponent {
                                     context.remaining_budget -= 1;
                                     debug!("sent received data to output");
                                 }
-                                Err(PushError::Full(returned_data)) => {
+                                Err(PushError::Full(_returned_data)) => {
                                     // Output buffer full - for TLS, we might want to buffer or drop
                                     // For now, we'll drop since TLS is streaming
                                     debug!("output buffer full, dropping received data");
@@ -580,7 +566,7 @@ impl Component for TLSServerComponent {
                         debug!("accepted new TLS connection from {}", addr);
 
                         // Set up timeouts
-                        let mut sock = sock;
+                        let sock = sock;
                         sock.set_read_timeout(READ_TIMEOUT)
                             .expect("failed to set read timeout on client socket");
                         sock.set_write_timeout(WRITE_TIMEOUT)
@@ -697,7 +683,7 @@ impl Component for TLSServerComponent {
                                         context.remaining_budget -= 1;
                                         debug!("sent received data to output");
                                     }
-                                    Err(PushError::Full(returned_data)) => {
+                                    Err(PushError::Full(_returned_data)) => {
                                         // Output buffer full - for TLS server, we might want to buffer or drop
                                         // For now, we'll drop since it's streaming
                                         debug!("output buffer full, dropping received data from client {}", client_id);
