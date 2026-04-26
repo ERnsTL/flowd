@@ -1,8 +1,9 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
-use log::{debug, info, trace};
+use log::{debug, info, trace, warn};
 
 // component-specific
 use regex::Regex;
@@ -13,6 +14,7 @@ pub struct RegexpExtractComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    regexp: Option<Regex>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -45,107 +47,122 @@ impl Component for RegexpExtractComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            regexp: None,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("RegexpExtract is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("RegexpExtract process() called");
 
-        // read configuration
-        trace!("read config IP");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            }
         }
-        */
-        let Ok(regexp_vec) = conf.pop() else {
-            trace!("no config IP received - exiting");
-            return;
-        };
 
-        // configure
-        let regexp = Regex::new(std::str::from_utf8(&regexp_vec).unwrap())
-            .expect("failed to compile given regexp");
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
-            }
-
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("got packet, processing...");
-
-                    // process
-                    //TODO send each match to the according index on OUT port - number of match groups must be number of connections on OUT port
-                    //TODO option for the future: send the matches as sexp object structure to the outport
-                    // apply regexp
-                    if let Some(captures) = regexp
-                        .captures(std::str::from_utf8(&ip).expect("failed to parse IP as UTF-8"))
-                    {
-                        // get first capture
-                        //captures.len() - TODO get all captures? put into object structure?
-                        let capture = captures.get(1).expect("failed to get first capture");
-                        // get the capture as string
-                        let capture_str = capture.as_str();
-
-                        // send results
-                        out.push(capture_str.as_bytes().to_vec())
-                            .expect("could not push into OUT");
-                        out_wakeup.unpark();
-                        debug!("done");
-                    } else {
-                        // no match, send empty value
-                        info!("no match");
-                        out.push(vec![]).expect("could not push into OUT");
-                        out_wakeup.unpark();
-                        debug!("done");
+        // Check if we have configuration
+        if self.regexp.is_none() {
+            if let Ok(regexp_vec) = self.conf.pop() {
+                let regexp_str = std::str::from_utf8(&regexp_vec).expect("invalid utf-8 in config IP");
+                debug!("received regexp: {}", regexp_str);
+                match Regex::new(regexp_str) {
+                    Ok(regexp) => {
+                        self.regexp = Some(regexp);
+                        return ProcessResult::DidWork(1); // Configuration processed
                     }
-                } else {
+                    Err(err) => {
+                        info!("failed to compile regexp: {}", err);
+                        return ProcessResult::Finished; // Invalid config, finish
+                    }
+                }
+            } else {
+                // No config yet
+                return ProcessResult::NoWork;
+            }
+        }
+
+        let regexp = self.regexp.as_ref().unwrap();
+
+        let mut work_units = 0;
+
+        // Process available input packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("got packet, processing...");
+
+                // Apply regexp
+                match std::str::from_utf8(&ip) {
+                    Ok(input_str) => {
+                        if let Some(captures) = regexp.captures(input_str) {
+                            // Get first capture
+                            if let Some(capture) = captures.get(1) {
+                                let capture_str = capture.as_str();
+
+                                // Send results
+                                debug!("sending...");
+                                if let Ok(()) = self.out.push(capture_str.as_bytes().to_vec()) {
+                                    debug!("done");
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                } else {
+                                    // Output buffer full, stop processing for now
+                                    break;
+                                }
+                            } else {
+                                // No first capture, send empty
+                                debug!("no first capture, sending empty");
+                                if let Ok(()) = self.out.push(vec![]) {
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        } else {
+                            // No match, send empty value
+                            info!("no match");
+                            if let Ok(()) = self.out.push(vec![]) {
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!("failed to parse IP as UTF-8: {}", err);
+                    }
+                }
+
+                if context.remaining_budget == 0 {
                     break;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
