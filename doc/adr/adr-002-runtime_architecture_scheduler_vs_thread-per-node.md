@@ -1418,7 +1418,7 @@ All such work MUST be executed in:
 * background threads, OR
 * async tasks
 
----
+Async or threaded execution MUST only be used for IO-bound or externally-blocking operations. Pure components SHOULD execute entirely within process() without background threads or async mechanisms.
 
 ### Enforcement
 
