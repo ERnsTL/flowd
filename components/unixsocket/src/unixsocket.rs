@@ -502,11 +502,13 @@ impl Component for UnixSocketServerComponent {
                     if bytes_in > 0 {
                         debug!("got {} bytes from unix socket client {}", bytes_in, client_id);
                         let data = Vec::from(&self.read_buffer[0..bytes_in]);
-                        match self.out.push(data) {
+                        // Frame data with client ID for multi-client support
+                        let framed_data = format!("{}:{}", client_id, String::from_utf8_lossy(&data)).into_bytes();
+                        match self.out.push(framed_data) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
-                                debug!("sent received data to output");
+                                debug!("sent received data from client {} to output", client_id);
                             }
                             Err(_) => {
                                 // Output buffer full, drop data
@@ -536,27 +538,40 @@ impl Component for UnixSocketServerComponent {
         // Send responses within remaining budget
         if context.remaining_budget > 0 {
             if let Ok(response_data) = self.resp.pop() {
-                debug!("got response packet, writing to unix socket...");
+                debug!("got response packet, parsing client ID and routing...");
 
-                // Send to first available connection
-                if let Some((client_id, socket)) = self.connections.iter_mut().next() {
-                    match socket.write_all(&response_data) {
-                        Ok(_) => {
-                            work_units += 1;
-                            context.remaining_budget -= 1;
-                            debug!("sent response to unix socket client {}", client_id);
-                        }
-                        Err(err) => {
-                            if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
-                                warn!("timed out writing response to client {}, dropping packet", client_id);
-                            } else {
-                                warn!("failed to write response to client {}: {}, dropping client", client_id, err);
-                                connections_to_remove.push(*client_id);
+                // Parse client ID from framed response data: "CLIENT_ID:response_data"
+                let response_str = String::from_utf8_lossy(&response_data);
+                if let Some(colon_pos) = response_str.find(':') {
+                    let client_id_str = &response_str[..colon_pos];
+                    if let Ok(target_client_id) = client_id_str.parse::<u32>() {
+                        let actual_response = &response_data[colon_pos + 1..];
+
+                        // Find and send to the specific client
+                        if let Some(socket) = self.connections.get_mut(&target_client_id) {
+                            match socket.write_all(actual_response) {
+                                Ok(_) => {
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                    debug!("sent response to unix socket client {}", target_client_id);
+                                }
+                                Err(err) => {
+                                    if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
+                                        warn!("timed out writing response to client {}, dropping packet", target_client_id);
+                                    } else {
+                                        warn!("failed to write response to client {}: {}, dropping client", target_client_id, err);
+                                        connections_to_remove.push(target_client_id);
+                                    }
+                                }
                             }
+                        } else {
+                            debug!("target client {} not connected, dropping response packet", target_client_id);
                         }
+                    } else {
+                        warn!("invalid client ID '{}' in response, dropping packet", client_id_str);
                     }
                 } else {
-                    debug!("no connected clients, dropping response packet");
+                    warn!("response packet missing client ID framing (expected 'CLIENT_ID:data'), dropping packet");
                 }
             }
         }
@@ -605,7 +620,7 @@ impl Component for UnixSocketServerComponent {
                     required: true,
                     is_arrayport: false,
                     description: String::from(
-                        "response data from downstream process for each connection",
+                        "framed response data in format 'CLIENT_ID:response_data' to route to specific client",
                     ),
                     values_allowed: vec![],
                     value_default: String::from(""),
@@ -617,7 +632,7 @@ impl Component for UnixSocketServerComponent {
                 schema: None,
                 required: true,
                 is_arrayport: false,
-                description: String::from("signal and content data from client connections"),
+                description: String::from("framed data from client connections in format 'CLIENT_ID:data'"),
                 values_allowed: vec![],
                 value_default: String::from(""),
             }],
