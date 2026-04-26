@@ -368,7 +368,20 @@ In particular:
 - process() MUST remain non-blocking (ADR-002)
 - all IO MUST be asynchronous or offloaded (ADR-0017)
 - completion of async work MUST signal the scheduler (ADR-002 + ADR-0017)
-- polling-only designs are forbidden
+- Polling external systems is generally forbidden.
+
+  However, if no callback or wakeup mechanism is available,
+components MAY use bounded periodic polling via wake_at().
+
+  Such polling MUST:
+
+  - use scheduler-integrated timing (wake_at)
+  - be rate-limited
+  - not rely on busy-looping
+  - not be the primary mechanism if a callback-based alternative exists
+
+  Polling MUST NOT occur inside process() in a blocking or loop-based manner
+  Polling MUST be driven by scheduler wakeups.
 
 ADR-002 defines execution semantics.
 ADR-0017 defines external interaction semantics.
@@ -1467,7 +1480,7 @@ Components performing background or async work MUST signal the scheduler.
 
 When async work completes:
 
-1. result MUST be enqueued into an output buffer
+1. result MUST be enqueued into a bounded component-owned completion queue OR directly into an output buffer. Component-owned completion queues MUST be bounded and MUST be drained within process() execution.
 2. scheduler MUST be explicitly woken via waker
 
 Async completion MUST follow this order:
