@@ -6,7 +6,6 @@ use flowd_component_api::{
 use log::{debug, info, trace, warn};
 
 // component-specific
-use std::thread;
 use tera::Tera;
 
 //TODO evaluate TT2 as alternative to Tera -> https://www.template-toolkit.org/#
