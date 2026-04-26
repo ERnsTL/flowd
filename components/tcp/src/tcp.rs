@@ -14,6 +14,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+// for non-blocking I/O
+use mio::Token;
+
 #[derive(Debug)]
 enum ClientCommand {
     Connect(SocketAddr),
@@ -36,7 +39,7 @@ enum ClientState {
     Disconnected,
     Connecting,
     Connected,
-    Error(String),
+    Error(()),
 }
 
 pub struct TCPClientComponent {
@@ -252,7 +255,7 @@ impl Component for TCPClientComponent {
                 // Initiate connection via worker thread
                 if let Err(e) = self.command_tx.send(ClientCommand::Connect(addr)) {
                     warn!("failed to send connect command to worker: {}", e);
-                    self.state = ClientState::Error("Failed to communicate with worker".to_string());
+                    self.state = ClientState::Error(());
                 } else {
                     self.state = ClientState::Connecting;
                     work_units += 1;
@@ -274,7 +277,7 @@ impl Component for TCPClientComponent {
                     debug!("connection established");
                 }
                 ClientResult::ConnectionFailed(e) => {
-                    self.state = ClientState::Error(format!("Connection failed: {}", e));
+                    self.state = ClientState::Error(());
                     work_units += 1;
                     warn!("connection failed: {}", e);
                 }
@@ -302,7 +305,7 @@ impl Component for TCPClientComponent {
                     debug!("connection closed by peer");
                 }
                 ClientResult::Error(e) => {
-                    self.state = ClientState::Error(format!("Worker error: {}", e));
+                    self.state = ClientState::Error(());
                     work_units += 1;
                     warn!("worker error: {}", e);
                 }
@@ -454,6 +457,8 @@ enum ConnectionState {
 struct Connection {
     state: ConnectionState,
     sock: TcpStream,
+    #[allow(dead_code)]
+    mio_token: Token,
 }
 
 pub struct TCPServerComponent {
@@ -573,12 +578,9 @@ impl Component for TCPServerComponent {
                     Ok((sock, addr)) => {
                         debug!("accepted new TCP connection from {}", addr);
 
-                        // Set up timeouts
-                        let sock = sock;
-                        sock.set_read_timeout(READ_TIMEOUT)
-                            .expect("failed to set read timeout on client socket");
-                        sock.set_write_timeout(WRITE_TIMEOUT)
-                            .expect("failed to set write timeout on client socket");
+                        // Set socket to non-blocking mode
+                        sock.set_nonblocking(true)
+                            .expect("failed to set non-blocking on client socket");
 
                         let client_id = self.next_client_id;
                         self.next_client_id += 1;
@@ -588,6 +590,7 @@ impl Component for TCPServerComponent {
                                 last_active: Instant::now(),
                             },
                             sock,
+                            mio_token: Token(client_id as usize),
                         };
 
                         self.connections.insert(client_id, connection);
@@ -686,7 +689,7 @@ impl Component for TCPServerComponent {
                                 }
                                 Err(e) => {
                                     match e.kind() {
-                                        ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                        ErrorKind::WouldBlock => {
                                             // Would block, buffer for later retry
                                             self.pending_responses.insert(target_client_id, actual_response.to_vec());
                                             work_units += 1;
@@ -738,7 +741,7 @@ impl Component for TCPServerComponent {
                     }
                     Err(e) => {
                         match e.kind() {
-                            ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                            ErrorKind::WouldBlock => {
                                 // Still would block, leave in buffer
                             }
                             _ => {

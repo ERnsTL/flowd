@@ -13,5 +13,8 @@ log = "0.4"
 # for TCPClientComponent, TCPServerComponent
 url = "2"
 
+# for non-blocking I/O
+mio = { version = "0.8", features = ["net", "os-poll"] }
+
 [package.metadata.flowd]
 compatible = "0.5"
