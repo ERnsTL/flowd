@@ -1,13 +1,14 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
 // component-specific
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use std::thread;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 /*
 Goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.
@@ -16,11 +17,176 @@ in order to easily form a multi-machine, multi-network FBP network with zero con
 for example via a TCP <-> TCP or WebSocket <-> WebSocket bridge.
 */
 
+#[derive(Debug)]
+enum ZeroconfResponderState {
+    WaitingForConfig,
+    Registering,
+    Registered,
+    Finished,
+}
+
 pub struct ZeroconfResponderComponent {
     conf: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    // Async operation state
+    state: ZeroconfResponderState,
+    config: Option<ZeroconfResponderConfig>,
+    cmd_sender: mpsc::UnboundedSender<ZeroconfResponderCommand>,
+    result_receiver: mpsc::UnboundedReceiver<ZeroconfResponderResult>,
+    #[allow(dead_code)]
+    async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
+}
+
+#[derive(Debug, Clone)]
+struct ZeroconfResponderConfig {
+    service_name: String,
+    instance_name: String,
+    host_name: String,
+    address: String,
+    port: u16,
+}
+
+#[derive(Debug)]
+enum ZeroconfResponderCommand {
+    Register(ZeroconfResponderConfig),
+    Unregister,
+}
+
+#[derive(Debug)]
+enum ZeroconfResponderResult {
+    Registered,
+    Error(String),
+}
+
+async fn async_responder_main(
+    mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfResponderCommand>,
+    result_tx: mpsc::UnboundedSender<ZeroconfResponderResult>,
+) {
+    let mut responder: Option<ServiceDaemon> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            ZeroconfResponderCommand::Register(config) => {
+                debug!("Registering mDNS service: {} {}", config.service_name, config.instance_name);
+                match register_service(&config).await {
+                    Ok(daemon) => {
+                        responder = Some(daemon);
+                        let _ = result_tx.send(ZeroconfResponderResult::Registered);
+                    }
+                    Err(e) => {
+                        let _ = result_tx.send(ZeroconfResponderResult::Error(format!("Registration failed: {}", e)));
+                    }
+                }
+            }
+            ZeroconfResponderCommand::Unregister => {
+                debug!("Unregistering mDNS service");
+                if let Some(daemon) = responder.take() {
+                    if let Err(e) = daemon.shutdown() {
+                        error!("Failed to shutdown mDNS daemon: {}", e);
+                    }
+                }
+                break; // Exit the loop
+            }
+        }
+    }
+}
+
+async fn register_service(config: &ZeroconfResponderConfig) -> Result<ServiceDaemon, Box<dyn std::error::Error + Send + Sync>> {
+    let responder = ServiceDaemon::new()?;
+    let my_service = ServiceInfo::new(
+        &config.service_name,
+        &config.instance_name,
+        &config.host_name,
+        &config.address,
+        config.port,
+        None,
+    )?;
+    responder.register(my_service)?;
+    Ok(responder)
+}
+
+async fn async_browser_main(
+    mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfBrowserCommand>,
+    result_tx: mpsc::UnboundedSender<ZeroconfBrowserResult>,
+) {
+    let mut browser: Option<ServiceDaemon> = None;
+    let mut receiver: Option<mdns_sd::Receiver<ServiceEvent>> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            ZeroconfBrowserCommand::Browse(config) => {
+                debug!("Starting mDNS browse for service: {}", config.service_name);
+                match start_browse(&config).await {
+                    Ok((daemon, recv)) => {
+                        browser = Some(daemon);
+                        receiver = Some(recv);
+                        debug!("mDNS browsing started successfully");
+                    }
+                    Err(e) => {
+                        let _ = result_tx.send(ZeroconfBrowserResult::Error(format!("Browse failed: {}", e)));
+                    }
+                }
+            }
+            ZeroconfBrowserCommand::Stop => {
+                debug!("Stopping mDNS browser");
+                if let Some(daemon) = browser.take() {
+                    if let Err(e) = daemon.shutdown() {
+                        error!("Failed to shutdown mDNS daemon: {}", e);
+                    }
+                }
+                break; // Exit the loop
+            }
+        }
+    }
+
+    // Continue browsing and sending results
+    if let Some(recv) = receiver {
+        while let Ok(event) = recv.recv_timeout(RECEIVE_TIMEOUT) {
+            match event {
+                ServiceEvent::ServiceResolved(info) => {
+                    debug!("Service resolved: {}", info.get_fullname());
+
+                    // Extract instance name from fullname
+                    let instance_name_this = info
+                        .get_fullname()
+                        .split('.')
+                        .next()
+                        .unwrap_or("");
+
+                    // Format as URL
+                    let address = info
+                        .get_addresses()
+                        .iter()
+                        .next();
+                    if let Some(addr) = address {
+                        let address_str = if addr.is_ipv6() {
+                            format!("[{}]", addr)
+                        } else {
+                            addr.to_string()
+                        };
+                        let result = format!(
+                            "tcp://{}:{}/{}",
+                            address_str,
+                            info.get_port(),
+                            instance_name_this
+                        );
+                        let _ = result_tx.send(ZeroconfBrowserResult::ServiceFound(result));
+                    }
+                }
+                other_event => {
+                    trace!("Received other mDNS event: {:?}", other_event);
+                }
+            }
+        }
+    }
+}
+
+async fn start_browse(config: &ZeroconfBrowserConfig) -> Result<(ServiceDaemon, mdns_sd::Receiver<ServiceEvent>), Box<dyn std::error::Error + Send + Sync>> {
+    let client = ServiceDaemon::new()?;
+    let receiver = client.browse(config.service_name.as_str())?;
+    Ok((client, receiver))
 }
 
 impl Component for ZeroconfResponderComponent {
@@ -34,6 +200,14 @@ impl Component for ZeroconfResponderComponent {
     where
         Self: Sized,
     {
+        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
+        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+
+        let async_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async_responder_main(cmd_receiver, result_sender));
+        }));
+
         ZeroconfResponderComponent {
             conf: inports
                 .remove("CONF")
@@ -42,97 +216,129 @@ impl Component for ZeroconfResponderComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: ZeroconfResponderState::WaitingForConfig,
+            config: None,
+            cmd_sender,
+            result_receiver,
+            async_thread,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(mut self) {
-        debug!("ZeroconfResponder is now run()ning!");
-        let conf = &mut self.conf;
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        debug!("ZeroconfResponder process() called");
 
-        // get configuration
-        trace!("read config IP");
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url_str = std::str::from_utf8(&url_vec).expect("configuration URL is invalid utf-8");
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        // get instance name
-        let instance_name = url
-            .path()
-            .strip_prefix("/")
-            .expect("failed to strip prefix '/' from instance name in configuration URL path")
-            .to_owned();
-        // get service name
-        //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
-        let service_name_queryparam = url
-            .query_pairs()
-            .find(|(key, _)| key.eq("service"))
-            .expect("failed to get service from connection URL");
-        let service_name_bytes = service_name_queryparam.1.as_bytes();
-        let service_name = std::str::from_utf8(service_name_bytes)
-            .expect("failed to convert socket address to str");
-        //TODO add support for publishing on defined interface
-
-        // configure
-        // set up responder
-        let responder = ServiceDaemon::new().expect("failed to create mDNS-SD daemon");
-        // prepare service record
-        let host_name = url
-            .host_str()
-            .expect("failed to get socket address from connection URL")
-            .to_owned()
-            + ".local.";
-        //let properties = [("property_1", "test"), ("property_2", "1234")];
-        let my_service = ServiceInfo::new(
-            service_name,
-            &instance_name,
-            &host_name,
-            url.host_str()
-                .expect("failed to get socket address from connection URL"),
-            url.port()
-                .expect("failed to get port from configuration URL"),
-            None, //&properties[..],
-        )
-        .unwrap();
-        // register service with responder, which will publish it
-        responder
-            .register(my_service)
-            .expect("Failed to register our service");
-        debug!("responder started");
-
-        // FBP main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, unregistering and finishing");
+                // Send unregister command to async thread
+                let _ = self.cmd_sender.send(ZeroconfResponderCommand::Unregister);
+                self.state = ZeroconfResponderState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+                )
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
 
-        // shut down
-        responder.shutdown().expect("failed to shut down responder");
-        thread::sleep(Duration::from_millis(500)); // give it some time to shut down
-        info!("exiting");
+        // Handle state machine
+        match self.state {
+            ZeroconfResponderState::WaitingForConfig => {
+                // Check if we have CONF configuration
+                if let Ok(conf_vec) = self.conf.pop() {
+                    debug!("received CONF config, parsing...");
+
+                    // Parse configuration (extracted from original run() method)
+                    let url_str = std::str::from_utf8(&conf_vec).expect("configuration URL is invalid utf-8");
+                    let url = url::Url::parse(&url_str).expect("failed to parse URL");
+
+                    // get instance name
+                    let instance_name = url
+                        .path()
+                        .strip_prefix("/")
+                        .expect("failed to strip prefix '/' from instance name in configuration URL path")
+                        .to_owned();
+
+                    // get service name
+                    let service_name_queryparam = url
+                        .query_pairs()
+                        .find(|(key, _)| key.eq("service"))
+                        .expect("failed to get service from connection URL");
+                    let service_name_bytes = service_name_queryparam.1.as_bytes();
+                    let service_name = std::str::from_utf8(service_name_bytes)
+                        .expect("failed to convert socket address to str")
+                        .to_string();
+
+                    // prepare service record
+                    let host_name = url
+                        .host_str()
+                        .expect("failed to get socket address from connection URL")
+                        .to_owned()
+                        + ".local.";
+
+                    let config = ZeroconfResponderConfig {
+                        service_name,
+                        instance_name,
+                        host_name,
+                        address: url.host_str()
+                            .expect("failed to get socket address from connection URL")
+                            .to_owned(),
+                        port: url.port()
+                            .expect("failed to get port from configuration URL"),
+                    };
+
+                    self.config = Some(config.clone());
+
+                    // Send register command to async thread
+                    if let Err(_) = self.cmd_sender.send(ZeroconfResponderCommand::Register(config)) {
+                        error!("Failed to send register command");
+                        return ProcessResult::Finished;
+                    }
+
+                    self.state = ZeroconfResponderState::Registering;
+                    debug!("mDNS service registration initiated");
+                    return ProcessResult::DidWork(1);
+                } else {
+                    // No CONF config yet
+                    return ProcessResult::NoWork;
+                }
+            }
+            ZeroconfResponderState::Registering => {
+                // Check for registration result
+                if let Ok(result) = self.result_receiver.try_recv() {
+                    match result {
+                        ZeroconfResponderResult::Registered => {
+                            self.state = ZeroconfResponderState::Registered;
+                            debug!("mDNS service registered successfully");
+                            return ProcessResult::DidWork(1);
+                        }
+                        ZeroconfResponderResult::Error(e) => {
+                            error!("mDNS service registration failed: {}", e);
+                            return ProcessResult::Finished;
+                        }
+                    }
+                }
+                // Still registering
+                return ProcessResult::NoWork;
+            }
+            ZeroconfResponderState::Registered => {
+                // Service is registered and running, nothing to do
+                return ProcessResult::NoWork;
+            }
+            ZeroconfResponderState::Finished => {
+                return ProcessResult::Finished;
+            }
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -164,12 +370,63 @@ impl Component for ZeroconfResponderComponent {
     }
 }
 
+impl Drop for ZeroconfResponderComponent {
+    fn drop(&mut self) {
+        debug!("ZeroconfResponderComponent dropping, sending unregister command");
+        // Send unregister command to async thread
+        let _ = self.cmd_sender.send(ZeroconfResponderCommand::Unregister);
+        // Note: The async thread will handle the unregister and terminate
+    }
+}
+
+impl Drop for ZeroconfBrowserComponent {
+    fn drop(&mut self) {
+        debug!("ZeroconfBrowserComponent dropping, sending stop command");
+        // Send stop command to async thread
+        let _ = self.cmd_sender.send(ZeroconfBrowserCommand::Stop);
+        // Note: The async thread will handle the stop and terminate
+    }
+}
+
+#[derive(Debug)]
+enum ZeroconfBrowserState {
+    WaitingForConfig,
+    Browsing,
+    Finished,
+}
+
 pub struct ZeroconfBrowserComponent {
     conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    // Async operation state
+    state: ZeroconfBrowserState,
+    config: Option<ZeroconfBrowserConfig>,
+    cmd_sender: mpsc::UnboundedSender<ZeroconfBrowserCommand>,
+    result_receiver: mpsc::UnboundedReceiver<ZeroconfBrowserResult>,
+    #[allow(dead_code)]
+    async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
+}
+
+#[derive(Debug, Clone)]
+struct ZeroconfBrowserConfig {
+    service_name: String,
+    #[allow(dead_code)]
+    instance_name: String,
+}
+
+#[derive(Debug)]
+enum ZeroconfBrowserCommand {
+    Browse(ZeroconfBrowserConfig),
+    Stop,
+}
+
+#[derive(Debug)]
+enum ZeroconfBrowserResult {
+    ServiceFound(String), // URL format result
+    Error(String),
 }
 
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -185,6 +442,14 @@ impl Component for ZeroconfBrowserComponent {
     where
         Self: Sized,
     {
+        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
+        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+
+        let async_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async_browser_main(cmd_receiver, result_sender));
+        }));
+
         ZeroconfBrowserComponent {
             conf: inports
                 .remove("CONF")
@@ -198,162 +463,116 @@ impl Component for ZeroconfBrowserComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: ZeroconfBrowserState::WaitingForConfig,
+            config: None,
+            cmd_sender,
+            result_receiver,
+            async_thread,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("ZeroconfQuery is now run()ning!");
-        let mut conf = self.conf;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        debug!("ZeroconfBrowser process() called");
 
-        // get configuration
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-
-        // get service name from URL
-        let service_name = url
-            .host_str()
-            .expect("failed to get service name from connection URL")
-            .to_owned();
-
-        // get instance name from URL
-        let instance_name: &str;
-        if url.path().is_empty() {
-            instance_name = "";
-        } else {
-            instance_name = url
-                .path()
-                .strip_prefix("/")
-                .expect("failed to strip prefix '/' from instance name in configuration URL path");
-        }
-
-        //TODO add support for domains other than "local"
-        /*
-        //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
-        let channel_queryparam = url.query_pairs().find( |kv| kv.0.eq("channel") ).expect("failed to get channel name from connection URL channel parameter");
-        let channel_bytes = channel_queryparam.1.as_bytes();
-        let channel = std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
-        debug!("channel: {}", channel);
-        */
-
-        //TODO add support for mode selection: one-shot, continuous, etc.
-        //TODO add support for timeout in one-shot mode
-        //TODO add support for selecting output format, which parameters to return
-
-        // set configuration
-        let client = ServiceDaemon::new().expect("failed to create mDNS-SD daemon");
-        // set up query
-        let receiver = client.browse(&service_name).expect("Failed to browse");
-        debug!("query started");
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, stopping browser and finishing");
+                // Send stop command to async thread
+                let _ = self.cmd_sender.send(ZeroconfBrowserCommand::Stop);
+                self.state = ZeroconfBrowserState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
-
-            // receive responses
-            if let Ok(event) = receiver.recv_timeout(RECEIVE_TIMEOUT) {
-                trace!("received event from resolver: {:?}", event);
-
-                // process
-                match event {
-                    ServiceEvent::ServiceResolved(info) => {
-                        trace!(
-                            "got a resolved service of given service name: {}",
-                            info.get_fullname()
-                        );
-
-                        // check instance name - it is part of the fullname up until the first dot
-                        let instance_name_this = info
-                            .get_fullname()
-                            .split('.')
-                            .next()
-                            .expect("failed to get instance name from fullname");
-                        if instance_name_this.contains(instance_name) {
-                            debug!(
-                                "got a resolved service with matching instance name, sending..."
-                            );
-
-                            //TODO add support for multiple IP addresses
-                            //TODO add support for IPv6 address and which is prefferred result - IPv4 or IPv6
-                            //TODO add support for TXT record properties in result
-
-                            // send it
-                            // NOTE: the first address is not always the best one, it could be a local address or an IP address that is not reachable from the network like a VPN address - OTOH, that is up to the publisher to do properly. Just FYI.
-                            let address = info
-                                .get_addresses()
-                                .iter()
-                                .next()
-                                .expect("failed to get first IP address");
-                            let address_str;
-                            if address.is_ipv6() {
-                                address_str = format!("[{}]", address); //TODO better use URL instead of this formatting exception, which does this automatically
-                            } else {
-                                address_str = address.to_string();
-                            }
-                            let result = format!(
-                                "tcp://{}:{}/{}",
-                                address_str,
-                                info.get_port(),
-                                instance_name_this
-                            )
-                            .into_bytes();
-                            out.push(result).expect("could not push into OUT"); //TODO optimize conversion
-                            out_wakeup.unpark();
-                            debug!("done");
-                        } else {
-                            trace!("service name matches, but instance name mismatch: {} != {}, discarding result", instance_name_this, instance_name);
-                        }
-
-                        // what to do next?
-                        break;
-                    }
-                    other_event => {
-                        // NOTE: for example, before the ServiceResolved event, there is a ServiceFound event, but it has no addresses yet so it is not useful
-                        trace!("received other event: {:?} - discarding", &other_event);
-                    }
-                }
-            }
-
-            trace!("-- end of iteration");
-            //NOTE: dont park thread here - this is achieved by recv_timeout()
         }
-        client.shutdown().expect("failed to shut down client");
-        thread::sleep(Duration::from_millis(500)); // give it some time to shut down
-        info!("exiting");
+
+        // Handle state machine
+        match self.state {
+            ZeroconfBrowserState::WaitingForConfig => {
+                // Check if we have CONF configuration
+                if let Ok(conf_vec) = self.conf.pop() {
+                    debug!("received CONF config, parsing...");
+
+                    // Parse configuration (extracted from original run() method)
+                    let url_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                    let url = url::Url::parse(&url_str).expect("failed to parse URL");
+
+                    // get service name from URL
+                    let service_name = url
+                        .host_str()
+                        .expect("failed to get service name from connection URL")
+                        .to_owned();
+
+                    // get instance name from URL
+                    let instance_name: String;
+                    if url.path().is_empty() {
+                        instance_name = "".to_string();
+                    } else {
+                        instance_name = url
+                            .path()
+                            .strip_prefix("/")
+                            .expect("failed to strip prefix '/' from instance name in configuration URL path")
+                            .to_owned();
+                    }
+
+                    let config = ZeroconfBrowserConfig {
+                        service_name,
+                        instance_name,
+                    };
+
+                    self.config = Some(config.clone());
+
+                    // Send browse command to async thread
+                    if let Err(_) = self.cmd_sender.send(ZeroconfBrowserCommand::Browse(config)) {
+                        error!("Failed to send browse command");
+                        return ProcessResult::Finished;
+                    }
+
+                    self.state = ZeroconfBrowserState::Browsing;
+                    debug!("mDNS browsing initiated");
+                    return ProcessResult::DidWork(1);
+                } else {
+                    // No CONF config yet
+                    return ProcessResult::NoWork;
+                }
+            }
+            ZeroconfBrowserState::Browsing => {
+                // Check for browse results
+                if let Ok(result) = self.result_receiver.try_recv() {
+                    match result {
+                        ZeroconfBrowserResult::ServiceFound(url) => {
+                            debug!("Service found, sending to output: {}", url);
+                            if let Err(_) = self.out.push(url.into_bytes()) {
+                                error!("Failed to send service result to output");
+                                return ProcessResult::Finished;
+                            }
+                            return ProcessResult::DidWork(1);
+                        }
+                        ZeroconfBrowserResult::Error(e) => {
+                            error!("mDNS browsing error: {}", e);
+                            return ProcessResult::DidWork(1); // Continue browsing despite error
+                        }
+                    }
+                }
+                // No results yet, continue browsing
+                return ProcessResult::NoWork;
+            }
+            ZeroconfBrowserState::Finished => {
+                return ProcessResult::Finished;
+            }
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
