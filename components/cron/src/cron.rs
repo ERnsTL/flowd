@@ -51,7 +51,7 @@ impl Component for CronComponent {
         }
     }
 
-    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("Cron process() called");
 
         // Check signals first
@@ -128,6 +128,8 @@ impl Component for CronComponent {
             } else {
                 // Not time yet
                 trace!("Next cron fire: {}", next);
+                // Set ready signal to be re-queued when time comes
+                context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
                 ProcessResult::NoWork
             }
         } else {

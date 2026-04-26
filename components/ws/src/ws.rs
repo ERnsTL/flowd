@@ -7,6 +7,7 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
 use std::time::Duration;
 use tungstenite::protocol::Message;
 
@@ -25,6 +26,7 @@ pub struct WSClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: WSClientState,
+    connect_result: Option<mpsc::Receiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -64,6 +66,7 @@ impl Component for WSClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             state: WSClientState::WaitingForConfig,
+            connect_result: None,
             //graph_inout: graph_inout,
         }
     }
@@ -113,36 +116,44 @@ impl Component for WSClientComponent {
             }
 
             WSClientState::Connecting { url, connect_start } => {
-                // Try to connect (this is blocking, but we limit attempts)
-                match tungstenite::client::connect(url.as_str()) {
-                    Ok((mut client, _)) => {
-                        debug!("WebSocket connection established");
-                        if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
-                            warn!("failed to set client socket timeouts: {}", err);
+                if self.connect_result.is_none() {
+                    let (tx, rx) = mpsc::channel();
+                    self.connect_result = Some(rx);
+                    let ready_signal = context.ready_signal.clone();
+                    let url_clone = url.clone();
+                    std::thread::spawn(move || {
+                        let result = tungstenite::client::connect(&url_clone).map(|(ws, _)| ws);
+                        let _ = tx.send(result);
+                        ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                    });
+                }
+
+                if let Some(ref rx) = self.connect_result {
+                    if let Ok(result) = rx.try_recv() {
+                        self.connect_result = None;
+                        match result {
+                            Ok(mut client) => {
+                                debug!("WebSocket connection established");
+                                if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
+                                    warn!("failed to set client socket timeouts: {}", err);
+                                }
+                                self.state = WSClientState::Connected { client };
+                                context.ready_signal.store(false, std::sync::atomic::Ordering::Release);
+                                return ProcessResult::DidWork(1);
+                            }
+                            Err(err) => {
+                                error!("failed to connect to WebSocket server: {}", err);
+                                self.state = WSClientState::Finished;
+                                return ProcessResult::Finished;
+                            }
                         }
-                        self.state = WSClientState::Connected { client };
-                        return ProcessResult::DidWork(1);
-                    }
-                    Err(tungstenite::Error::Io(err)) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                        // Connection in progress, check timeout
-                        if connect_start.elapsed() > CONNECT_TIMEOUT {
-                            error!("timed out connecting to WebSocket server after {:?}", CONNECT_TIMEOUT);
-                            self.state = WSClientState::Finished;
-                            return ProcessResult::Finished;
-                        }
-                        // Yield if no budget left
-                        if context.remaining_budget == 0 {
-                            return ProcessResult::NoWork;
-                        }
-                        context.remaining_budget -= 1;
-                        return ProcessResult::NoWork;
-                    }
-                    Err(err) => {
-                        error!("failed to connect to WebSocket server: {}", err);
+                    } else if connect_start.elapsed() > CONNECT_TIMEOUT {
+                        error!("timed out connecting to WebSocket server after {:?}", CONNECT_TIMEOUT);
                         self.state = WSClientState::Finished;
                         return ProcessResult::Finished;
                     }
                 }
+                ProcessResult::NoWork
             }
 
             WSClientState::Connected { ref mut client } => {
@@ -150,28 +161,33 @@ impl Component for WSClientComponent {
 
                 // Send data
                 while !self.inn.is_empty() && context.remaining_budget > 0 {
-                    debug!("got {} packets, sending into WebSocket...", self.inn.slots());
-                    let chunk = self.inn
-                        .read_chunk(self.inn.slots())
-                        .expect("receive as chunk failed");
+                    let available = self.inn.slots();
+                    let to_process = available.min(context.remaining_budget as usize);
+                    if to_process > 0 {
+                        debug!("sending {} packets into WebSocket...", to_process);
+                        let chunk = self.inn
+                            .read_chunk(to_process)
+                            .expect("receive as chunk failed");
 
-                    for ip in chunk.into_iter() {
-                        //TODO add support for Text messages
-                        if let Err(err) = client.write(Message::Binary(ip)) {
-                            error!("failed to write into WebSocket client: {}", err);
+                        for ip in chunk.into_iter() {
+                            //TODO add support for Text messages
+                            if let Err(err) = client.write(Message::Binary(ip)) {
+                                error!("failed to write into WebSocket client: {}", err);
+                                self.state = WSClientState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        }
+
+                        if let Err(err) = client.flush() {
+                            error!("failed to flush WebSocket client: {}", err);
                             self.state = WSClientState::Finished;
                             return ProcessResult::Finished;
                         }
+                    } else {
+                        break;
                     }
-
-                    if let Err(err) = client.flush() {
-                        error!("failed to flush WebSocket client: {}", err);
-                        self.state = WSClientState::Finished;
-                        return ProcessResult::Finished;
-                    }
-
-                    work_units += 1;
-                    context.remaining_budget -= 1;
                 }
 
                 // Receive data

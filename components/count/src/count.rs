@@ -173,37 +173,44 @@ impl Component for CountComponent {
                 }
             }
 
-            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
-                //debug!("got {} packets", chunk.len());
-                //TODO optimize - instead of if on every IP, prepare Fn and apply it without branching
-                match mode {
-                    Mode::Packets => {
-                        self.packets += chunk.len();
-                        chunk.commit_all();
-                    }
-                    Mode::Size => {
-                        for ip in chunk.into_iter() {
-                            self.packetsize += ip.len();
+            let available = self.inn.slots();
+            let to_process = available.min(context.remaining_budget as usize);
+            if to_process > 0 {
+                if let Ok(chunk) = self.inn.read_chunk(to_process) {
+                    let num = chunk.len() as u32;
+                    //debug!("got {} packets", chunk.len());
+                    //TODO optimize - instead of if on every IP, prepare Fn and apply it without branching
+                    match mode {
+                        Mode::Packets => {
+                            self.packets += chunk.len();
+                            chunk.commit_all();
                         }
-                        // NOTE: no need for commit_all(), because into_iter() does that automatically
-                    }
-                    Mode::Sum => {
-                        for ip in chunk {
-                            //TODO optimize - is into_iter() optimal?
-                            // convert ip value to numeric type and add it
-                            //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse-number-from-u8/104487/8
-                            //TODO optimize - atoi_simd crate
-                            if let Some(value) = atoi::atoi::<u64>(&ip) {
-                                self.sum += value;
-                            } else {
-                                error!("value if IP cannot be summed up: {:?} - skipping", ip);
+                        Mode::Size => {
+                            for ip in chunk.into_iter() {
+                                self.packetsize += ip.len();
                             }
+                            // NOTE: no need for commit_all(), because into_iter() does that automatically
                         }
-                        // NOTE: no need for commit_all(), because into_iter() does that automatically
+                        Mode::Sum => {
+                            for ip in chunk {
+                                //TODO optimize - is into_iter() optimal?
+                                // convert ip value to numeric type and add it
+                                //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse_number-from-u8/104487/8
+                                //TODO optimize - atoi_simd crate
+                                if let Some(value) = atoi::atoi::<u64>(&ip) {
+                                    self.sum += value;
+                                } else {
+                                    error!("value if IP cannot be summed up: {:?} - skipping", ip);
+                                }
+                            }
+                            // NOTE: no need for commit_all(), because into_iter() does that automatically
+                        }
                     }
+                    work_units += num;
+                    context.remaining_budget -= num;
+                } else {
+                    break;
                 }
-                work_units += 1;
-                context.remaining_budget -= 1;
             } else {
                 break;
             }

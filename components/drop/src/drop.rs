@@ -77,11 +77,17 @@ impl Component for DropComponent {
                 }
             }
 
-            debug!("got {} packets, dropping them.", self.inn.slots());
-            if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
-                chunk.commit_all();
-                work_units += 1;
-                context.remaining_budget -= 1;
+            let available = self.inn.slots();
+            let to_process = available.min(context.remaining_budget as usize);
+            if to_process > 0 {
+                if let Ok(chunk) = self.inn.read_chunk(to_process) {
+                    let num = chunk.len() as u32;
+                    chunk.commit_all();
+                    work_units += num;
+                    context.remaining_budget -= num;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }

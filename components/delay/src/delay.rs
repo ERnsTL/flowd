@@ -196,6 +196,11 @@ impl Component for DelayComponent {
             return ProcessResult::Finished;
         }
 
+        // If we have pending packets, set ready signal to be re-queued when time comes
+        if !self.pending_packets.is_empty() {
+            context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+        }
+
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
