@@ -1,7 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
-    PushError,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
 use std::thread;
@@ -38,71 +38,69 @@ impl Component for MuxerComponent {
         }
     }
 
-    fn run(self) {
-        debug!("Muxer is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        loop {
-            trace!("begin of iteration");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Muxer process() called");
 
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
             }
+        }
 
-            // check in port(s)
-            for inport in inn.iter_mut() {
-                loop {
-                    if let Ok(ip) = inport.pop() {
-                        debug!("repeating packet...");
-                        if push_blocking(
-                            &mut out,
-                            &out_wakeup,
-                            ip,
-                            &self.signals_in,
-                            &self.signals_out,
-                        ) {
-                            info!("stop requested while waiting on full outport, exiting");
-                            return;
+        let mut work_units = 0;
+
+        // Process available packets from all input ports within remaining budget
+        for inport in self.inn.iter_mut() {
+            while context.remaining_budget > 0 && !inport.is_empty() {
+                if let Ok(ip) = inport.pop() {
+                    debug!("multiplexing packet...");
+
+                    // Try to send to output
+                    match self.out.push(ip) {
+                        Ok(()) => {
+                            debug!("done");
+                            work_units += 1;
+                            context.remaining_budget -= 1;
                         }
-                        debug!("done");
-                    } else {
+                        Err(PushError::Full(_)) => {
+                            // Output buffer full, stop processing for now
+                            break;
+                        }
+                    }
+
+                    if context.remaining_budget == 0 {
                         break;
                     }
+                } else {
+                    break;
                 }
             }
 
-            // are we done? = all inports have exited
-            if inn.iter().all(|x| x.is_abandoned()) {
-                // inputs closed, nothing more to do
-                info!("EOF on all inports, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            if context.remaining_budget == 0 {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if all inports are abandoned
+        if self.inn.iter().all(|x| x.is_abandoned()) {
+            info!("EOF on all inports, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -146,6 +144,7 @@ pub struct Demux3Component {
     out_c: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    branch: usize,
 }
 
 impl Component for Demux3Component {
@@ -179,96 +178,74 @@ impl Component for Demux3Component {
                 .unwrap(),
             signals_in,
             signals_out,
+            branch: 0,
         }
     }
 
-    fn run(self) {
-        debug!("Demux3 is now run()ning!");
-        let mut inn = self.inn;
-        let mut out_a = self.out_a.sink;
-        let mut out_b = self.out_b.sink;
-        let mut out_c = self.out_c.sink;
-        let wake_a = self.out_a.wakeup.expect("demux A wake missing");
-        let wake_b = self.out_b.wakeup.expect("demux B wake missing");
-        let wake_c = self.out_c.wakeup.expect("demux C wake missing");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Demux3 process() called");
 
-        let mut branch = 0usize;
-        loop {
-            if let Ok(signal) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&signal).expect("invalid utf-8")
-                );
-                if signal == b"stop" {
-                    info!("got stop signal, exiting");
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            }
+        }
+
+        let mut work_units = 0;
+
+        // Process available packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("demultiplexing packet...");
+
+                // Route to appropriate output based on round-robin
+                let result = match self.branch % 3 {
+                    0 => self.out_a.push(ip),
+                    1 => self.out_b.push(ip),
+                    _ => self.out_c.push(ip),
+                };
+
+                match result {
+                    Ok(()) => {
+                        debug!("done");
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        self.branch += 1;
+                    }
+                    Err(PushError::Full(_)) => {
+                        // Output buffer full, stop processing for now
+                        break;
+                    }
+                }
+
+                if context.remaining_budget == 0 {
                     break;
                 }
-                if signal == b"ping" {
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
-            }
-
-            let mut stop_requested = false;
-            while let Ok(ip) = inn.pop() {
-                match branch % 3 {
-                    0 => {
-                        if push_blocking(
-                            &mut out_a,
-                            &wake_a,
-                            ip,
-                            &self.signals_in,
-                            &self.signals_out,
-                        ) {
-                            stop_requested = true;
-                            break;
-                        }
-                    }
-                    1 => {
-                        if push_blocking(
-                            &mut out_b,
-                            &wake_b,
-                            ip,
-                            &self.signals_in,
-                            &self.signals_out,
-                        ) {
-                            stop_requested = true;
-                            break;
-                        }
-                    }
-                    _ => {
-                        if push_blocking(
-                            &mut out_c,
-                            &wake_c,
-                            ip,
-                            &self.signals_in,
-                            &self.signals_out,
-                        ) {
-                            stop_requested = true;
-                            break;
-                        }
-                    }
-                }
-                branch += 1;
-            }
-            if stop_requested {
-                info!("stop requested while waiting on full outport, exiting");
+            } else {
                 break;
             }
-
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out_a);
-                drop(out_b);
-                drop(out_c);
-                wake_a.unpark();
-                wake_b.unpark();
-                wake_c.unpark();
-                break;
-            }
-
-            thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload {
