@@ -14,7 +14,6 @@ const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 enum RedisPublisherState {
     WaitingForConfig,
     Connected {
-        client: redis::Client,
         connection: redis::Connection,
         channel: String,
         pipeline: redis::Pipeline,
@@ -104,7 +103,7 @@ impl Component for RedisPublisherComponent {
 
                     // Connect to Redis
                     let client = redis::Client::open(url_str).expect("failed to open client");
-                    let mut connection = client
+                    let connection = client
                         .get_connection()
                         .expect("failed to get connection on client");
                     connection
@@ -117,7 +116,6 @@ impl Component for RedisPublisherComponent {
                     let pipeline = redis::pipe();
 
                     self.state = RedisPublisherState::Connected {
-                        client,
                         connection,
                         channel: channel.to_owned(),
                         pipeline,
@@ -347,6 +345,7 @@ impl Component for RedisSubscriberComponent {
                     // This is necessary because PubSub borrows from Connection
                     let pubsub_static = unsafe { std::mem::transmute::<redis::PubSub<'_>, redis::PubSub<'static>>(pubsub) };
 
+                    info!("Redis subscriber connected and subscribed to channel: {}", channel);
                     self.state = RedisSubscriberState::Connected {
                         pubsub: pubsub_static,
                         channel: channel.to_owned(),
@@ -361,7 +360,9 @@ impl Component for RedisSubscriberComponent {
                 return ProcessResult::NoWork;
             }
 
-            RedisSubscriberState::Connected { ref mut pubsub, .. } => {
+            RedisSubscriberState::Connected { ref mut pubsub, channel } => {
+                info!("Redis subscriber listening on channel: {}", channel);
+
                 let mut work_units = 0;
 
                 // Receive messages cooperatively within remaining budget
@@ -369,7 +370,7 @@ impl Component for RedisSubscriberComponent {
                     match pubsub.get_message() {
                         Ok(msg) => {
                             let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
-                            debug!("Received payload from redis channel: {:?}", payload);
+                            debug!("Received payload from redis channel '{}': {:?}", channel, payload);
 
                             // Try to send it to output
                             match self.out.push(payload) {
