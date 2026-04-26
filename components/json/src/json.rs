@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -26,6 +27,7 @@ pub struct JSONQueryComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    query: Option<jaq_interpret::Filter<Val>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -58,147 +60,139 @@ impl Component for JSONQueryComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            query: None,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("JSONQuery is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("JSONQuery process() called");
 
-        // read configuration
-        trace!("read config IP");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(filter_vec) = conf.pop() else {
-            trace!("no config IP received - exiting");
-            return;
-        };
-        let filter_str = std::str::from_utf8(&filter_vec).expect("invalid utf-8 in config IP");
-
-        // configure
-        // start out only from core filters,
-        // which do not include filters in the standard library
-        // such as `map`, `select` etc.
-        //TODO add support for standard library filters
-        let mut parse_context = ParseCtx::new(Vec::new());
-
-        // parse the filter
-        let (filter, errors) = jaq_parse::parse(filter_str, jaq_parse::main());
-        if errors.len() > 0 {
-            for err in errors {
-                error!("filter parse error: {:?} - exiting", err);
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
             }
-            return;
         }
 
-        // compile the filter in the context of the given definitions
-        let filter = parse_context.compile(filter.unwrap());
-        if parse_context.errs.len() > 0 {
-            for (err, range) in parse_context.errs {
-                error!(
-                    "filter compile error: {:?} in character {} to {} - exiting",
-                    err.to_string(),
-                    range.start,
-                    range.end
-                );
+        // Check if we have configuration
+        if self.query.is_none() {
+            if let Ok(filter_vec) = self.conf.pop() {
+                let filter_str = std::str::from_utf8(&filter_vec).expect("invalid utf-8 in config IP");
+                debug!("received query: {}", filter_str);
+
+                // Configure
+                let mut parse_context = ParseCtx::new(Vec::new());
+
+                // Parse the filter
+                let (filter, errors) = jaq_parse::parse(filter_str, jaq_parse::main());
+                if !errors.is_empty() {
+                    for err in errors {
+                        error!("filter parse error: {:?}", err);
+                    }
+                    return ProcessResult::Finished; // Invalid config, finish
+                }
+
+                // Compile the filter
+                let filter = parse_context.compile(filter.unwrap());
+                if !parse_context.errs.is_empty() {
+                    for (err, range) in parse_context.errs {
+                        error!(
+                            "filter compile error: {:?} in character {} to {}",
+                            err.to_string(),
+                            range.start,
+                            range.end
+                        );
+                    }
+                    return ProcessResult::Finished; // Invalid config, finish
+                }
+
+                self.query = Some(filter);
+                return ProcessResult::DidWork(1); // Configuration processed
+            } else {
+                // No config yet
+                return ProcessResult::NoWork;
             }
-            return;
         }
 
+        let filter = self.query.as_ref().unwrap();
         let inputs = RcIter::new(core::iter::empty());
 
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
+        let mut work_units = 0;
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // prepare packet
-                    debug!("got a packet, processing...");
-                    let input: Value =
-                        serde_json::from_slice(&ip).expect("could not parse JSON from input IP");
+        // Process available input packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("got a packet, processing...");
+                match serde_json::from_slice::<serde_json::Value>(&ip) {
+                    Ok(input) => {
+                        // Iterator over the output values
+                        let result = filter.run((Ctx::new([], &inputs), Val::from(input)));
 
-                    // iterator over the output values
-                    //TODO support for chunks via open bracket, closing bracket
-                    let result = filter.run((Ctx::new([], &inputs), Val::from(input)));
+                        for value in result {
+                            match value {
+                                Ok(val) => {
+                                    // Prepare packet
+                                    let vec_out = format!("{}", val).into_bytes();
 
-                    //TODO send open bracket
-                    /*
-                    assert_eq!(out.next(), Some(Ok(Val::from(json!("Hello")))));
-                    assert_eq!(out.next(), Some(Ok(Val::from(json!("world")))));
-                    assert_eq!(out.next(), None);
-                    */
-                    for value in result {
-                        match value {
-                            Ok(val) => {
-                                // prepare packet
-                                let vec_out = format!("{}", val).into_bytes(); //TODO optimize - get rid of format!() maybe possible using .to_string() but what if result is a number or an object etc.?
-
-                                // send it
-                                debug!("sending...");
-                                out.push(vec_out).expect("could not push into OUT");
-                                out_wakeup.unpark();
-                                debug!("done");
+                                    // Send it
+                                    debug!("sending...");
+                                    if let Ok(()) = self.out.push(vec_out) {
+                                        debug!("done");
+                                        work_units += 1;
+                                        context.remaining_budget -= 1;
+                                    } else {
+                                        // Output buffer full, stop processing for now
+                                        break;
+                                    }
+                                }
+                                Err(err) => {
+                                    let vec_out = err.to_string().into_bytes();
+                                    error!(
+                                        "error while filtering: {} - discarding",
+                                        std::str::from_utf8(&vec_out).expect("invalid utf-8")
+                                    );
+                                }
                             }
-                            Err(err) => {
-                                let vec_out = err.to_string().into_bytes();
-                                error!(
-                                    "error while filtering: {} - discarding",
-                                    std::str::from_utf8(&vec_out).expect("invalid utf-8")
-                                );
-                            }
-                        };
+                        }
                     }
-                    //TODO send closing bracket
-                } else {
+                    Err(err) => {
+                        warn!("failed to parse IP as JSON: {}", err);
+                    }
+                }
+
+                if context.remaining_budget == 0 {
                     break;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
