@@ -1,16 +1,13 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
+use tokio::sync::mpsc;
 
 // component-specific
-use std::future::IntoFuture;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{thread, thread::Thread};
 use teloxide::prelude::*;
 
 /*
@@ -19,16 +16,139 @@ TODO currently replying messages to the chat ID the latest message came from - a
 TODO add support for sending and receiving images, files, documents, also for command list, buttons, selection possibilities etc.
 */
 
+#[derive(Debug)]
+enum TelegramBotState {
+    WaitingForConfig,
+    Active,
+    Finished,
+}
+
 pub struct TelegramBotComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    // Async operation state
+    state: TelegramBotState,
+    config: Option<TelegramBotConfig>,
+    cmd_sender: mpsc::UnboundedSender<TelegramBotCommand>,
+    result_receiver: mpsc::UnboundedReceiver<TelegramBotResult>,
+    #[allow(dead_code)]
+    async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
+#[derive(Debug, Clone)]
+struct TelegramBotConfig {
+    #[allow(dead_code)]
+    bot_token: String,
+}
+
+#[derive(Debug)]
+enum TelegramBotCommand {
+    InitBot(String),
+    SendMessage(String),
+    SetChatId(i64),
+    Shutdown,
+}
+
+#[derive(Debug)]
+enum TelegramBotResult {
+    BotInitialized,
+    MessageReceived(Vec<u8>, i64), // message bytes and chat ID
+    MessageSent,
+    Error(String),
+}
+
 const TELEGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
+async fn async_telegram_main(
+    mut cmd_rx: mpsc::UnboundedReceiver<TelegramBotCommand>,
+    result_tx: mpsc::UnboundedSender<TelegramBotResult>,
+) {
+    let mut bot: Option<Bot> = None;
+    let mut chat_id: i64 = 0;
+    let mut dispatcher_handle: Option<tokio::task::JoinHandle<()>> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            TelegramBotCommand::InitBot(token) => {
+                debug!("Initializing Telegram bot");
+                let new_bot = Bot::new(token);
+                let bot_ref = new_bot.clone();
+                let result_tx_clone = result_tx.clone();
+
+                // Start message dispatcher
+                let handle = tokio::spawn(async move {
+                    let handler = Update::filter_message().endpoint(
+                        move |_bot: Bot, msg: Message| {
+                            let result_tx = result_tx_clone.clone();
+                            async move {
+                                // Store chat ID for responses
+                                // Note: In a real implementation, this would need thread-safe storage
+                                // For now, we'll handle this in the process() method
+
+                                // Send message to component
+                                if let Some(text) = msg.text() {
+                                    let _ = result_tx.send(TelegramBotResult::MessageReceived(text.as_bytes().to_vec(), msg.chat.id.0));
+                                }
+                                ResponseResult::Ok(())
+                            }
+                        },
+                    );
+
+                    let mut builder = Dispatcher::builder(bot_ref, handler).build();
+                    let _ = builder.dispatch().await;
+                });
+
+                bot = Some(new_bot);
+                dispatcher_handle = Some(handle);
+                let _ = result_tx.send(TelegramBotResult::BotInitialized);
+            }
+            TelegramBotCommand::SendMessage(text) => {
+                if let Some(bot_ref) = &bot {
+                    if chat_id != 0 {
+                        debug!("Sending message to Telegram chat {}", chat_id);
+                        let send_result = tokio::time::timeout(
+                            TELEGRAM_SEND_TIMEOUT,
+                            bot_ref.send_message(ChatId(chat_id), text).send(),
+                        ).await;
+
+                        match send_result {
+                            Ok(Ok(_)) => {
+                                let _ = result_tx.send(TelegramBotResult::MessageSent);
+                            }
+                            Ok(Err(err)) => {
+                                let _ = result_tx.send(TelegramBotResult::Error(format!("Send failed: {}", err)));
+                            }
+                            Err(_) => {
+                                let _ = result_tx.send(TelegramBotResult::Error(format!(
+                                    "Send timed out after {:?}", TELEGRAM_SEND_TIMEOUT
+                                )));
+                            }
+                        }
+                    } else {
+                        let _ = result_tx.send(TelegramBotResult::Error("No chat ID set".to_string()));
+                    }
+                } else {
+                    let _ = result_tx.send(TelegramBotResult::Error("Bot not initialized".to_string()));
+                }
+            }
+            TelegramBotCommand::SetChatId(new_chat_id) => {
+                chat_id = new_chat_id;
+                debug!("Chat ID set to {}", chat_id);
+            }
+            TelegramBotCommand::Shutdown => {
+                debug!("Shutting down Telegram bot");
+                if let Some(handle) = dispatcher_handle.take() {
+                    handle.abort();
+                }
+                break;
+            }
+        }
+    }
+}
 
 impl Component for TelegramBotComponent {
     fn new(
@@ -41,6 +161,14 @@ impl Component for TelegramBotComponent {
     where
         Self: Sized,
     {
+        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
+        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+
+        let async_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async_telegram_main(cmd_receiver, result_sender));
+        }));
+
         TelegramBotComponent {
             conf: inports
                 .remove("CONF")
@@ -59,185 +187,120 @@ impl Component for TelegramBotComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: TelegramBotState::WaitingForConfig,
+            config: None,
+            cmd_sender,
+            result_receiver,
+            async_thread,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("TelegramBot is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        debug!("TelegramBot process() called");
 
-        // read configuration
-        trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(token) = conf.pop() else {
-            trace!("no config IP received - exiting");
-            return;
-        };
-        let token_str = std::str::from_utf8(&token).expect("failed to parse token as utf-8");
-
-        // configure
-        // tokio runtime
-        let rt = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1) //TODO optimize - still starts additional thread for rt.spawn() thus 2 threads for tokio, seems useless
-            .enable_all()
-            .thread_name(format!(
-                "{}/EV",
-                thread::current()
-                    .name()
-                    .expect("failed to get current thread name")
-            ))
-            .build()
-            .expect("failed to build tokio runtime");
-        // configure bot
-        let bot = Bot::new(token_str); //TODO harden - this can panic
-                                       // variables for the bot
-        let bot_ref = bot.clone();
-        let messages_total = Arc::new(AtomicU64::new(0));
-        let chat_id: Arc<AtomicI64> = Arc::new(AtomicI64::new(0));
-        let chat_id_ref = chat_id.clone();
-        let out_ref = Arc::new(Mutex::new(out)); //TODO optimize
-        let out_wakeup_ref = out_wakeup.clone();
-        // handler for incoming messages - which can be text, images, etc.
-        let handler = Update::filter_message().endpoint(
-            |_bot: Bot,
-             msg: Message,
-             out: Arc<Mutex<ProcessEdgeSinkConnection>>,
-             out_wakeup: Thread,
-             chat_id: Arc<AtomicI64>,
-             messages_total: Arc<AtomicU64>| async move {
-                // increase message counter
-                let _previous = messages_total.fetch_add(1, Ordering::Relaxed);
-
-                // store chat ID for being able to respond
-                chat_id.store(msg.chat.id.0, Ordering::Relaxed);
-
-                // send it
-                debug!("sending...");
-                out.lock()
-                    .expect("lock poisoned")
-                    .push(
-                        msg.text()
-                            .expect("failed to get text from Telegram message")
-                            .as_bytes()
-                            .to_vec(),
-                    )
-                    .expect("could not push into OUT");
-                out_wakeup.unpark();
-                debug!("done");
-
-                ResponseResult::Ok(())
-            },
-        );
-        // start bot on the separate tokio runtime thread
-        debug!("starting bot message dispatcher...");
-        rt.spawn(async move {
-            let mut builder = Dispatcher::builder(bot, handler)
-                .dependencies(dptree::deps![
-                    out_ref,
-                    out_wakeup_ref,
-                    chat_id_ref,
-                    messages_total
-                ]) // pass the shared state to the handler as a dependency
-                .build();
-            let bot_dispatcher = builder.dispatch();
-            bot_dispatcher.await;
-        });
-        debug!("done");
-
-        // main loop
-        let mut stop_requested = false;
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, shutting down and finishing");
+                // Send shutdown command to async thread
+                let _ = self.cmd_sender.send(TelegramBotCommand::Shutdown);
+                self.state = TelegramBotState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    stop_requested = true;
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
+        }
 
-            // check in port
-            loop {
-                //TODO add support for chunks
-                if let Ok(ip) = inn.pop() {
-                    // prepare packet
-                    debug!("got a packet, sending to Telegram...");
-                    // nothing to do
+        // Handle state machine
+        match self.state {
+            TelegramBotState::WaitingForConfig => {
+                // Check if we have CONF configuration
+                if let Ok(conf_vec) = self.conf.pop() {
+                    debug!("received CONF config, parsing...");
 
-                    // process
-                    let chat_id = chat_id.load(Ordering::Relaxed);
-                    if chat_id != 0 {
-                        //TODO add suport for handling multiple chat IDs ("clients")
-                        let text = String::from_utf8(ip).expect("failed to convert IP to UTF-8");
-                        let send_result = rt.block_on(async {
-                            tokio::time::timeout(
-                                TELEGRAM_SEND_TIMEOUT,
-                                bot_ref
-                                    .send_message(ChatId(chat_id), text)
-                                    .send()
-                                    .into_future(),
-                            )
-                            .await
-                        });
-                        match send_result {
-                            Ok(Ok(_)) => {}
-                            Ok(Err(err)) => warn!("failed to send Telegram message: {}", err),
-                            Err(_) => warn!(
-                                "Telegram send timed out after {:?}, dropping packet",
-                                TELEGRAM_SEND_TIMEOUT
-                            ),
-                        }
-                    } else {
-                        warn!("no chat ID set - discarding IP");
+                    // Parse configuration (extracted from original run() method)
+                    let token_str = std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
+
+                    let config = TelegramBotConfig {
+                        bot_token: token_str.to_string(),
+                    };
+
+                    self.config = Some(config.clone());
+
+                    // Send init command to async thread
+                    if let Err(_) = self.cmd_sender.send(TelegramBotCommand::InitBot(token_str.to_string())) {
+                        error!("Failed to send init bot command");
+                        return ProcessResult::Finished;
                     }
 
-                    debug!("done");
+                    self.state = TelegramBotState::Active;
+                    debug!("Telegram bot initialization initiated");
+                    return ProcessResult::DidWork(1);
                 } else {
-                    break;
+                    // No CONF config yet
+                    return ProcessResult::NoWork;
                 }
             }
+            TelegramBotState::Active => {
+                // Check for incoming messages from async thread
+                if let Ok(result) = self.result_receiver.try_recv() {
+                    match result {
+                        TelegramBotResult::BotInitialized => {
+                            debug!("Telegram bot initialized successfully");
+                            return ProcessResult::DidWork(1);
+                        }
+                        TelegramBotResult::MessageReceived(msg_bytes, chat_id) => {
+                            debug!("Received message from Telegram chat {}, forwarding to output", chat_id);
+                            // Set chat ID for future responses
+                            let _ = self.cmd_sender.send(TelegramBotCommand::SetChatId(chat_id));
+                            if let Err(_) = self.out.push(msg_bytes) {
+                                error!("Failed to send message to output");
+                                return ProcessResult::Finished;
+                            }
+                            return ProcessResult::DidWork(1);
+                        }
+                        TelegramBotResult::MessageSent => {
+                            debug!("Message sent successfully to Telegram");
+                            return ProcessResult::DidWork(1);
+                        }
+                        TelegramBotResult::Error(e) => {
+                            error!("Telegram operation error: {}", e);
+                            return ProcessResult::DidWork(1); // Continue despite error
+                        }
+                    }
+                }
 
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                out_wakeup.unpark();
-                break;
+                // Check for outgoing messages to send
+                if let Ok(msg_bytes) = self.inn.pop() {
+                    debug!("Received message to send to Telegram");
+                    let text = String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
+
+                    // Send message command to async thread
+                    if let Err(_) = self.cmd_sender.send(TelegramBotCommand::SendMessage(text)) {
+                        error!("Failed to send message command");
+                        return ProcessResult::Finished;
+                    }
+                    return ProcessResult::DidWork(1);
+                }
+
+                // No work to do
+                return ProcessResult::NoWork;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
+            TelegramBotState::Finished => {
+                return ProcessResult::Finished;
+            }
         }
-        rt.shutdown_background();
-        if stop_requested {
-            out_wakeup.unpark();
-        }
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -285,5 +348,14 @@ impl Component for TelegramBotComponent {
             ],
             ..Default::default()
         }
+    }
+}
+
+impl Drop for TelegramBotComponent {
+    fn drop(&mut self) {
+        debug!("TelegramBotComponent dropping, sending shutdown command");
+        // Send shutdown command to async thread
+        let _ = self.cmd_sender.send(TelegramBotCommand::Shutdown);
+        // Note: The async thread will handle the shutdown and terminate
     }
 }
