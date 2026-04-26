@@ -501,7 +501,9 @@ impl Component for TCPServerComponent {
                         let ConnectionState::Active { ref mut last_active } = connection.state;
                         *last_active = Instant::now();
 
-                        match self.out.push(data) {
+                        // Frame data with client ID for multi-client support
+                        let framed_data = format!("{}:{}", client_id, String::from_utf8_lossy(&data)).into_bytes();
+                        match self.out.push(framed_data) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
@@ -534,51 +536,59 @@ impl Component for TCPServerComponent {
             }
         }
 
-        // Send responses to connections (within remaining budget)
-        while context.remaining_budget > 0 {
+        // Send responses within remaining budget
+        if context.remaining_budget > 0 {
             if let Ok(response_data) = self.resp.pop() {
-                // For now, send to the first available connection
-                // TODO: Implement proper client targeting based on framing/metadata
-                if let Some((client_id, connection)) = self.connections.iter_mut().find(|(_, conn)| {
-                    let ConnectionState::Active { .. } = &conn.state;
-                    true
-                }) {
-                    match connection.sock.write_all(&response_data) {
-                        Ok(()) => {
-                            debug!("sent response to TCP client {}", client_id);
-                            work_units += 1;
-                            context.remaining_budget -= 1;
+                debug!("got response packet, parsing client ID and routing...");
 
-                            // Update last active time
-                            let ConnectionState::Active { ref mut last_active } = connection.state;
-                            *last_active = Instant::now();
-                        }
-                        Err(e) => {
-                            match e.kind() {
-                                ErrorKind::WouldBlock | ErrorKind::TimedOut => {
-                                    // Would block, buffer for later retry
-                                    self.pending_responses.insert(*client_id, response_data);
+                // Parse client ID from framed response data: "CLIENT_ID:response_data"
+                let response_str = String::from_utf8_lossy(&response_data);
+                if let Some(colon_pos) = response_str.find(':') {
+                    let client_id_str = &response_str[..colon_pos];
+                    if let Ok(target_client_id) = client_id_str.parse::<u32>() {
+                        let actual_response = &response_data[colon_pos + 1..];
+
+                        // Find and send to the specific client
+                        if let Some(connection) = self.connections.get_mut(&target_client_id) {
+                            match connection.sock.write_all(actual_response) {
+                                Ok(()) => {
+                                    debug!("sent response to TCP client {}", target_client_id);
                                     work_units += 1;
                                     context.remaining_budget -= 1;
-                                    debug!("buffered response for client {} (would block)", client_id);
+
+                                    // Update last active time
+                                    let ConnectionState::Active { ref mut last_active } = connection.state;
+                                    *last_active = Instant::now();
                                 }
-                                ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
-                                    warn!("connection to client {} broken, removing", client_id);
-                                    connections_to_remove.push(*client_id);
-                                }
-                                _ => {
-                                    warn!("failed to write to TCP client {}: {}", client_id, e);
-                                    connections_to_remove.push(*client_id);
+                                Err(e) => {
+                                    match e.kind() {
+                                        ErrorKind::WouldBlock | ErrorKind::TimedOut => {
+                                            // Would block, buffer for later retry
+                                            self.pending_responses.insert(target_client_id, actual_response.to_vec());
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
+                                            debug!("buffered response for client {} (would block)", target_client_id);
+                                        }
+                                        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
+                                            warn!("connection to client {} broken, removing", target_client_id);
+                                            connections_to_remove.push(target_client_id);
+                                        }
+                                        _ => {
+                                            warn!("failed to write to TCP client {}: {}", target_client_id, e);
+                                            connections_to_remove.push(target_client_id);
+                                        }
+                                    }
                                 }
                             }
+                        } else {
+                            debug!("target client {} not connected, dropping response packet", target_client_id);
                         }
+                    } else {
+                        warn!("invalid client ID '{}' in response, dropping packet", client_id_str);
                     }
                 } else {
-                    debug!("no active connections, dropping response packet");
-                    // Could buffer responses, but for now we'll drop them
+                    warn!("response packet missing client ID framing (expected 'CLIENT_ID:data'), dropping packet");
                 }
-            } else {
-                break; // No more responses
             }
         }
 
@@ -676,7 +686,7 @@ impl Component for TCPServerComponent {
                     required: true,
                     is_arrayport: false,
                     description: String::from(
-                        "response data from downstream process for each connection",
+                        "framed response data in format 'CLIENT_ID:response_data' to route to specific client",
                     ),
                     values_allowed: vec![],
                     value_default: String::from(""),
@@ -688,7 +698,7 @@ impl Component for TCPServerComponent {
                 schema: None,
                 required: true,
                 is_arrayport: false,
-                description: String::from("signal and content data from the client connections"),
+                description: String::from("framed data from client connections in format 'CLIENT_ID:data'"),
                 values_allowed: vec![],
                 value_default: String::from(""),
             }],
