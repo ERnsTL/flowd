@@ -12,7 +12,8 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 // Hyper imports for the old run() method
@@ -366,6 +367,24 @@ struct Connection {
     keep_alive_requested: bool, // Whether client requested keep-alive
 }
 
+#[derive(Debug)]
+enum HttpClientCommand {
+    MakeRequest(String), // URL to request
+}
+
+#[derive(Debug)]
+enum HttpClientResult {
+    Response(Vec<u8>), // Response body
+    Error(String),     // Error message
+}
+
+#[derive(Debug, Clone)]
+enum HttpClientState {
+    Idle,
+    Processing,
+    Error(String),
+}
+
 pub struct HTTPClientComponent {
     req: ProcessEdgeSource,
     out_resp: ProcessEdgeSink,
@@ -373,10 +392,76 @@ pub struct HTTPClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Worker thread communication
+    command_tx: Sender<HttpClientCommand>,
+    result_rx: Receiver<HttpClientResult>,
+    worker_handle: Option<JoinHandle<()>>,
+
     // Runtime state
-    client: reqwest::blocking::Client,
+    state: HttpClientState,
     pending_responses: std::collections::VecDeque<Vec<u8>>, // responses to send, buffered for backpressure
     pending_errors: std::collections::VecDeque<Vec<u8>>,    // errors to send, buffered for backpressure
+}
+
+impl HTTPClientComponent {
+    fn worker_thread(command_rx: Receiver<HttpClientCommand>, result_tx: Sender<HttpClientResult>, client: reqwest::blocking::Client) {
+        loop {
+            // Try to receive a command
+            match command_rx.try_recv() {
+                Ok(command) => {
+                    match command {
+                        HttpClientCommand::MakeRequest(url) => {
+                            debug!("Worker: making HTTP request to {}", url);
+                            match client.get(&url).send() {
+                                Ok(resp) => {
+                                    debug!("Worker: got response, reading body...");
+                                    match resp.bytes() {
+                                        Ok(body_bytes) => {
+                                            let body = body_bytes.to_vec();
+                                            debug!("Worker: sent response body ({} bytes)", body.len());
+                                            let _ = result_tx.send(HttpClientResult::Response(body));
+                                        }
+                                        Err(e) => {
+                                            let error_msg = format!("Failed to read response body: {}", e);
+                                            let _ = result_tx.send(HttpClientResult::Error(error_msg));
+                                            debug!("Worker: failed to read response body: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let error_msg = format!("HTTP request failed: {}", e);
+                                    let _ = result_tx.send(HttpClientResult::Error(error_msg));
+                                    debug!("Worker: HTTP request failed: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // No command, sleep briefly to avoid busy looping
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Main thread disconnected, exit
+                    debug!("Worker: command channel disconnected, exiting");
+                    break;
+                }
+            }
+        }
+
+        debug!("HTTP worker thread exiting");
+    }
+}
+
+impl Drop for HTTPClientComponent {
+    fn drop(&mut self) {
+        // Send a dummy command to wake up the worker thread so it can exit
+        let _ = self.command_tx.send(HttpClientCommand::MakeRequest("http://dummy".to_string()));
+        if let Some(handle) = self.worker_handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl Component for HTTPClientComponent {
@@ -395,6 +480,15 @@ impl Component for HTTPClientComponent {
             .timeout(HTTP_REQUEST_TIMEOUT)
             .build()
             .expect("failed to build HTTP client");
+
+        // Create communication channels for worker thread
+        let (command_tx, command_rx) = mpsc::channel::<HttpClientCommand>();
+        let (result_tx, result_rx) = mpsc::channel::<HttpClientResult>();
+
+        // Spawn worker thread
+        let worker_handle = Some(thread::spawn(move || {
+            Self::worker_thread(command_rx, result_tx, client);
+        }));
 
         HTTPClientComponent {
             req: inports
@@ -415,7 +509,10 @@ impl Component for HTTPClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
-            client,
+            command_tx,
+            result_rx,
+            worker_handle,
+            state: HttpClientState::Idle,
             pending_responses: std::collections::VecDeque::new(),
             pending_errors: std::collections::VecDeque::new(),
         }
@@ -425,7 +522,7 @@ impl Component for HTTPClientComponent {
         debug!("HTTPClient is now process()ing!");
         let mut work_units = 0u32;
 
-        // check signals
+        // Check signals
         if let Ok(ip) = self.signals_in.try_recv() {
             trace!(
                 "received signal ip: {}",
@@ -446,7 +543,41 @@ impl Component for HTTPClientComponent {
             }
         }
 
-        // First, try to send any pending responses that were buffered due to backpressure
+        // Check for results from worker thread
+        while let Ok(result) = self.result_rx.try_recv() {
+            match result {
+                HttpClientResult::Response(body) => {
+                    match self.out_resp.push(body) {
+                        Ok(()) => {
+                            work_units += 1;
+                            debug!("forwarded HTTP response to output");
+                        }
+                        Err(PushError::Full(body)) => {
+                            // Output buffer full, buffer internally for later retry
+                            debug!("response output buffer full, buffering internally");
+                            self.pending_responses.push_back(body);
+                            work_units += 1;
+                        }
+                    }
+                }
+                HttpClientResult::Error(error_msg) => {
+                    match self.out_err.push(error_msg.into_bytes()) {
+                        Ok(()) => {
+                            work_units += 1;
+                            debug!("forwarded HTTP error to output");
+                        }
+                        Err(PushError::Full(error_bytes)) => {
+                            // Output buffer full, buffer internally for later retry
+                            debug!("error output buffer full, buffering internally");
+                            self.pending_errors.push_back(error_bytes);
+                            work_units += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Send any pending responses that were buffered due to backpressure
         while context.remaining_budget > 0 && !self.pending_responses.is_empty() {
             if let Some(pending_response) = self.pending_responses.front() {
                 match self.out_resp.push(pending_response.clone()) {
@@ -464,7 +595,7 @@ impl Component for HTTPClientComponent {
             }
         }
 
-        // Then, try to send any pending errors that were buffered due to backpressure
+        // Send any pending errors that were buffered due to backpressure
         while context.remaining_budget > 0 && !self.pending_errors.is_empty() {
             if let Some(pending_error) = self.pending_errors.front() {
                 match self.out_err.push(pending_error.clone()) {
@@ -482,94 +613,22 @@ impl Component for HTTPClientComponent {
             }
         }
 
-        // Then, process new URLs within remaining budget
+        // Queue new requests to worker thread within remaining budget
         while context.remaining_budget > 0 {
-            // stay responsive to stop/ping even while making HTTP requests
-            if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
-                    info!("got stop signal while processing, finishing");
-                    return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
-            }
-
             if let Ok(ip) = self.req.pop() {
                 let url = std::str::from_utf8(&ip).expect("non utf-8 data");
                 debug!("got a request: {}", &url);
 
-                // make HTTP request
-                //TODO may be big file - add chunking
-                //TODO enclose files in brackets to know where its stream of chunks start and end
-                //TODO enable use of async and/or timeout
-                debug!("making HTTP request...");
-                match self.client.get(url).send() {
-                    Ok(resp) => {
-                        debug!("forwarding HTTP results...");
-                        match resp.bytes() {
-                            Ok(body_bytes) => {
-                                let body = body_bytes.to_vec();
-                                // Try to send response
-                                match self.out_resp.push(body) {
-                                    Ok(()) => {
-                                        work_units += 1;
-                                        context.remaining_budget -= 1;
-                                        debug!("sent HTTP response successfully");
-                                    }
-                                    Err(PushError::Full(returned_body)) => {
-                                        // Output buffer full, buffer internally for later retry
-                                        debug!("response output buffer full, buffering internally");
-                                        self.pending_responses.push_back(returned_body);
-                                        work_units += 1; // We processed the request, just couldn't send
-                                        context.remaining_budget -= 1;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let error_msg = format!("Failed to read response body: {}", e);
-                                warn!("{}", error_msg);
-                                match self.out_err.push(error_msg.into_bytes()) {
-                                    Ok(()) => {
-                                        work_units += 1;
-                                        context.remaining_budget -= 1;
-                                        debug!("sent HTTP error successfully");
-                                    }
-                                    Err(PushError::Full(returned_error)) => {
-                                        debug!("error output buffer full, buffering internally");
-                                        self.pending_errors.push_back(returned_error);
-                                        work_units += 1;
-                                        context.remaining_budget -= 1;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        // send error
-                        debug!("got HTTP error, sending...");
-                        let error_msg = err.to_string();
-                        match self.out_err.push(error_msg.into_bytes()) {
-                            Ok(()) => {
-                                work_units += 1;
-                                context.remaining_budget -= 1;
-                                debug!("sent HTTP error successfully");
-                            }
-                            Err(PushError::Full(returned_error)) => {
-                                // Output buffer full, buffer internally for later retry
-                                debug!("error output buffer full, buffering internally");
-                                self.pending_errors.push_back(returned_error);
-                                work_units += 1; // We processed the request, just couldn't send
-                                context.remaining_budget -= 1;
-                            }
-                        }
-                    }
-                };
-                debug!("done processing request");
+                // Send request to worker thread
+                if let Err(e) = self.command_tx.send(HttpClientCommand::MakeRequest(url.to_string())) {
+                    warn!("failed to send HTTP request to worker: {}", e);
+                    self.state = HttpClientState::Error("Failed to communicate with worker".to_string());
+                } else {
+                    self.state = HttpClientState::Processing;
+                    work_units += 1;
+                    context.remaining_budget -= 1;
+                    debug!("queued HTTP request to worker thread");
+                }
             } else {
                 break;
             }
