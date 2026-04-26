@@ -68,7 +68,11 @@ const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 4096;
 
 impl TCPClientComponent {
-    fn worker_thread(command_rx: Receiver<ClientCommand>, result_tx: Sender<ClientResult>) {
+    fn worker_thread(
+        command_rx: Receiver<ClientCommand>,
+        result_tx: Sender<ClientResult>,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+    ) {
         let mut stream: Option<TcpStream> = None;
 
         loop {
@@ -89,11 +93,13 @@ impl TCPClientComponent {
                                 }
                                 stream = Some(s);
                                 let _ = result_tx.send(ClientResult::Connected);
+                                flowd_component_api::wake_scheduler(&scheduler_waker);
                                 debug!("Worker: connected to {}", addr);
                             }
                             Err(e) => {
                                 debug!("Worker: failed to connect to {}: {}", addr, e);
                                 let _ = result_tx.send(ClientResult::ConnectionFailed(e));
+                                flowd_component_api::wake_scheduler(&scheduler_waker);
                             }
                         }
                     }
@@ -103,11 +109,13 @@ impl TCPClientComponent {
                                 Ok(()) => {
                                     let _ = s.flush();
                                     let _ = result_tx.send(ClientResult::DataSent);
+                                    flowd_component_api::wake_scheduler(&scheduler_waker);
                                     debug!("Worker: sent {} bytes", data.len());
                                 }
                                 Err(e) => {
                                     debug!("Worker: failed to send data: {}", e);
                                     let _ = result_tx.send(ClientResult::Error(e));
+                                    flowd_component_api::wake_scheduler(&scheduler_waker);
                                 }
                             }
                         } else {
@@ -115,11 +123,13 @@ impl TCPClientComponent {
                                 std::io::ErrorKind::NotConnected,
                                 "No active connection",
                             )));
+                            flowd_component_api::wake_scheduler(&scheduler_waker);
                         }
                     }
                     ClientCommand::Disconnect => {
                         stream = None;
                         let _ = result_tx.send(ClientResult::ConnectionClosed);
+                        flowd_component_api::wake_scheduler(&scheduler_waker);
                         debug!("Worker: disconnected");
                     }
                 },
@@ -132,11 +142,13 @@ impl TCPClientComponent {
                                 if bytes_read > 0 {
                                     let data = Vec::from(&buf[0..bytes_read]);
                                     let _ = result_tx.send(ClientResult::DataReceived(data));
+                                    flowd_component_api::wake_scheduler(&scheduler_waker);
                                     debug!("Worker: received {} bytes", bytes_read);
                                 } else {
                                     // Connection closed by peer
                                     stream = None;
                                     let _ = result_tx.send(ClientResult::ConnectionClosed);
+                                    flowd_component_api::wake_scheduler(&scheduler_waker);
                                     debug!("Worker: connection closed by peer");
                                 }
                             }
@@ -150,6 +162,7 @@ impl TCPClientComponent {
                                         debug!("Worker: read error: {}", e);
                                         stream = None;
                                         let _ = result_tx.send(ClientResult::Error(e));
+                                        flowd_component_api::wake_scheduler(&scheduler_waker);
                                     }
                                 }
                             }
@@ -188,7 +201,7 @@ impl Component for TCPClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -198,8 +211,9 @@ impl Component for TCPClientComponent {
         let (result_tx, result_rx) = mpsc::channel::<ClientResult>();
 
         // Spawn worker thread
+        let worker_waker = scheduler_waker.clone();
         let worker_handle = Some(thread::spawn(move || {
-            Self::worker_thread(command_rx, result_tx);
+            Self::worker_thread(command_rx, result_tx, worker_waker);
         }));
 
         TCPClientComponent {
@@ -413,6 +427,9 @@ impl Component for TCPClientComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            if matches!(self.state, ClientState::Connecting | ClientState::Connected) {
+                context.wake_at(std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL);
+            }
             ProcessResult::NoWork
         }
     }
@@ -849,6 +866,11 @@ impl Component for TCPServerComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            if self.listener.is_some() {
+                context.wake_at(
+                    std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                );
+            }
             ProcessResult::NoWork
         }
     }

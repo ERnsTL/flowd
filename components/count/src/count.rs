@@ -19,6 +19,7 @@ pub struct CountComponent {
     sum: u64,
     start: Option<chrono::DateTime<chrono::Utc>>,
     start_1st: Option<chrono::DateTime<chrono::Utc>>,
+    pending_reports: std::collections::VecDeque<Vec<u8>>,
 }
 
 #[derive(Clone, Copy)]
@@ -37,9 +38,11 @@ impl CountComponent {
             Mode::Sum => format!("{}", self.sum),
         };
 
-        self.out
-            .push(final_count.clone().into_bytes())
-            .unwrap_or_else(|_| warn!("could not push final count into OUT due to backpressure"));
+        if let Err(flowd_component_api::PushError::Full(returned)) =
+            self.out.push(final_count.clone().into_bytes())
+        {
+            self.pending_reports.push_back(returned);
+        }
 
         // Send network output with the final count
         flowd_component_api::send_network_output_comfortable(
@@ -88,6 +91,7 @@ impl Component for CountComponent {
             sum: 0,
             start: None,
             start_1st: None,
+            pending_reports: std::collections::VecDeque::new(),
         }
     }
 
@@ -128,6 +132,19 @@ impl Component for CountComponent {
             return ProcessResult::NoWork;
         };
         let mut work_units = 0u32;
+
+        while context.remaining_budget > 0 && !self.pending_reports.is_empty() {
+            if let Some(report) = self.pending_reports.front().cloned() {
+                match self.out.push(report) {
+                    Ok(()) => {
+                        self.pending_reports.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(flowd_component_api::PushError::Full(_)) => break,
+                }
+            }
+        }
 
         // check signals
         if let Ok(ip) = self.signals_in.try_recv() {
@@ -227,7 +244,7 @@ impl Component for CountComponent {
         }
 
         // check for EOF on input
-        if self.inn.is_abandoned() {
+        if self.inn.is_abandoned() && self.pending_reports.is_empty() {
             // send final report
             info!("EOF on inport, finishing");
             let end = chrono::Utc::now();

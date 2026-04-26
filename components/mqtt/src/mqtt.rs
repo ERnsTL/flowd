@@ -7,7 +7,7 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 enum MQTTPublisherState {
     WaitingForConfig,
@@ -30,6 +30,7 @@ pub struct MQTTPublisherComponent {
 
 const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
 const MQTT_QOS: QoS = QoS::AtMostOnce; //TODO find out what is best for FBP
+const MQTT_POLL_TIMEOUT: Duration = Duration::from_millis(0);
 
 impl Component for MQTTPublisherComponent {
     fn new(
@@ -133,7 +134,7 @@ impl Component for MQTTPublisherComponent {
 
                 // Handle MQTT connection events cooperatively
                 if context.remaining_budget > 0 {
-                    match connection.recv_timeout(Duration::from_millis(10)) {
+                    match connection.recv_timeout(MQTT_POLL_TIMEOUT) {
                         Ok(event) => {
                             match event {
                                 Err(err) => {
@@ -221,6 +222,7 @@ impl Component for MQTTPublisherComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL);
                     ProcessResult::NoWork
                 }
             }
@@ -430,7 +432,7 @@ impl Component for MQTTSubscriberComponent {
 
                 // Process MQTT events cooperatively within remaining budget
                 while context.remaining_budget > 0 {
-                    match connection.recv_timeout(Duration::from_millis(10)) {
+                    match connection.recv_timeout(MQTT_POLL_TIMEOUT) {
                         Ok(event) => {
                             match event {
                                 Ok(Incoming(Publish(packet))) => {
@@ -475,6 +477,7 @@ impl Component for MQTTSubscriberComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL);
                     ProcessResult::NoWork
                 }
             }

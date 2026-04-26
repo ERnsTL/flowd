@@ -1723,6 +1723,11 @@ impl Component for HTTPServerComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            if self.listener.is_some() {
+                context.wake_at(
+                    std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                );
+            }
             ProcessResult::NoWork
         }
     }
@@ -1892,10 +1897,12 @@ impl Component for HTTPServerComponent {
                                             if let Some(out_req_one) =
                                                 out_req_locked.get_mut(route_index)
                                             {
-                                                out_req_one
-                                                    .push(body.to_vec())
-                                                    .expect("could not push IP into FBP network");
-                                                true
+                                                match out_req_one.push(body.to_vec()) {
+                                                    Ok(()) => true,
+                                                    Err(flowd_component_api::PushError::Full(_)) => {
+                                                        false
+                                                    }
+                                                }
                                             } else {
                                                 false
                                             }

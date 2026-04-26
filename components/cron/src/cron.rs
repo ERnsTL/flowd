@@ -10,6 +10,7 @@ use cron::{OwnedScheduleIterator, Schedule};
 //use chrono::prelude::*;   //TODO is this necessary?
 use chrono::Local;
 use std::str::FromStr;
+use std::time::Instant;
 
 pub struct CronComponent {
     when: ProcessEdgeSource,
@@ -18,6 +19,7 @@ pub struct CronComponent {
     signals_out: ProcessSignalSink,
     schedule: Option<OwnedScheduleIterator<Local>>,
     next_fire_time: Option<chrono::DateTime<Local>>,
+    timer_armed: bool,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -48,6 +50,7 @@ impl Component for CronComponent {
             signals_out: signals_out,
             schedule: None,
             next_fire_time: None,
+            timer_armed: false,
             //graph_inout,
         }
     }
@@ -86,6 +89,7 @@ impl Component for CronComponent {
                         if let Some(next_time) = iterator.next() {
                             self.schedule = Some(iterator);
                             self.next_fire_time = Some(next_time);
+                            self.arm_next_timer(context);
                             info!("Next fire time: {}", next_time);
                             return ProcessResult::DidWork(1); // Configuration processed
                         } else {
@@ -104,41 +108,35 @@ impl Component for CronComponent {
             }
         }
 
-        // Check if it's time to send a tick
-        if let Some(next) = self.next_fire_time {
-            if Local::now() >= next {
-                // Time to send tick
-                info!("Cron firing at: {}", next);
-                debug!("sending tick");
+        // Fire only when scheduler explicitly woke us due to timer expiration.
+        if self.timer_armed && context.take_timer_fired().is_some() {
+            let Some(next) = self.next_fire_time else {
+                info!("Cron schedule exhausted, finishing");
+                return ProcessResult::Finished;
+            };
+            info!("Cron firing at: {}", next);
+            debug!("sending tick");
 
-                if let Ok(()) = self.tick.push(vec![]) {
-                    // Get next schedule time
-                    if let Some(schedule) = self.schedule.as_mut() {
-                        if let Some(next_time) = schedule.next() {
-                            self.next_fire_time = Some(next_time);
-                            info!("Next fire time: {}", next_time);
-                        } else {
-                            self.next_fire_time = None;
-                        }
+            if let Ok(()) = self.tick.push(vec![]) {
+                self.timer_armed = false;
+                // Get next schedule time and arm next timer.
+                if let Some(schedule) = self.schedule.as_mut() {
+                    if let Some(next_time) = schedule.next() {
+                        self.next_fire_time = Some(next_time);
+                        info!("Next fire time: {}", next_time);
+                        self.arm_next_timer(context);
+                    } else {
+                        self.next_fire_time = None;
                     }
-                    ProcessResult::DidWork(1)
-                } else {
-                    // Output buffer full, try again later
-                    ProcessResult::NoWork
                 }
+                ProcessResult::DidWork(1)
             } else {
-                // Not time yet
-                trace!("Next cron fire: {}", next);
-                let now = Local::now();
-                if next > now {
-                    if let Ok(dur) = (next - now).to_std() {
-                        context.wake_at(std::time::Instant::now() + dur);
-                    }
-                } else {
-                    context.signal_ready();
-                }
+                // Output buffer full, retry on bounded scheduler polling.
+                context.wake_at(Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL);
                 ProcessResult::NoWork
             }
+        } else if self.next_fire_time.is_some() {
+            ProcessResult::NoWork
         } else {
             // Schedule exhausted
             info!("Cron schedule exhausted, finishing");
@@ -176,6 +174,24 @@ impl Component for CronComponent {
                 value_default: String::from(""),
             }],
             ..Default::default()
+        }
+    }
+}
+
+impl CronComponent {
+    fn arm_next_timer(&mut self, context: &mut NodeContext) {
+        if let Some(next) = self.next_fire_time {
+            let now = Local::now();
+            if next > now {
+                if let Ok(dur) = (next - now).to_std() {
+                    context.wake_at(Instant::now() + dur);
+                    self.timer_armed = true;
+                }
+            } else {
+                // If schedule time is already due, trigger near-immediate scheduler wake.
+                context.wake_at(Instant::now());
+                self.timer_armed = true;
+            }
         }
     }
 }

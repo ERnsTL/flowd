@@ -42,6 +42,7 @@ pub struct CmdComponent {
 
     // Runtime state
     state: SubprocessState,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
 #[derive(Debug)]
@@ -68,7 +69,7 @@ impl Component for CmdComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -103,6 +104,7 @@ impl Component for CmdComponent {
             retry: false,
             config_loaded: false,
             state: SubprocessState::Idle,
+            scheduler_waker,
         }
     }
 
@@ -236,12 +238,14 @@ impl Component for CmdComponent {
 
                                 // Start stdout thread
                                 let (stdout_tx, stdout_rx) = mpsc::channel();
+                                let scheduler_waker = self.scheduler_waker.clone();
                                 let stdout_thread = std::thread::spawn(move || {
                                     let reader = BufReader::new(child_stdout);
                                     for line in reader.lines().map_while(Result::ok) {
                                         if stdout_tx.send(line.into_bytes()).is_err() {
                                             break;
                                         }
+                                        flowd_component_api::wake_scheduler(&scheduler_waker);
                                     }
                                 });
 

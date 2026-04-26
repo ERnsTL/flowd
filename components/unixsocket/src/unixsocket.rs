@@ -322,6 +322,11 @@ impl Component for UnixSocketClientComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            if self.socket_address.is_some() {
+                context.wake_at(
+                    std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                );
+            }
             ProcessResult::NoWork
         }
     }
@@ -681,6 +686,11 @@ impl Component for UnixSocketServerComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            if self.listener.is_some() {
+                context.wake_at(
+                    std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                );
+            }
             ProcessResult::NoWork
         }
     }

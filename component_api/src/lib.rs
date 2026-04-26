@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Formatter};
 use std::sync::Arc;
 use std::thread::Thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use multimap::MultiMap;
 use serde::Serialize;
@@ -122,6 +122,7 @@ pub struct NodeContext {
     pub work_units_processed: u64,
     ready_signal: std::sync::Arc<std::sync::atomic::AtomicBool>, // level-triggered readiness
     wake_at: Option<Instant>,
+    timer_fired_at: Option<Instant>,
 }
 
 impl Debug for NodeContext {
@@ -152,6 +153,7 @@ impl NodeContext {
             work_units_processed: 0,
             ready_signal,
             wake_at: None,
+            timer_fired_at: None,
         }
     }
 
@@ -175,6 +177,14 @@ impl NodeContext {
 
     pub fn take_wake_at(&mut self) -> Option<Instant> {
         self.wake_at.take()
+    }
+
+    pub fn mark_timer_fired(&mut self, at: Instant) {
+        self.timer_fired_at = Some(at);
+    }
+
+    pub fn take_timer_fired(&mut self) -> Option<Instant> {
+        self.timer_fired_at.take()
     }
 }
 
@@ -345,3 +355,15 @@ pub fn send_network_previewurl_comfortable(graph_inout: &GraphInportOutportHandl
 
 // Scheduler waker type for components to signal readiness from background threads
 pub type SchedulerWaker = Arc<dyn Fn() + Send + Sync>;
+
+/// Default bounded periodic polling interval for components that must poll
+/// external systems because no callback-based wakeup is available.
+pub const DEFAULT_IO_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
+/// Wake scheduler from background/async contexts.
+#[inline]
+pub fn wake_scheduler(waker: &Option<SchedulerWaker>) {
+    if let Some(waker) = waker {
+        waker();
+    }
+}

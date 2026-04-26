@@ -394,6 +394,9 @@ impl Scheduler {
             match state.timer_latest_by_node.get(&entry.node_id) {
                 Some(latest) if *latest == entry.when => {
                     state.timer_latest_by_node.remove(&entry.node_id);
+                    if let Some(context) = state.nodes.get_mut(&entry.node_id) {
+                        context.mark_timer_fired(entry.when);
+                    }
                     if let Some(flag) = state.ready_flags.get(&entry.node_id) {
                         flag.store(true, Ordering::Release);
                     }

@@ -7,9 +7,9 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use redis::ErrorKind as RedisErrorKind;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(0));
 
 enum RedisPublisherState {
     WaitingForConfig,
@@ -193,6 +193,9 @@ impl Component for RedisPublisherComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(
+                        Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                    );
                     ProcessResult::NoWork
                 }
             }
@@ -264,7 +267,7 @@ pub struct RedisSubscriberComponent {
 }
 
 // how often the subscriber receive loop should check for signals from FBP network
-const RECV_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+const RECV_TIMEOUT: Option<Duration> = Some(Duration::from_millis(0));
 
 impl Component for RedisSubscriberComponent {
     fn new(
@@ -431,6 +434,9 @@ impl Component for RedisSubscriberComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(
+                        Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                    );
                     ProcessResult::NoWork
                 }
             }

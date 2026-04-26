@@ -1,6 +1,6 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
-    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace};
@@ -10,6 +10,7 @@ pub struct RepeatComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    pending_out: std::collections::VecDeque<Vec<u8>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -35,6 +36,7 @@ impl Component for RepeatComponent {
                 .unwrap(),
             signals_in,
             signals_out,
+            pending_out: std::collections::VecDeque::new(),
             //graph_inout: graph_inout,
         }
     }
@@ -42,6 +44,19 @@ impl Component for RepeatComponent {
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("Repeat is now process()ing!");
         let mut work_units = 0u32;
+
+        while context.remaining_budget > 0 && !self.pending_out.is_empty() {
+            if let Some(ip) = self.pending_out.front().cloned() {
+                match self.out.push(ip) {
+                    Ok(()) => {
+                        self.pending_out.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(_)) => break,
+                }
+            }
+        }
 
         // check signals
         if let Ok(ip) = self.signals_in.try_recv() {
@@ -78,17 +93,24 @@ impl Component for RepeatComponent {
 
             if let Ok(ip) = self.inn.pop() {
                 debug!("repeating packet...");
-                self.out.push(ip).expect("could not push into OUT");
-                debug!("done");
-                work_units += 1;
-                context.remaining_budget -= 1;
+                match self.out.push(ip) {
+                    Ok(()) => {
+                        debug!("done");
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(returned)) => {
+                        self.pending_out.push_back(returned);
+                        break;
+                    }
+                }
             } else {
                 break;
             }
         }
 
         // are we done?
-        if self.inn.is_abandoned() {
+        if self.inn.is_abandoned() && self.pending_out.is_empty() {
             // input closed, nothing more to do
             info!("EOF on inport, finishing");
             return ProcessResult::Finished;

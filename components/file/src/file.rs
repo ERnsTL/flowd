@@ -185,6 +185,9 @@ impl Component for FileReaderComponent {
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            context.wake_at(
+                std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+            );
             ProcessResult::NoWork
         }
     }

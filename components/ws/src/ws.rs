@@ -1,6 +1,6 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
-    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
@@ -40,6 +40,7 @@ pub struct WSClientComponent {
         >,
     >,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+    pending_received: std::collections::VecDeque<Vec<u8>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -80,6 +81,7 @@ impl Component for WSClientComponent {
             state: WSClientState::WaitingForConfig,
             connect_result: None,
             scheduler_waker,
+            pending_received: std::collections::VecDeque::new(),
             //graph_inout: graph_inout,
         }
     }
@@ -176,6 +178,19 @@ impl Component for WSClientComponent {
             WSClientState::Connected { ref mut client } => {
                 let mut work_units = 0;
 
+                while context.remaining_budget > 0 && !self.pending_received.is_empty() {
+                    if let Some(ip) = self.pending_received.front().cloned() {
+                        match self.out.push(ip) {
+                            Ok(()) => {
+                                self.pending_received.pop_front();
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            Err(PushError::Full(_)) => break,
+                        }
+                    }
+                }
+
                 // Send data
                 while !self.inn.is_empty() && context.remaining_budget > 0 {
                     let available = self.inn.slots();
@@ -213,12 +228,17 @@ impl Component for WSClientComponent {
                     debug!("got message from WebSocket, repeating...");
                     match client.read() {
                         Ok(msg) => {
-                            self.out
-                                .push(msg.into_data())
-                                .expect("could not push into OUT");
-                            debug!("done");
-                            work_units += 1;
-                            context.remaining_budget -= 1;
+                            match self.out.push(msg.into_data()) {
+                                Ok(()) => {
+                                    debug!("done");
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                Err(PushError::Full(returned)) => {
+                                    self.pending_received.push_back(returned);
+                                    break;
+                                }
+                            }
                         }
                         Err(tungstenite::Error::Io(err))
                             if err.kind() == std::io::ErrorKind::WouldBlock
@@ -250,6 +270,9 @@ impl Component for WSClientComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(
+                        std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                    );
                     ProcessResult::NoWork
                 }
             }
@@ -337,6 +360,7 @@ pub struct WSServerComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: WSServerState,
+    pending_outbound: std::collections::VecDeque<Vec<u8>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -371,6 +395,7 @@ impl Component for WSServerComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             state: WSServerState::WaitingForConfig,
+            pending_outbound: std::collections::VecDeque::new(),
             //graph_inout: graph_inout,
         }
     }
@@ -439,6 +464,19 @@ impl Component for WSServerComponent {
             } => {
                 let mut work_units = 0;
 
+                while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
+                    if let Some(ip) = self.pending_outbound.front().cloned() {
+                        match self.out.push(ip) {
+                            Ok(()) => {
+                                self.pending_outbound.pop_front();
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            Err(PushError::Full(_)) => break,
+                        }
+                    }
+                }
+
                 // Accept new connections
                 if context.remaining_budget > 0 {
                     match listener.accept() {
@@ -493,11 +531,16 @@ impl Component for WSServerComponent {
                     match websocket.read() {
                         Ok(message) => {
                             debug!("got message from connection {}, pushing to OUT", conn_id);
-                            self.out
-                                .push(message.into_data())
-                                .expect("could not push IP into OUT");
-                            work_units += 1;
-                            context.remaining_budget -= 1;
+                            match self.out.push(message.into_data()) {
+                                Ok(()) => {
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                Err(PushError::Full(returned)) => {
+                                    self.pending_outbound.push_back(returned);
+                                    break;
+                                }
+                            }
                         }
                         Err(tungstenite::Error::Io(err))
                             if err.kind() == std::io::ErrorKind::WouldBlock
@@ -557,6 +600,9 @@ impl Component for WSServerComponent {
                 if work_units > 0 {
                     ProcessResult::DidWork(work_units)
                 } else {
+                    context.wake_at(
+                        std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                    );
                     ProcessResult::NoWork
                 }
             }

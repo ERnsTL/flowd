@@ -155,24 +155,28 @@ impl Component for DelayComponent {
                 }
             }
 
-            // First, check if any pending packets are ready to be sent
-            let now = Instant::now();
-            while !self.pending_packets.is_empty() {
-                let front_ready_time = self.pending_packets.front().unwrap().ready_time;
-                if front_ready_time <= now {
-                    let packet = self.pending_packets.pop_front().unwrap();
-                    if let Err(PushError::Full(returned_packet)) = self.out.push(packet.data) {
-                        // If output is full, put it back at the front
-                        self.pending_packets.push_front(DelayedPacket {
-                            data: returned_packet,
-                            ready_time: front_ready_time,
-                        });
-                        break; // Can't send more until output is free
+            // First, release packets only when scheduler indicates the timer fired.
+            if let Some(fired_at) = context.take_timer_fired() {
+                while !self.pending_packets.is_empty() {
+                    let front_ready_time = self.pending_packets.front().unwrap().ready_time;
+                    if front_ready_time <= fired_at {
+                        let packet = self.pending_packets.pop_front().unwrap();
+                        if let Err(PushError::Full(returned_packet)) = self.out.push(packet.data) {
+                            // If output is full, put it back at the front
+                            self.pending_packets.push_front(DelayedPacket {
+                                data: returned_packet,
+                                ready_time: front_ready_time,
+                            });
+                            context.wake_at(
+                                Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                            );
+                            break; // Can't send more until output is free
+                        }
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    } else {
+                        break;
                     }
-                    work_units += 1;
-                    context.remaining_budget -= 1;
-                } else {
-                    break; // Next packet not ready yet
                 }
             }
 
