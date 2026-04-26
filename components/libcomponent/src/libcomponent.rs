@@ -1,21 +1,19 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 
 //component-specific
 use libloading::{Library, Symbol};
-use std::ffi::OsString;
 
 pub struct LibComponent {
-    //<'a> {
     inn: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
-    //fn_process: Option<libloading::Symbol<'a, unsafe extern fn(&std::ffi::CStr) -> u32>>,
     lib: libloading::Library,
 }
 
@@ -56,20 +54,14 @@ impl Component for LibComponent {
         Self: Sized,
     {
         unsafe {
-            //TODO load the shared libary
-            //TODO if there are any undefined symbols, this panics in some OS-specific function before it bubbles up into libloading -> cannot be caught! argh
+            // Load the shared library
             let lib = Library::new(libloading::library_filename("wordcounter"))
                 .expect("failed to load library 'wordcounter'");
-            //TODO give the process function some shared state that it can mutate
-            //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
-            //TODO find way to prepare the function already here at this point
-            let _func: Symbol<unsafe extern "C" fn(OsString) -> u32> =
+
+            // Verify the process function exists
+            let _func: Symbol<unsafe extern "C" fn(&std::ffi::CStr) -> u32> =
                 lib.get(b"process").expect("failed to get symbol 'process'");
-            //self.fn_process = func;
 
-            //TODO get metadata from a global variable in the shared library
-
-            //TODO take the declared inports and outports
             LibComponent {
                 inn: inports
                     .remove("IN")
@@ -85,89 +77,83 @@ impl Component for LibComponent {
                 signals_out: signals_out,
                 //graph_inout: graph_inout,
                 lib: lib,
-                //fn_process: Some(func),  //TODO cannot return function at this point, can only check - because otherwise error "cannot return reference to value owned by current function" - solution?
             }
         }
     }
 
-    // TODO refactor to receive on inports of the component in the shared library
-    fn run(self) {
-        debug!("LibComponent is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        unsafe {
-            let fn_process: libloading::Symbol<unsafe extern "C" fn(&std::ffi::CStr) -> u32> = self
-                .lib
-                .get(b"process")
-                .expect("failed to re-get symbol 'process'");
-            loop {
-                trace!("begin of iteration");
-                // check signals
-                //TODO optimize, there is also try_recv() and recv_timeout()
-                if let Ok(ip) = self.signals_in.try_recv() {
-                    //TODO optimize string conversions
-                    trace!(
-                        "received signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    );
-                    // stop signal
-                    if ip == b"stop" {
-                        //TODo optimize comparison
-                        info!("got stop signal, exiting");
-                        break;
-                    } else if ip == b"ping" {
-                        trace!("got ping signal, responding");
-                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                    } else {
-                        warn!(
-                            "received unknown signal ip: {}",
-                            std::str::from_utf8(&ip).expect("invalid utf-8")
-                        )
-                    }
-                }
-                // check in port
-                //TODO while !inn.is_empty() {
-                loop {
-                    if let Ok(mut ip) = inn.pop() {
-                        //TODO normally the IP should be immutable and forwarded as-is into the component library
-                        // output the packet data with newline
-                        debug!("got a packet, splitting words...");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("LibComponent process() called");
 
-                        //TODO call library
-                        //TODO what is CStr, CString, OsStringExt used for?
-                        ip.insert(ip.len(), 0); // insert null byte  //TODO optimize - just for the CStr conversion below that it finds its null byte
-                        let res = fn_process(std::ffi::CStr::from_bytes_with_nul_unchecked(
-                            ip.as_slice(),
-                        )); //TODO fix this: take care of possible null bytes. Goal: ability to transfer any binary data, incl. null bytes. But then again, the FBP protocol is JSON so would need base64-encoding (CPU intensive!) -> any solution? do usual binary serialization formats use null byte?
+        let mut work_units = 0u32;
 
-                        // forward split words
-                        //TODO maybe more than one
-                        out.push(res.to_string().into_bytes())
-                            .expect("could not push into OUT"); //TODO optimize kludgy conversion
-                        out_wakeup.unpark();
-                        debug!("done");
-                    } else {
-                        break;
-                    }
-                }
-
-                // are we done?
-                if inn.is_abandoned() {
-                    info!("EOF on inport, shutting down");
-                    drop(out);
-                    out_wakeup.unpark();
-                    break;
-                }
-
-                trace!("-- end of iteration");
-                std::thread::park();
+        // Check signals first (signals are handled regardless of budget)
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
             }
         }
-        info!("exiting");
+
+        // Process input within budget
+        while context.remaining_budget > 0 {
+            if let Ok(mut ip) = self.inn.pop() {
+                debug!("got a packet, calling library function...");
+
+                // Call library function (unsafe)
+                let res = unsafe {
+                    let fn_process: Symbol<unsafe extern "C" fn(&std::ffi::CStr) -> u32> = self
+                        .lib
+                        .get(b"process")
+                        .expect("failed to get symbol 'process'");
+
+                    // Add null byte for C string
+                    ip.push(0);
+                    let cstr = std::ffi::CStr::from_bytes_with_nul_unchecked(&ip);
+                    fn_process(cstr)
+                };
+
+                // Send result to output
+                if let Err(_) = self.out.push(res.to_string().into_bytes()) {
+                    error!("Failed to send library result to output");
+                    return ProcessResult::Finished;
+                }
+
+                work_units += 1;
+                context.remaining_budget -= 1;
+                debug!("library function called, result sent");
+            } else {
+                break;
+            }
+        }
+
+        // Check if we're done
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        // Signal readiness if we have pending input work
+        if self.inn.slots() > 0 {
+            context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
