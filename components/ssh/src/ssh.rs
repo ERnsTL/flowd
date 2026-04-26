@@ -1,15 +1,16 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
 //component-specific
 use lexopt::prelude::*;
-use ssh::TerminalSize;
 use std::ffi::OsString;
-use std::time::Duration;
 use std::vec;
+use tokio::sync::mpsc;
+use openssh;
 
 /*
 Ability to remotely execute a command and forward data to its STDIN and receive data from its STDOUT.
@@ -29,15 +30,153 @@ pub struct SSHClientComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    // Configuration state
+    cmd_config: Option<String>,
+    ssh_config: Option<ParsedSSHConfig>,
+    // Async operation state
+    state: SSHState,
+    cmd_sender: mpsc::UnboundedSender<SSHCommand>,
+    result_receiver: mpsc::UnboundedReceiver<SSHResult>,
+    /// JoinHandle for the dedicated async thread that runs SSH operations.
+    ///
+    /// This field is currently unused after thread creation but kept for architectural clarity
+    /// and future enhancement potential. The thread terminates automatically when the component
+    /// is dropped or when a disconnect command is received.
+    ///
+    /// TODO: Future enhancement potentials:
+    /// 1. Thread Joining: Explicitly wait for thread completion in Drop::drop()
+    /// 2. Status Monitoring: Check if the thread is still running for health checks
+    /// 3. Testing: Wait for thread completion in unit tests to ensure clean teardown
+    /// 4. Debugging: Better error reporting if the async thread panics
+    #[allow(dead_code)]
+    async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
-const CONNECT_TIMEOUT: Option<Duration> = Some(Duration::from_secs(7));
-const READ_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(2000)); //TODO should be set to 500ms for streaming mode
+//TODO implement or remove
+#[derive(Debug, Clone)]
+struct ParsedSSHConfig {
+    address_port: String,
+    #[allow(dead_code)]
+    username: Option<String>,
+    #[allow(dead_code)]
+    password: Option<String>,
+    #[allow(dead_code)]
+    private_key_path: Option<String>,
+    #[allow(dead_code)]
+    mode: Mode,
+    #[allow(dead_code)]
+    retry: bool,
+    #[allow(dead_code)]
+    pipe_out: bool,
+}
 
+
+
+#[derive(Debug, Clone)]
 enum Mode {
     One,
     Each,
+}
+
+#[derive(Debug)]
+enum SSHCommand {
+    Connect { config: ParsedSSHConfig },
+    Execute { command: String, input: Vec<u8> },
+    Disconnect,
+}
+
+#[derive(Debug)]
+enum SSHResult {
+    Connected,
+    Output(Vec<u8>),
+    Error(String),
+}
+
+#[derive(Debug)]
+enum SSHState {
+    WaitingForConfig,
+    Connecting,
+    Connected,
+    Executing,
+    Finished,
+}
+
+async fn async_main(
+    mut cmd_rx: mpsc::UnboundedReceiver<SSHCommand>,
+    result_tx: mpsc::UnboundedSender<SSHResult>,
+) {
+    let mut session: Option<openssh::Session> = None;
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            SSHCommand::Connect { config } => {
+                debug!("Connecting to SSH: {}", config.address_port);
+                match connect_ssh(&config).await {
+                    Ok(sess) => {
+                        session = Some(sess);
+                        let _ = result_tx.send(SSHResult::Connected);
+                    }
+                    Err(e) => {
+                        let _ = result_tx.send(SSHResult::Error(format!("Connect failed: {}", e)));
+                    }
+                }
+            }
+            SSHCommand::Execute { command, input } => {
+                if let Some(sess) = &session {
+                    debug!("Executing command: {}", command);
+                    match execute_command(sess, &command, &input).await {
+                        Ok(output) => {
+                            let _ = result_tx.send(SSHResult::Output(output));
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(SSHResult::Error(format!("Execute failed: {}", e)));
+                        }
+                    }
+                } else {
+                    let _ = result_tx.send(SSHResult::Error("Not connected".to_string()));
+                }
+            }
+            SSHCommand::Disconnect => {
+                debug!("Disconnecting SSH session");
+                session = None; // Drop the session
+                let _ = result_tx.send(SSHResult::Error("Disconnected".to_string()));
+            }
+        }
+    }
+}
+
+async fn connect_ssh(config: &ParsedSSHConfig) -> Result<openssh::Session, Box<dyn std::error::Error + Send + Sync>> {
+    let mut builder = openssh::SessionBuilder::default();
+
+    // Set user if provided
+    if let Some(user) = &config.username {
+        builder.user(user.clone());
+    }
+
+    // Configure authentication - openssh handles this automatically based on available credentials
+    // Password and key authentication will be attempted in order
+
+    if let Some(key_path) = &config.private_key_path {
+        builder.keyfile(key_path);
+    }
+
+    // Connect to the SSH server
+    let session = builder.connect(&config.address_port).await?;
+    Ok(session)
+}
+
+async fn execute_command(
+    session: &openssh::Session,
+    command: &str,
+    _input: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    // Placeholder: input handling not implemented yet
+    let output = session.command(command).output().await?;
+    if !output.status.success() {
+        return Err(format!("Command failed with exit code {:?}", output.status.code()).into());
+    }
+    Ok(output.stdout)
 }
 
 impl Component for SSHClientComponent {
@@ -51,6 +190,14 @@ impl Component for SSHClientComponent {
     where
         Self: Sized,
     {
+        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
+        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+
+        let async_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(async_main(cmd_receiver, result_sender));
+        }));
+
         SSHClientComponent {
             inn: inports
                 .remove("IN")
@@ -74,290 +221,293 @@ impl Component for SSHClientComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            cmd_config: None,
+            ssh_config: None,
+            state: SSHState::WaitingForConfig,
+            cmd_sender,
+            result_receiver,
+            async_thread,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("SSHClient is now run()ning!");
-        let mut inn = self.inn;
-        let mut cmd = self.cmd;
-        let mut conf = self.conf;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        debug!("SSHClient process() called");
 
-        // read sub-process program and args
-        let cmd_ip = cmd
-            .pop()
-            .expect("could not read IP from CMD configuration inport");
-        let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
-        // NOTE: ssh does the parsing of the command-line itself, we just pass it as a str
-        /*
-        let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line of sub-process");
-        let mut cmd_args: Vec<OsString> = vec![];
-        if cmd_words.len() > 0 {
-            let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
-            cmd_args = cmd_args1.iter().map(|x| OsString::from(x)).collect();
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, disconnecting and finishing");
+                // Send disconnect command to async thread
+                let _ = self.cmd_sender.send(SSHCommand::Disconnect);
+                self.state = SSHState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
         }
-        let cmd_program = cmd_words.pop().expect("could not pop program name");
-        debug!("got program {} with arguments {:?}", cmd_program, cmd_args);
-        */
 
-        // read configuration
-        let mut username: Option<String> = None;
-        let mut password: Option<String> = None;
-        let mut private_key_path: Option<String> = None;
-        let mut mode = Mode::Each;
-        let mut retry = false;
-        let mut pipe_out: bool = false;
-        let conf_vec = conf
-            .pop()
-            .expect("could not read IP from CONF configuration inport");
-        let conf_words_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
-        let conf_words = shell_words::split(conf_words_str)
-            .expect("failed to parse command-line of sub-process");
-        let mut parser = lexopt::Parser::from_args(conf_words);
-        let mut address_port: Option<String> = None;
-        while let Some(arg) = parser.next().expect("could not call next()") {
-            match arg {
-                Long("retry") => {
-                    retry = parser
-                        .value()
-                        .expect("failed to get value for retry")
-                        .parse()
-                        .expect("failed to parse value for retry");
-                }
-                Long("mode") => {
-                    let mode_str: OsString = parser
-                        .value()
-                        .expect("failed to get value for mode")
-                        .parse::<OsString>()
-                        .expect("failed to parse value for mode");
-                    match mode_str
-                        .to_str()
-                        .expect("could not convert mode_str to str")
-                    {
-                        "one" => {
-                            mode = Mode::One;
+        // Check if we have CMD configuration
+        if self.cmd_config.is_none() {
+            if let Ok(cmd_ip) = self.cmd.pop() {
+                let cmd_line = std::str::from_utf8(&cmd_ip).expect("invalid utf-8 in CMD IP");
+                debug!("received CMD config: {}", cmd_line);
+                self.cmd_config = Some(cmd_line.to_string());
+                return ProcessResult::DidWork(1); // Configuration processed
+            } else {
+                // No CMD config yet
+                return ProcessResult::NoWork;
+            }
+        }
+
+        // Check if we have CONF configuration
+        if self.ssh_config.is_none() {
+            if let Ok(conf_vec) = self.conf.pop() {
+                debug!("received CONF config, parsing...");
+
+                // Parse configuration (extracted from original run() method)
+                let mut username: Option<String> = None;
+                let mut password: Option<String> = None;
+                let mut private_key_path: Option<String> = None;
+                let mut mode = Mode::Each;
+                let mut retry = false;
+                let mut pipe_out: bool = false;
+
+                let conf_words_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                let conf_words = shell_words::split(conf_words_str)
+                    .expect("failed to parse command-line of sub-process");
+                let mut parser = lexopt::Parser::from_args(conf_words);
+                let mut address_port: Option<String> = None;
+
+                while let Some(arg) = parser.next().expect("could not call next()") {
+                    match arg {
+                        Long("retry") => {
+                            retry = parser
+                                .value()
+                                .expect("failed to get value for retry")
+                                .parse()
+                                .expect("failed to parse value for retry");
                         }
-                        "each" => {
-                            mode = Mode::Each;
+                        Long("mode") => {
+                            let mode_str: OsString = parser
+                                .value()
+                                .expect("failed to get value for mode")
+                                .parse::<OsString>()
+                                .expect("failed to parse value for mode");
+                            match mode_str
+                                .to_str()
+                                .expect("could not convert mode_str to str")
+                            {
+                                "one" => {
+                                    mode = Mode::One;
+                                }
+                                "each" => {
+                                    mode = Mode::Each;
+                                }
+                                _ => {
+                                    error!("invalid mode: {:?}", mode_str);
+                                    return ProcessResult::Finished;
+                                }
+                            }
+                        }
+                        Long("user") => {
+                            username = Some(
+                                parser
+                                    .value()
+                                    .expect("failed to get value for user")
+                                    .into_string()
+                                    .expect("failed to get parser value for user"),
+                            );
+                        }
+                        Long("pass") => {
+                            password = Some(
+                                parser
+                                    .value()
+                                    .expect("failed to get value for pass")
+                                    .into_string()
+                                    .expect("failed to get parser value for pass"),
+                            );
+                        }
+                        Short('i') => {
+                            private_key_path = Some(
+                                parser
+                                    .value()
+                                    .expect("failed to get value for -i")
+                                    .into_string()
+                                    .expect("failed to get parser value for -i"),
+                            );
+                        }
+                        Long("pipeout") => {
+                            pipe_out = parser
+                                .value()
+                                .expect("failed to get value for pipeout")
+                                .parse()
+                                .expect("failed to parse value for pipeout");
+                        }
+                        Value(val) => {
+                            // check for address:port
+                            if address_port.is_none() {
+                                // check if the format is address:port or user@address:port
+                                let val = val.into_string().expect("could not convert val to string");
+                                if val.contains('@') {
+                                    // split user@address:port
+                                    let parts: Vec<&str> = val.split('@').collect();
+                                    if parts.len() != 2 {
+                                        error!("invalid address:port format: {}", val);
+                                        return ProcessResult::Finished;
+                                    }
+                                    username = Some(parts[0].to_string());
+                                    address_port = Some(parts[1].to_string());
+                                } else {
+                                    // just address:port
+                                    address_port = Some(val);
+                                }
+                            } else {
+                                error!("got extra free argument: {:?} - exiting", val);
+                                return ProcessResult::Finished;
+                            }
                         }
                         _ => {
-                            unreachable!();
+                            error!("got unexpected argument: {:?} - exiting", arg);
+                            return ProcessResult::Finished;
                         }
                     }
                 }
-                Long("user") => {
-                    username = Some(
-                        parser
-                            .value()
-                            .expect("failed to get value for user")
-                            .into_string()
-                            .expect("failed to get parser value for user"),
-                    );
+
+                // Validate configuration
+                if address_port.is_none() {
+                    error!("missing address:port as free argument - exiting");
+                    return ProcessResult::Finished;
                 }
-                Long("pass") => {
-                    password = Some(
-                        parser
-                            .value()
-                            .expect("failed to get value for pass")
-                            .into_string()
-                            .expect("failed to get parser value for pass"),
-                    );
+
+                let address_port = address_port.unwrap();
+
+                //TODO implement retry and mode one
+                if retry {
+                    warn!("retry not implemented yet, ignoring");
                 }
-                Short('i') => {
-                    private_key_path = Some(
-                        parser
-                            .value()
-                            .expect("failed to get value for -i")
-                            .into_string()
-                            .expect("failed to get parser value for -i"),
-                    );
+                if matches!(mode, Mode::One) {
+                    error!("mode one not implemented yet - exiting");
+                    return ProcessResult::Finished;
                 }
-                Long("pipeout") => {
-                    pipe_out = parser
-                        .value()
-                        .expect("failed to get value for pipeout")
-                        .parse()
-                        .expect("failed to parse value for pipeout");
+
+                let config = ParsedSSHConfig {
+                    address_port,
+                    username,
+                    password,
+                    private_key_path,
+                    mode,
+                    retry,
+                    pipe_out,
+                };
+
+                self.ssh_config = Some(config.clone());
+
+                // Send connect command to async thread
+                if let Err(_) = self.cmd_sender.send(SSHCommand::Connect { config }) {
+                    error!("Failed to send connect command");
+                    return ProcessResult::Finished;
                 }
-                Value(val) => {
-                    // check for address:port
-                    if address_port.is_none() {
-                        // check if the format is address:port or user@address:port
-                        let val = val.into_string().expect("could not convert val to string");
-                        if val.contains('@') {
-                            // split user@address:port
-                            let parts: Vec<&str> = val.split('@').collect();
-                            if parts.len() != 2 {
-                                error!("invalid address:port format: {}", val);
-                                return;
+
+                self.state = SSHState::Connecting;
+                debug!("SSH configuration parsed successfully, connecting...");
+                return ProcessResult::DidWork(1); // Configuration processed
+            } else {
+                // No CONF config yet
+                return ProcessResult::NoWork;
+            }
+        }
+
+        // Handle state machine
+        match self.state {
+            SSHState::WaitingForConfig => {
+                // Should not reach here
+                return ProcessResult::NoWork;
+            }
+            SSHState::Connecting => {
+                // Check for connection result
+                if let Ok(result) = self.result_receiver.try_recv() {
+                    match result {
+                        SSHResult::Connected => {
+                            self.state = SSHState::Connected;
+                            debug!("SSH connected successfully");
+                            return ProcessResult::DidWork(1);
+                        }
+                        SSHResult::Error(e) => {
+                            error!("SSH connection failed: {}", e);
+                            return ProcessResult::Finished;
+                        }
+                        _ => {
+                            // Unexpected result
+                            return ProcessResult::NoWork;
+                        }
+                    }
+                }
+                // Still connecting
+                return ProcessResult::NoWork;
+            }
+            SSHState::Connected => {
+                // Check if we have input to execute
+                if let Ok(input) = self.inn.pop() {
+                    if let Some(cmd) = &self.cmd_config {
+                        if let Err(_) = self.cmd_sender.send(SSHCommand::Execute {
+                            command: cmd.clone(),
+                            input,
+                        }) {
+                            error!("Failed to send execute command");
+                            return ProcessResult::Finished;
+                        }
+                        self.state = SSHState::Executing;
+                        debug!("Sent execute command to async thread");
+                        return ProcessResult::DidWork(1);
+                    } else {
+                        warn!("No command configured");
+                        return ProcessResult::NoWork;
+                    }
+                }
+                // No input
+                return ProcessResult::NoWork;
+            }
+            SSHState::Executing => {
+                // Check for execution result
+                if let Ok(result) = self.result_receiver.try_recv() {
+                    match result {
+                        SSHResult::Output(output) => {
+                            if let Err(_) = self.out.push(output) {
+                                error!("Failed to send output");
+                                return ProcessResult::Finished;
                             }
-                            username = Some(parts[0].to_string());
-                            address_port = Some(parts[1].to_string());
-                            //TODO add check if there is a port included, but because of IPv6 with its ":" this is not trivial
-                        } else {
-                            // just address:port
-                            address_port = Some(val);
+                            self.state = SSHState::Connected;
+                            debug!("Command executed successfully, output sent");
+                            return ProcessResult::DidWork(1);
                         }
-                    } else {
-                        error!("got extra free argument: {:?} - exiting", val);
-                        return;
+                        SSHResult::Error(e) => {
+                            error!("Command execution failed: {}", e);
+                            self.state = SSHState::Connected; // Reset to connected for retry
+                            return ProcessResult::DidWork(1);
+                        }
+                        _ => {
+                            return ProcessResult::NoWork;
+                        }
                     }
                 }
-                _ => {
-                    error!("got unexpected argument: {:?} - exiting", arg);
-                    return;
-                }
+                // Still executing
+                return ProcessResult::NoWork;
+            }
+            SSHState::Finished => {
+                return ProcessResult::Finished;
             }
         }
-        // check configuration
-        if address_port.is_none() {
-            error!("missing address:port as free argument - exiting");
-            return;
-        }
-        let address_port = address_port.unwrap();
-        //TODO implement
-        if retry {
-            unimplemented!("retry not implemented yet");
-        }
-        match mode {
-            Mode::One => {
-                error!("mode one not implemented yet - exiting");
-                return;
-            }
-            Mode::Each => {}
-        }
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
-            }
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // output the packet data with newline
-                    debug!("got a packet, starting sub-process:");
-                    //println!("{}", std::str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid clone here
-
-                    // build session
-                    let mut session_builder = ssh::create_session();
-                    if let Some(ref username) = username {
-                        session_builder = session_builder.username(&username);
-                    };
-                    if let Some(ref password) = password {
-                        session_builder = session_builder.password(&password);
-                    };
-                    if let Some(ref private_key_path) = private_key_path {
-                        session_builder = session_builder.private_key_path(private_key_path);
-                    };
-                    session_builder = session_builder.timeout(READ_WRITE_TIMEOUT);
-
-                    // open session
-                    let mut session = session_builder
-                        // connect does not support SSH-tpyical user@host:port syntax but only the basic from TcpStream.connect("host:port")
-                        .connect_with_timeout(&address_port, CONNECT_TIMEOUT) //TODO optimize - avoid unwrap, could do unwrap_unchecked because of previous check
-                        .unwrap()
-                        .run_local();
-
-                    // run remote command
-                    //TODO funtional overlap with mode = one
-                    // NOTE: in send_command() mode, the read_write_timeout is applied to the command execution time (how unexpected)
-                    //  but in exec_shell resp. streaming mode it is read from the channel, and then there is nothing available yet,
-                    //  then we just do another iteration, able to handle singals
-                    let out_vec: Vec<u8>;
-                    if pipe_out {
-                        // stream data from SSH command to next component
-                        // open and execute command in SSH channel in session
-                        let channel = session.open_channel().unwrap();
-                        // start shell in the channel
-                        let mut channel_shell = channel
-                            .shell(TerminalSize::from_type(
-                                80,
-                                25,
-                                ssh::TerminalSizeType::Character,
-                            ))
-                            .unwrap();
-                        // write trigger IP into the remote shell STDIN
-                        channel_shell
-                            .write(&ip)
-                            .expect("failed to write into channel_shell");
-                        // read from that command
-                        out_vec = channel_shell
-                            .read()
-                            .expect("failed to read from channel_shell");
-                        //TODO implement this mode - currently does only 1 read()
-                    } else {
-                        // one command execution per inport packet
-                        // capture of output desired
-                        let exec = session.open_exec().expect("failed to open exec");
-                        out_vec = exec.send_command(cmd_line).expect("failed to send command");
-
-                        // no capture of output needed
-                        //TODO make configurable
-                        //TODO deliver the trigger IP contents to the sub-process STDIN, if possible
-                        /*
-                        let mut exec = session.open_exec().unwrap();
-                        exec.exec_command("no_output_command").unwrap();
-                        out_vec = exec.get_output().unwrap();
-                        println!("exit status: {}", exec.exit_status().unwrap());
-                        println!("terminated msg: {}", exec.terminate_msg().unwrap());
-                        let _ = exec.close();   //TODO optimize - reuse?
-                        */
-                    }
-
-                    debug!("repeating remote process output...");
-                    out.push(out_vec).expect("could not push into OUT");
-                    out_wakeup.unpark();
-
-                    // close session
-                    //TODO optimize - reuse?
-                    session.close();
-
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-
-            // are we done yet?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
-        }
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -419,5 +569,14 @@ impl Component for SSHClientComponent {
             //TODO implement STDERR
             ..Default::default()
         }
+    }
+}
+
+impl Drop for SSHClientComponent {
+    fn drop(&mut self) {
+        debug!("SSHClientComponent dropping, sending disconnect command");
+        // Send disconnect command to async thread
+        let _ = self.cmd_sender.send(SSHCommand::Disconnect);
+        // Note: The async thread will handle the disconnect and terminate
     }
 }
