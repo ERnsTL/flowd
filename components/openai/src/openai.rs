@@ -1,16 +1,45 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
+use tokio::sync::mpsc;
 
 // component-specific
 use openai::{
     chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole},
     Credentials,
 };
-use std::thread;
 use std::time::Duration;
+
+#[derive(Debug)]
+enum OpenAIChatState {
+    WaitingForConfig,
+    WaitingForInitialPrompt,
+    Active,
+    Finished,
+}
+
+#[derive(Debug, Clone)]
+struct OpenAIConfig {
+    credentials: Credentials,
+    model: String,
+    context: bool,
+}
+
+#[derive(Debug)]
+enum OpenAICommand {
+    SetConfig(OpenAIConfig), // set configuration
+    SetInitialPrompt(String), // set initial system prompt
+    ChatCompletion(Vec<u8>), // user message bytes
+}
+
+#[derive(Debug)]
+enum OpenAIResult {
+    ChatResponse(String), // AI response
+    Error(String),
+}
 
 pub struct OpenAIChatComponent {
     conf: ProcessEdgeSource,
@@ -18,11 +47,110 @@ pub struct OpenAIChatComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    // Async operation state
+    state: OpenAIChatState,
+    config: Option<OpenAIConfig>,
+    #[allow(dead_code)]
+    messages: Vec<ChatCompletionMessage>,
+    cmd_sender: mpsc::UnboundedSender<OpenAICommand>,
+    result_receiver: mpsc::UnboundedReceiver<OpenAIResult>,
+    #[allow(dead_code)]
+    async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
-const INITIAL_PROMPT_POLL: Duration = Duration::from_millis(50);
 const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+async fn async_openai_main(
+    mut cmd_rx: mpsc::UnboundedReceiver<OpenAICommand>,
+    result_tx: mpsc::UnboundedSender<OpenAIResult>,
+) {
+    let mut config: Option<OpenAIConfig> = None;
+    let mut messages: Vec<ChatCompletionMessage> = Vec::new();
+
+    while let Some(cmd) = cmd_rx.recv().await {
+        match cmd {
+            OpenAICommand::SetConfig(new_config) => {
+                config = Some(new_config);
+                debug!("OpenAI config set");
+            }
+            OpenAICommand::SetInitialPrompt(prompt) => {
+                messages.push(ChatCompletionMessage {
+                    role: ChatCompletionMessageRole::System,
+                    content: Some(prompt),
+                    name: None,
+                    function_call: None,
+                    tool_call_id: None,
+                    tool_calls: None,
+                });
+                debug!("Initial prompt set");
+            }
+            OpenAICommand::ChatCompletion(msg_bytes) => {
+                if let Some(ref cfg) = config {
+                    let user_message_content = String::from_utf8(msg_bytes).expect("invalid utf-8 in message");
+
+                    // Prepare messages for this request
+                    let request_messages = if cfg.context {
+                        // Add user message to context
+                        messages.push(ChatCompletionMessage {
+                            role: ChatCompletionMessageRole::User,
+                            content: Some(user_message_content),
+                            name: None,
+                            function_call: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                        });
+                        messages.clone()
+                    } else {
+                        // Single-turn conversation
+                        vec![ChatCompletionMessage {
+                            role: ChatCompletionMessageRole::User,
+                            content: Some(user_message_content),
+                            name: None,
+                            function_call: None,
+                            tool_call_id: None,
+                            tool_calls: None,
+                        }]
+                    };
+
+                    // Build and send request
+                    let chat_completion = ChatCompletion::builder(&cfg.model, request_messages)
+                        .credentials(cfg.credentials.clone())
+                        .create();
+
+                    let response_result = tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await;
+
+                    match response_result {
+                        Ok(Ok(response)) => {
+                            let choice = &response.choices[0];
+                            let ai_message = &choice.message;
+
+                            // Add AI response to context if enabled
+                            if cfg.context {
+                                messages.push(ai_message.clone());
+                            }
+
+                            let content = ai_message.content.as_ref()
+                                .expect("no content in AI response");
+
+                            let _ = result_tx.send(OpenAIResult::ChatResponse(content.clone()));
+                        }
+                        Ok(Err(err)) => {
+                            let _ = result_tx.send(OpenAIResult::Error(format!("OpenAI API error: {}", err)));
+                        }
+                        Err(_) => {
+                            let _ = result_tx.send(OpenAIResult::Error(format!(
+                                "OpenAI request timed out after {:?}", OPENAI_REQUEST_TIMEOUT
+                            )));
+                        }
+                    }
+                } else {
+                    let _ = result_tx.send(OpenAIResult::Error("OpenAI not configured".to_string()));
+                }
+            }
+        }
+    }
+}
 
 impl Component for OpenAIChatComponent {
     fn new(
@@ -35,6 +163,17 @@ impl Component for OpenAIChatComponent {
     where
         Self: Sized,
     {
+        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
+        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+
+        let async_thread = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async_openai_main(cmd_receiver, result_sender));
+        }));
+
         OpenAIChatComponent {
             conf: inports
                 .remove("CONF")
@@ -53,234 +192,194 @@ impl Component for OpenAIChatComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: OpenAIChatState::WaitingForConfig,
+            config: None,
+            messages: Vec::new(),
+            cmd_sender,
+            result_receiver,
+            async_thread,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("OpenAIChat is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("OpenAIChat process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+        let mut work_units = 0u32;
 
-        // get configuration arguments
-        let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
-        //let mut query_pairs = url.query_pairs();    // TODO optimize why mut?
-        //TODO optimize ^ re-use the query_pairs iterator? wont find anything after first .find() call
-        // get API key
-        let api_key;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "apikey") {
-            api_key = value.to_string();
-        } else {
-            error!("no API key found in configuration URL - exiting");
-            return;
-        }
-        // get model
-        let model;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "model") {
-            model = value.to_string(); //TODO optimize and use &str
-        } else {
-            trace!("no model found in configuration URL - assuming default");
-            model = "gpt-3.5-turbo".to_owned();
-        }
-        // get context
-        let context: bool;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "context") {
-            context = value
-                .parse()
-                .expect("could not parse context value in configuration URL as boolean");
-        } else {
-            trace!("no context found in configuration URL - assuming default");
-            context = false;
-        }
-        // get initial prompt
-        let initialprompt: bool;
-        if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "initialprompt") {
-            initialprompt = value
-                .parse()
-                .expect("could not parse initialprompt value in configuration URL as boolean");
-        } else {
-            trace!("no initial prompt found in configuration URL - assuming default");
-            initialprompt = false;
-        }
-
-        // set configuration
-        // set API key and base URL
-        let credentials;
-        if url.host_str().expect("no host in URL") != "default" {
-            let base_url = url.scheme().to_owned()
-                + "://"
-                + url.host_str().expect("no host in URL")
-                + url.path();
-            credentials = Credentials::new(api_key, base_url);
-        } else {
-            debug!("using default base URL for OpenAI API");
-            credentials = Credentials::new(api_key, "");
-        }
-        // set initial prompt
-        let mut messages = vec![];
-        let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
-        debug!("waiting for initial prompt IP");
-        if initialprompt {
-            // read initial prompt from inport
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    let initialprompt_str = String::from_utf8(ip).expect("invalid utf-8");
-                    // set initial prompt
-                    messages.push(ChatCompletionMessage {
-                        role: ChatCompletionMessageRole::System,
-                        content: Some(initialprompt_str),
-                        name: None,
-                        function_call: None,
-                        tool_call_id: None,
-                        tool_calls: None,
-                    });
-                    break;
-                }
-                if inn.is_abandoned() {
-                    info!("IN port closed while waiting for initial prompt, exiting");
-                    drop(out);
-                    out_wakeup.unpark();
-                    return;
-                }
-                if let Ok(sig) = self.signals_in.try_recv() {
-                    trace!(
-                        "received signal ip: {}",
-                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                    );
-                    if sig == b"stop" {
-                        info!("got stop signal while waiting for initial prompt, exiting");
-                        drop(out);
-                        out_wakeup.unpark();
-                        return;
-                    } else if sig == b"ping" {
-                        trace!("got ping signal, responding");
-                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                    }
-                }
-                thread::sleep(INITIAL_PROMPT_POLL);
-            }
-        }
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first (signals are handled regardless of budget)
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, shutting down and finishing");
+                self.state = OpenAIChatState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+                )
             }
-
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("got a packet, sending to AI...");
-                    let user_message_content = String::from_utf8(ip).expect("invalid utf-8 in IP");
-
-                    // put into context, if desired
-                    if context {
-                        messages.push(ChatCompletionMessage {
-                            role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content),
-                            name: None,
-                            function_call: None,
-                            tool_call_id: None,
-                            tool_calls: None,
-                        });
-                    } else {
-                        messages = vec![ChatCompletionMessage {
-                            role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content),
-                            name: None,
-                            function_call: None,
-                            tool_call_id: None,
-                            tool_calls: None,
-                        }];
-                    }
-
-                    // build request
-                    let chat_completion = ChatCompletion::builder(&model, messages.clone())
-                        .credentials(credentials.clone())
-                        .create();
-                    // send request and wait for result
-                    let returned_message_res = rt.block_on(async {
-                        tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await
-                    });
-                    let returned_message_inner = match returned_message_res {
-                        Ok(Ok(message)) => message,
-                        Ok(Err(err)) => {
-                            warn!("OpenAI request failed: {}", err);
-                            continue;
-                        }
-                        Err(_) => {
-                            warn!(
-                                "OpenAI request timed out after {:?}, dropping current packet",
-                                OPENAI_REQUEST_TIMEOUT
-                            );
-                            continue;
-                        }
-                    };
-                    let returned_message_inner2 = &returned_message_inner.choices[0];
-                    let returned_message_inner3 = &returned_message_inner2.message;
-                    // add returned message into context
-                    if context {
-                        messages.push(returned_message_inner3.clone());
-                    }
-                    let returned_message = returned_message_inner3
-                        .content
-                        .as_ref()
-                        .expect("no content in returned message");
-
-                    // send response to out port
-                    out.push(returned_message.as_bytes().to_vec())
-                        .expect("could not push into OUT"); //TODO optimize - avoid copy, why isnt it possible to just get the message from the returned chat completion?
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Handle state machine
+        match self.state {
+            OpenAIChatState::WaitingForConfig => {
+                // Check if we have CONF configuration
+                if let Ok(conf_vec) = self.conf.pop() {
+                    debug!("received CONF config, parsing...");
+
+                    // Parse configuration (extracted from original run() method)
+                    let url_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                    let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
+
+                    // Get API key
+                    let api_key = url.query_pairs()
+                        .find(|(key, _)| key == "apikey")
+                        .map(|(_, value)| value.to_string())
+                        .expect("no API key found in configuration URL");
+
+                    // Get model
+                    let model = url.query_pairs()
+                        .find(|(key, _)| key == "model")
+                        .map(|(_, value)| value.to_string())
+                        .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
+
+                    // Get context
+                    let context_enabled = url.query_pairs()
+                        .find(|(key, _)| key == "context")
+                        .and_then(|(_, value)| value.parse().ok())
+                        .unwrap_or(false);
+
+                    // Get initial prompt
+                    let initialprompt = url.query_pairs()
+                        .find(|(key, _)| key == "initialprompt")
+                        .and_then(|(_, value)| value.parse().ok())
+                        .unwrap_or(false);
+
+                    // Set credentials
+                    let credentials = if url.host_str().unwrap_or("default") != "default" {
+                        let base_url = format!("{}://{}{}",
+                            url.scheme(),
+                            url.host_str().expect("no host in URL"),
+                            url.path()
+                        );
+                        Credentials::new(api_key, base_url)
+                    } else {
+                        debug!("using default base URL for OpenAI API");
+                        Credentials::new(api_key, "")
+                    };
+
+                    let config = OpenAIConfig {
+                        credentials,
+                        model,
+                        context: context_enabled,
+                    };
+
+                    self.config = Some(config.clone());
+
+                    // Send config to async thread
+                    if let Err(_) = self.cmd_sender.send(OpenAICommand::SetConfig(config)) {
+                        error!("Failed to send config command");
+                        return ProcessResult::Finished;
+                    }
+
+                    if initialprompt {
+                        self.state = OpenAIChatState::WaitingForInitialPrompt;
+                    } else {
+                        self.state = OpenAIChatState::Active;
+                    }
+
+                    debug!("OpenAI configuration processed");
+                    work_units += 1; // Configuration work
+                    return ProcessResult::DidWork(work_units);
+                } else {
+                    // No CONF config yet
+                    return ProcessResult::NoWork;
+                }
+            }
+            OpenAIChatState::WaitingForInitialPrompt => {
+                // Check if we have initial prompt on IN port
+                if let Ok(prompt_bytes) = self.inn.pop() {
+                    let prompt_str = String::from_utf8(prompt_bytes).expect("invalid utf-8 in initial prompt");
+
+                    // Send initial prompt to async thread
+                    if let Err(_) = self.cmd_sender.send(OpenAICommand::SetInitialPrompt(prompt_str)) {
+                        error!("Failed to send initial prompt command");
+                        return ProcessResult::Finished;
+                    }
+
+                    self.state = OpenAIChatState::Active;
+                    debug!("Initial prompt set, transitioning to active state");
+                    work_units += 1;
+                    return ProcessResult::DidWork(work_units);
+                } else if self.inn.is_abandoned() {
+                    info!("IN port closed while waiting for initial prompt, finishing");
+                    self.state = OpenAIChatState::Finished;
+                    return ProcessResult::Finished;
+                } else {
+                    // Still waiting for initial prompt
+                    return ProcessResult::NoWork;
+                }
+            }
+            OpenAIChatState::Active => {
+                // Check for responses from async thread within budget
+                if context.remaining_budget > 0 {
+                    if let Ok(result) = self.result_receiver.try_recv() {
+                        match result {
+                            OpenAIResult::ChatResponse(response) => {
+                                debug!("Received AI response, forwarding to output");
+                                if let Err(_) = self.out.push(response.as_bytes().to_vec()) {
+                                    error!("Failed to send response to output");
+                                    return ProcessResult::Finished;
+                                }
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            OpenAIResult::Error(e) => {
+                                error!("OpenAI operation error: {}", e);
+                                work_units += 1; // Error handling is work
+                                context.remaining_budget -= 1;
+                            }
+                        }
+                    }
+                }
+
+                // Check for incoming messages to send within remaining budget
+                if context.remaining_budget > 0 {
+                    if let Ok(msg_bytes) = self.inn.pop() {
+                        debug!("Received message to send to OpenAI");
+                        // Send chat completion command to async thread
+                        if let Err(_) = self.cmd_sender.send(OpenAICommand::ChatCompletion(msg_bytes)) {
+                            error!("Failed to send chat completion command");
+                            return ProcessResult::Finished;
+                        }
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                }
+
+                // Signal readiness if we have pending input work
+                if self.inn.slots() > 0 {
+                    context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
+                } else {
+                    ProcessResult::NoWork
+                }
+            }
+            OpenAIChatState::Finished => {
+                ProcessResult::Finished
+            }
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -328,5 +427,12 @@ impl Component for OpenAIChatComponent {
             ],
             ..Default::default()
         }
+    }
+}
+
+impl Drop for OpenAIChatComponent {
+    fn drop(&mut self) {
+        debug!("OpenAIChatComponent dropping, sending shutdown command");
+        // Note: OpenAI async thread will terminate when cmd_sender is dropped
     }
 }
