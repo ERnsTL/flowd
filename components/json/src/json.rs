@@ -7,9 +7,6 @@ use log::{debug, error, info, trace, warn};
 
 // component-specific
 use jaq_interpret::{Ctx, FilterT, ParseCtx, RcIter, Val};
-use serde_json::Value; //Error};
-                       //use jaq_core::core;
-                       //use jaq_std::std;
 
 /*
 Ability to extract a value from a JSON data structure.
