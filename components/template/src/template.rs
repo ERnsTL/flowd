@@ -85,7 +85,7 @@ impl Component for TeraTemplateComponent {
 
                 // Configure
                 let mut tera = Tera::default();
-                match unsafe { tera.add_raw_template("a", template_str) } {
+                match tera.add_raw_template("a", template_str) {
                     Ok(_) => {
                         self.template = Some(tera);
                         return ProcessResult::DidWork(1); // Configuration processed
