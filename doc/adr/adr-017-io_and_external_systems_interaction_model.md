@@ -462,7 +462,7 @@ All IO components operate under the execution constraints defined in ADR-0002.
 Specifically:
 
 - IO must never block scheduler execution
-- process() must return immediately
+- process() MUST comply with the non-blocking execution contract defined in ADR-0002. In particular, it MUST NOT perform blocking operations and MUST return control to the scheduler without waiting for external IO or asynchronous completion.
 - scheduler controls execution timing
 
 
