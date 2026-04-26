@@ -382,7 +382,7 @@ enum HttpClientResult {
 enum HttpClientState {
     Idle,
     Processing,
-    Error(String),
+    Error(()),
 }
 
 pub struct HTTPClientComponent {
@@ -622,7 +622,7 @@ impl Component for HTTPClientComponent {
                 // Send request to worker thread
                 if let Err(e) = self.command_tx.send(HttpClientCommand::MakeRequest(url.to_string())) {
                     warn!("failed to send HTTP request to worker: {}", e);
-                    self.state = HttpClientState::Error("Failed to communicate with worker".to_string());
+                    self.state = HttpClientState::Error(());
                 } else {
                     self.state = HttpClientState::Processing;
                     work_units += 1;
