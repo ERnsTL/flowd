@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace, warn};
 
@@ -16,6 +17,7 @@ pub struct TeraTemplateComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    template: Option<Tera>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -48,121 +50,114 @@ impl Component for TeraTemplateComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            template: None,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("TeraTemplate is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("TeraTemplate process() called");
 
-        // check config port
-        trace!("read config IP");
-        while conf.is_empty() {
-            if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
-                    info!("got stop signal while waiting for template config, exiting");
-                    return;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&sig).expect("invalid utf-8")
-                    );
-                }
-            }
-            thread::yield_now();
-        }
-        let Ok(template) = conf.pop() else {
-            trace!("no config IP received - exiting");
-            return;
-        };
-
-        // configure
-        // create a new Tera instance and add a template from a string
-        //let mut tera = Tera::new("templates/**/*").unwrap();
-        let mut tera = Tera::default();
-        unsafe {
-            //let ip_str = String::from_utf8(ip).expect("invalid utf-8 in IP");
-            tera.add_raw_template("a", std::str::from_utf8_unchecked(&template))
-                .unwrap();
-        }
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+                )
             }
+        }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("got a packet, processing...");
+        // Check if we have configuration
+        if self.template.is_none() {
+            if let Ok(template_data) = self.conf.pop() {
+                debug!("received template");
+                let template_str = unsafe { std::str::from_utf8_unchecked(&template_data) };
 
-                    // prepare the context with some data
-                    let mut context = tera::Context::new();
-                    unsafe {
-                        //let ip_str = String::from_utf8(ip).expect("invalid utf-8 in IP");
-                        let ip_str = std::str::from_utf8_unchecked(&ip);
-                        context.insert("ip", &ip_str);
+                // Configure
+                let mut tera = Tera::default();
+                match unsafe { tera.add_raw_template("a", template_str) } {
+                    Ok(_) => {
+                        self.template = Some(tera);
+                        return ProcessResult::DidWork(1); // Configuration processed
                     }
+                    Err(err) => {
+                        warn!("failed to add template: {}", err);
+                        return ProcessResult::Finished; // Invalid config, finish
+                    }
+                }
+            } else {
+                // No config yet
+                return ProcessResult::NoWork;
+            }
+        }
 
-                    // render the template with the given context
-                    let rendered = tera.render("a", &context).expect("failed to render");
-                    trace!("{}", rendered);
+        let tera = self.template.as_ref().unwrap();
 
-                    // send result to out port
-                    out.push(rendered.trim().as_bytes().to_vec())
-                        .expect("could not push into OUT"); //TODO optimize - allocations?
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
+        let mut work_units = 0;
+
+        // Process available input packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("got a packet, processing...");
+
+                // Prepare the context with some data
+                let mut template_context = tera::Context::new();
+                unsafe {
+                    let ip_str = std::str::from_utf8_unchecked(&ip);
+                    template_context.insert("ip", &ip_str);
+                }
+
+                // Render the template with the given context
+                match tera.render("a", &template_context) {
+                    Ok(rendered) => {
+                        trace!("{}", rendered);
+
+                        // Send result to out port
+                        debug!("sending...");
+                        if let Ok(()) = self.out.push(rendered.trim().as_bytes().to_vec()) {
+                            debug!("done");
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        } else {
+                            // Output buffer full, stop processing for now
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        warn!("failed to render template: {}", err);
+                    }
+                }
+
+                if context.remaining_budget == 0 {
                     break;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
