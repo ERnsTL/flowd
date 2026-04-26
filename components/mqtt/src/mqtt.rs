@@ -1,38 +1,35 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
 // component-specific
 use rumqttc::{Client, Event::Incoming, MqttOptions, Packet::Publish, QoS};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+enum MQTTPublisherState {
+    WaitingForConfig,
+    Connected {
+        client: rumqttc::Client,
+        connection: rumqttc::Connection,
+        topic: String,
+    },
+    Finished,
+}
 
 pub struct MQTTPublisherComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: MQTTPublisherState,
     //graph_inout: GraphInportOutportHandle,
 }
 
 const RETAIN_MSG: bool = false; // "sticky" message to the topic, there can be only one retained message, and this message is delivered to new subscribers immediately
 const MQTT_QOS: QoS = QoS::AtMostOnce; //TODO find out what is best for FBP
-const EVENT_THREAD_JOIN_GRACE: Duration = Duration::from_secs(5);
-
-fn handoff_join(handle: thread::JoinHandle<()>, label: &'static str) {
-    thread::Builder::new()
-        .name(format!("mqtt-join-{}", label))
-        .spawn(move || {
-            if let Err(err) = handle.join() {
-                warn!("{}: deferred thread join returned error: {:?}", label, err);
-            }
-        })
-        .expect("failed to spawn mqtt deferred join thread");
-}
 
 impl Component for MQTTPublisherComponent {
     fn new(
@@ -58,243 +55,166 @@ impl Component for MQTTPublisherComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: MQTTPublisherState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("MQTTPublisher is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("MQTTPublisher process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-
-        // prepare connection arguments
-        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(mqttoptions, 10);
-        // get topic from URL
-        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
-        let mut topic = url_parsed.path();
-        if topic.is_empty() || topic == "/" {
-            error!("no topic given in MQTT URL path, exiting");
-            return;
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = MQTTPublisherState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
         }
-        // remove leading slash
-        topic = topic.trim_start_matches('/');
-        debug!("topic: {}", topic);
 
-        // signal handling for event thread shutdown
-        let eventthread_shutdown = Arc::new(AtomicBool::new(false));
-        let eventthread_shutdown_ref = eventthread_shutdown.clone();
+        match &mut self.state {
+            MQTTPublisherState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(url_vec) = self.conf.pop() {
+                    let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                    debug!("got config URL: {}", url);
 
-        // handle connection events
-        //TODO automatic reconnection
-        let event_handler_thread = thread::Builder::new()
-            .name(format!(
-                "{}/EV",
-                thread::current()
-                    .name()
-                    .expect("failed to get current thread name")
-            ))
-            .spawn(move || {
-                // Iterate to poll the eventloop for connection progress
-                //TODO or change to recv_timeout() like in MQTTSubscriber and then use signals channel to check for stop signal
-                //TODO optimize - dont know how to install a signal handler on thread level, otherwise we could save the channel and polling for shutdown
-                /*
-                for event in connection.iter() {
-                    match event {
-                        _ => {
-                            trace!("Event = {:?}", event);
-                            // nothing to do, not interested in any events
-                            //TODO really?
+                    // Parse and connect to MQTT server
+                    let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
+                    mqttoptions.set_keep_alive(Duration::from_secs(5));
+                    let (mut client, connection) = Client::new(mqttoptions, 10);
+
+                    // Get topic from URL
+                    let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
+                    let mut topic = url_parsed.path();
+                    if topic.is_empty() || topic == "/" {
+                        error!("no topic given in MQTT URL path");
+                        self.state = MQTTPublisherState::Finished;
+                        return ProcessResult::Finished;
+                    }
+                    topic = topic.trim_start_matches('/');
+                    debug!("topic: {}", topic);
+
+                    self.state = MQTTPublisherState::Connected {
+                        client,
+                        connection,
+                        topic: topic.to_owned(),
+                    };
+                    return ProcessResult::DidWork(1);
+                }
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
+
+            MQTTPublisherState::Connected { client, connection, topic } => {
+                let mut work_units = 0;
+
+                // Handle MQTT connection events cooperatively
+                if context.remaining_budget > 0 {
+                    match connection.recv_timeout(Duration::from_millis(10)) {
+                        Ok(event) => {
+                            match event {
+                                Err(err) => {
+                                    trace!("Event Err = {:?}", err);
+                                    match err {
+                                        rumqttc::ConnectionError::MqttState(err) => {
+                                            match err {
+                                                rumqttc::StateError::Io(err) => {
+                                                    if err.kind() == std::io::ErrorKind::ConnectionAborted {
+                                                        debug!("MQTT connection aborted, shutting down");
+                                                        self.state = MQTTPublisherState::Finished;
+                                                        return ProcessResult::Finished;
+                                                    } else {
+                                                        error!("MQTT state error: {:?}", err);
+                                                    }
+                                                }
+                                                _ => {
+                                                    error!("MQTT connection error: {:?}", err);
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            // Will be handled by the eventloop
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    trace!("Event = {:?}", event);
+                                    // Nothing to do, not interested in events
+                                }
+                            }
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        }
+                        Err(_) => {
+                            // No events available, continue with publishing
                         }
                     }
                 }
-                */
-                // alternative with recv_timeout()
-                /*
-                loop {
-                    // check for closed shutdown signal channel
-                    match eventthread_signalsource.try_recv() {
-                        Ok(_) => {
-                            // there will never anything be sent
-                        },
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            // nothing to do, lets continue receiving MQTT events
-                        },
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            trace!("eventloop listener got close on signal channel, shutting down");
+
+                // Publish available messages within remaining budget
+                while context.remaining_budget > 0 && !self.inn.is_empty() {
+                    debug!("got {} packets, forwarding to MQTT topic.", self.inn.slots());
+                    let chunk = self.inn
+                        .read_chunk(self.inn.slots())
+                        .expect("receive as chunk failed");
+
+                    for ip in chunk.into_iter() {
+                        debug!("publishing message to MQTT topic: {}", topic);
+                        if let Err(err) = client.publish(topic.as_str(), MQTT_QOS, RETAIN_MSG, ip) {
+                            error!("failed to publish to MQTT: {}", err);
+                            self.state = MQTTPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+
+                        if context.remaining_budget == 0 {
                             break;
                         }
                     }
-                    // block on MQTT events
-                    while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                            match event {
-                            _ => {
-                                debug!("Event = {:?}", event);
-                                // nothing to do, not interested in any events
-                                //TODO really?
-                            }
-                        }
+
+                    if context.remaining_budget == 0 {
+                        break;
                     }
                 }
-                */
-                while !eventthread_shutdown_ref.load(Ordering::Relaxed) {
-                    if let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                        match event {
-                            Err(err) => {
-                                trace!("Event Err = {:?}", err);
-                                match err {
-                                    rumqttc::ConnectionError::MqttState(err) => {
-                                        match err {
-                                            rumqttc::StateError::Io(err) => {
-                                                if err.kind()
-                                                    == std::io::ErrorKind::ConnectionAborted
-                                                {
-                                                    debug!(
-                                                        "MQTT connection aborted, shutting down"
-                                                    );
-                                                    break;
-                                                } else {
-                                                    error!("MQTT state error: {:?}", err);
-                                                    //TODO optimize - maybe send a signal to the main thread to stop the component
-                                                }
-                                            }
-                                            _ => {
-                                                error!("MQTT connection error: {:?}", err);
-                                                //TODO optimize - maybe send a signal to the main thread to stop the component
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        // will be handled by the eventloop?
-                                        //TODO make sure
-                                    }
-                                }
-                            }
-                            _ => {
-                                trace!("Event = {:?}", event);
-                                // nothing to do, not interested in any events
-                                //TODO really?
-                            }
-                        }
+
+                // Check if input is abandoned
+                if self.inn.is_abandoned() {
+                    info!("EOF on inport, shutting down");
+                    // Disconnect MQTT client
+                    if let Err(err) = client.disconnect() {
+                        warn!("failed to disconnect MQTT client cleanly: {:?}", err);
                     }
+                    self.state = MQTTPublisherState::Finished;
+                    return ProcessResult::Finished;
                 }
-                debug!("exiting");
-            })
-            .expect("failed to spawn eventloop listener thread");
 
-        // FBP main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
-            }
-
-            // check in port
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
                 } else {
-                    break;
+                    ProcessResult::NoWork
                 }
             }
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                //_ = inn.pop().ok();
-                //debug!("got a packet, dropping it.");
 
-                debug!("got {} packets, forwarding to MQTT topic.", inn.slots());
-                let chunk = inn
-                    .read_chunk(inn.slots())
-                    .expect("receive as chunk failed");
-                for ip in chunk.into_iter() {
-                    //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    client
-                        .publish(topic, MQTT_QOS, RETAIN_MSG, ip)
-                        .expect("failed to publish");
-                }
-                // NOTE: no commit_all() necessary, because into_iter() does that automatically
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                break;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
+            MQTTPublisherState::Finished => ProcessResult::Finished,
         }
-
-        // stop MQTT event thread
-        eventthread_shutdown.store(true, Ordering::Relaxed);
-        // close MQTT connection -> MQTT event thread will exit from special connection error ConnectionAborted
-        if let Err(err) = client.disconnect() {
-            warn!(
-                "MQTTPublisher: failed to disconnect MQTT client cleanly: {:?}",
-                err
-            );
-        }
-        // wait for event thread to exit (bounded)
-        let join_started = Instant::now();
-        while !event_handler_thread.is_finished()
-            && join_started.elapsed() < EVENT_THREAD_JOIN_GRACE
-        {
-            thread::sleep(Duration::from_millis(10));
-        }
-        if event_handler_thread.is_finished() {
-            if let Err(err) = event_handler_thread.join() {
-                warn!(
-                    "MQTTPublisher: failed to join eventloop listener thread: {:?}",
-                    err
-                );
-            }
-        } else {
-            warn!(
-                "MQTTPublisher: eventloop listener thread did not exit within {:?}, handing off to join reaper",
-                EVENT_THREAD_JOIN_GRACE
-            );
-            handoff_join(event_handler_thread, "MQTTPublisher");
-        }
-
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -340,11 +260,22 @@ impl Component for MQTTPublisherComponent {
     }
 }
 
+enum MQTTSubscriberState {
+    WaitingForConfig,
+    Connected {
+        client: rumqttc::Client,
+        connection: rumqttc::Connection,
+        topic: String,
+    },
+    Finished,
+}
+
 pub struct MQTTSubscriberComponent {
     conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: MQTTSubscriberState,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -375,110 +306,133 @@ impl Component for MQTTSubscriberComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: MQTTSubscriberState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(mut self) {
-        debug!("MQTTSubscriber is now run()ning!");
-        let conf = &mut self.conf; //TODO optimize
-        let out = &mut self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("MQTTSubscriber process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-
-        // prepare connection arguments
-        let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
-        mqttoptions.set_keep_alive(Duration::from_secs(5));
-        let (mut client, mut connection) = Client::new(mqttoptions, 10);
-
-        // get topic from URL
-        let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
-        let mut topic = url_parsed.path();
-        if topic.is_empty() || topic == "/" {
-            error!("no topic given in MQTT URL path, exiting");
-            return;
-        }
-        // remove leading slash
-        topic = topic.trim_start_matches('/');
-        debug!("topic: {}", topic);
-
-        // subscribe to given topic
-        //TODO enable reconnection - or is this done automatically via .iter()?
-        client.subscribe(topic, QoS::AtMostOnce).unwrap();
-
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = MQTTSubscriberState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
-
-            // iterate to poll the eventloop for connection progress
-            //TODO optimize is recv(), recv_timeout() or iter() better?
-            while let Ok(event) = connection.recv_timeout(RECV_TIMEOUT) {
-                match event {
-                    Ok(Incoming(Publish(packet))) => {
-                        debug!("Received payload from MQTT topic: {:?}", packet.payload);
-
-                        // send it
-                        debug!("forwarding MQTT payload...");
-                        out.push(packet.payload.to_vec())
-                            .expect("could not push into OUT"); //TODO optimize conversion
-                        out_wakeup.unpark();
-                        debug!("done");
-                    }
-                    _ => {
-                        trace!("Event = {:?}", event);
-                    }
-                }
-            }
-
-            // are we done?
-            //TODO handle EOF on MQTT connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
-            /*
-            if inn.is_abandoned() {
-                //TODO EOF on MQTT connection
-                info!("EOF on inport NAMES, shutting down");
-                drop(out);
-                out_wakeup.unpark();
-                break;
-            }
-            */
-
-            trace!("-- end of iteration");
-            //NOTE: dont park thread here - this is done by recv_timeout()
         }
-        info!("exiting");
+
+        match &mut self.state {
+            MQTTSubscriberState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(url_vec) = self.conf.pop() {
+                    let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                    debug!("got config URL: {}", url);
+
+                    // Parse and connect to MQTT server
+                    let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
+                    mqttoptions.set_keep_alive(Duration::from_secs(5));
+                    let (mut client, connection) = Client::new(mqttoptions, 10);
+
+                    // Get topic from URL
+                    let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
+                    let mut topic = url_parsed.path();
+                    if topic.is_empty() || topic == "/" {
+                        error!("no topic given in MQTT URL path");
+                        self.state = MQTTSubscriberState::Finished;
+                        return ProcessResult::Finished;
+                    }
+                    topic = topic.trim_start_matches('/');
+                    debug!("topic: {}", topic);
+
+                    // Subscribe to the topic
+                    if let Err(err) = client.subscribe(topic, QoS::AtMostOnce) {
+                        error!("failed to subscribe to MQTT topic: {}", err);
+                        self.state = MQTTSubscriberState::Finished;
+                        return ProcessResult::Finished;
+                    }
+
+                    self.state = MQTTSubscriberState::Connected {
+                        client,
+                        connection,
+                        topic: topic.to_owned(),
+                    };
+                    return ProcessResult::DidWork(1);
+                }
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
+
+            MQTTSubscriberState::Connected { ref mut client, connection, .. } => {
+                let mut work_units = 0;
+
+                // Process MQTT events cooperatively within remaining budget
+                while context.remaining_budget > 0 {
+                    match connection.recv_timeout(Duration::from_millis(10)) {
+                        Ok(event) => {
+                            match event {
+                                Ok(Incoming(Publish(packet))) => {
+                                    debug!("Received payload from MQTT topic: {:?}", packet.payload);
+
+                                    // Try to send it to output
+                                    match self.out.push(packet.payload.to_vec()) {
+                                        Ok(()) => {
+                                            debug!("forwarded MQTT payload");
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
+                                        }
+                                        Err(_) => {
+                                            // Output buffer full, stop processing for now
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    trace!("MQTT event error: {:?}", err);
+                                    // Continue processing other events
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                _ => {
+                                    trace!("Other MQTT event: {:?}", event);
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // No more events available, yield to scheduler
+                            break;
+                        }
+                    }
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
+                } else {
+                    ProcessResult::NoWork
+                }
+            }
+
+            MQTTSubscriberState::Finished => ProcessResult::Finished,
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
