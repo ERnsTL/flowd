@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, info, trace, warn};
 
@@ -52,85 +53,65 @@ impl Component for HTMLStripComponent {
         }
     }
 
-    fn run(self) {
-        debug!("HTMLStrip is now run()ning!");
-        //let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("HTMLStrip process() called");
 
-        // read configuration
-        //trace!("read config IPs");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        //let Ok(opts) = conf.pop() else { trace!("no config IP received - exiting"); return; };
-
-        // configure
-        // NOTE: nothing to be done here
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
+        }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // prepare packet
-                    debug!("got a packet, stripping...");
-                    // nothing to do
+        let mut work_units = 0;
 
-                    // strip HTML tags
-                    let ip_out = HTMLStripComponent::remove_html_tags(ip);
+        // Process available input packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("got a packet, stripping...");
 
-                    // send it
-                    debug!("sending...");
-                    out.push(ip_out).expect("could not push into OUT");
-                    out_wakeup.unpark();
+                // Strip HTML tags
+                let ip_out = HTMLStripComponent::remove_html_tags(ip);
+
+                // Send it
+                debug!("sending...");
+                if let Ok(()) = self.out.push(ip_out) {
                     debug!("done");
+                    work_units += 1;
+                    context.remaining_budget -= 1;
                 } else {
+                    // Output buffer full, stop processing for now
                     break;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -211,6 +192,7 @@ pub struct HTMLQueryComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    query: Option<xpath::Xpath>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -243,110 +225,120 @@ impl Component for HTMLQueryComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            query: None,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("HTMLQuery is now run()ning!");
-        let mut conf = self.conf;
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("HTMLQuery process() called");
 
-        // read configuration
-        trace!("read config IP");
-        /*
-        while conf.is_empty() {
-            thread::yield_now();
-        }
-        */
-        let Ok(query_vec) = conf.pop() else {
-            trace!("no config IP received - exiting");
-            return;
-        };
-        let query_str = std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
-
-        // configure
-        let xpath_query = xpath::parse(query_str).expect("failed to parse XPath query");
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
+        }
 
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    //TODO optimize - add support for chunks
-                    // prepare packet
-                    debug!("got a packet, processing...");
-
-                    // process packet
-                    let document = html::parse(
-                        std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8"),
-                    )
-                    .expect("failed to parse IP as HTML document");
-                    let xpath_item_tree = XpathItemTree::from(&document);
-                    let item_set = xpath_query
-                        .apply(&xpath_item_tree)
-                        .expect("failed to apply XPath query to HTML document");
-
-                    // prepare output
-                    if !item_set.is_empty() {
-                        for item in item_set.into_iter() {
-                            // prepare packet
-                            let vec_out = item.to_string().into_bytes(); //TODO currently, this quotes output strings - add option to disable quoting and other output paramaters, or add un-quote component :-)
-
-                            // send it
-                            debug!("sending...");
-                            out.push(vec_out).expect("could not push into OUT");
-                            out_wakeup.unpark();
-                            debug!("done");
-                        }
-                    } else {
-                        debug!("XPath query did not match any elements - skipping IP");
+        // Check if we have configuration
+        if self.query.is_none() {
+            if let Ok(query_vec) = self.conf.pop() {
+                let query_str = std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
+                debug!("received XPath query: {}", query_str);
+                match xpath::parse(query_str) {
+                    Ok(xpath_query) => {
+                        self.query = Some(xpath_query);
+                        return ProcessResult::DidWork(1); // Configuration processed
                     }
-                } else {
+                    Err(err) => {
+                        warn!("failed to parse XPath query: {}", err);
+                        return ProcessResult::Finished; // Invalid config, finish
+                    }
+                }
+            } else {
+                // No config yet
+                return ProcessResult::NoWork;
+            }
+        }
+
+        let xpath_query = self.query.as_ref().unwrap();
+
+        let mut work_units = 0;
+
+        // Process available input packets within remaining budget
+        while context.remaining_budget > 0 && !self.inn.is_empty() {
+            if let Ok(ip) = self.inn.pop() {
+                debug!("got a packet, processing...");
+
+                // Process packet
+                match html::parse(std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8")) {
+                    Ok(document) => {
+                        let xpath_item_tree = XpathItemTree::from(&document);
+                        match xpath_query.apply(&xpath_item_tree) {
+                            Ok(item_set) => {
+                                // Prepare output
+                                if !item_set.is_empty() {
+                                    for item in item_set.into_iter() {
+                                        // Prepare packet
+                                        let vec_out = item.to_string().into_bytes();
+
+                                        // Send it
+                                        debug!("sending...");
+                                        if let Ok(()) = self.out.push(vec_out) {
+                                            debug!("done");
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
+                                        } else {
+                                            // Output buffer full, stop processing for now
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    debug!("XPath query did not match any elements - skipping IP");
+                                }
+                            }
+                            Err(err) => {
+                                warn!("failed to apply XPath query: {}", err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!("failed to parse IP as HTML: {}", err);
+                    }
+                }
+
+                if context.remaining_budget == 0 {
                     break;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if input is abandoned
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, shutting down");
+            return ProcessResult::Finished;
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
