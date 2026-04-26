@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -15,6 +16,8 @@ pub struct CronComponent {
     tick: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    schedule: Option<OwnedScheduleIterator<Local>>,
+    next_fire_time: Option<chrono::DateTime<Local>>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -42,88 +45,96 @@ impl Component for CronComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            schedule: None,
+            next_fire_time: None,
             //graph_inout,
         }
     }
 
-    fn run(mut self) {
-        debug!("Count is now run()ning!");
-        let when = &mut self.when;
-        let tick = &mut self.tick.sink;
-        let tick_wakeup = self
-            .tick
-            .wakeup
-            .expect("got no wakeup handle for outport TICK");
-        let mut schedule: OwnedScheduleIterator<Local>;
+    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+        debug!("Cron process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        if let Ok(ip) = when.pop() {
-            //TODO the cron crate has a non-standard 7-parameter form ranging down to seconds and up to years, is that good? cron-parser has POSIX 5-parameter format
-            schedule = Schedule::from_str(std::str::from_utf8(&ip).expect("invalid utf-8"))
-                .unwrap()
-                .upcoming_owned(Local); //TODO error handling
-        } else {
-            error!("no config IP received - exiting");
-            return;
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                )
+            }
         }
 
-        'outer: loop {
-            trace!("begin of outer iteration");
-
-            // calculate next fire
-            let next = schedule.next().unwrap();
-            info!("Next fire time: {}", next);
-
-            // sleep again in case we get woken up by watchdog
-            //TODO might condition never complete when system time changes into the past?
-            while Local::now() < next {
-                trace!("begin of inner iteration");
-                // check signals
-                if let Ok(ip) = self.signals_in.try_recv() {
-                    trace!(
-                        "received signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    );
-                    // stop signal
-                    if ip == b"stop" {
-                        //TODO optimize comparison
-                        info!("got stop signal, exiting");
-                        break 'outer;
-                    } else if ip == b"ping" {
-                        trace!("got ping signal, responding");
-                        let _ = self.signals_out.try_send(b"pong".to_vec());
-                    } else {
-                        warn!(
-                            "received unknown signal ip: {}",
-                            std::str::from_utf8(&ip).expect("invalid utf-8")
-                        )
+        // Check if we have configuration
+        if self.schedule.is_none() {
+            if let Ok(ip) = self.when.pop() {
+                let cron_str = std::str::from_utf8(&ip).expect("invalid utf-8 in config IP");
+                debug!("received cron schedule: {}", cron_str);
+                match Schedule::from_str(cron_str) {
+                    Ok(schedule) => {
+                        let mut iterator = schedule.upcoming_owned(Local);
+                        if let Some(next_time) = iterator.next() {
+                            self.schedule = Some(iterator);
+                            self.next_fire_time = Some(next_time);
+                            info!("Next fire time: {}", next_time);
+                            return ProcessResult::DidWork(1); // Configuration processed
+                        } else {
+                            info!("Cron schedule has no future times, finishing");
+                            return ProcessResult::Finished;
+                        }
+                    }
+                    Err(err) => {
+                        error!("failed to parse cron schedule: {}", err);
+                        return ProcessResult::Finished; // Invalid config, finish
                     }
                 }
-
-                let dur_to_next = next - Local::now();
-
-                if let Ok(dur_to_next_std) = dur_to_next.to_std() {
-                    // cannot get woken by the condvar
-                    std::thread::sleep(dur_to_next_std);
-                } else {
-                    // out of range = negative -> we are after next already
-                    //TODO optimize this actually happens sometimes
-                    break;
-                }
+            } else {
+                // No config yet
+                return ProcessResult::NoWork;
             }
-            trace!("-- end of inner iteration");
-
-            // send notification downstream
-            debug!("sending tick");
-            //TODO really send an empty IP or just wake the downstream component? how could the receiver differentiate?
-            tick.push(vec![]).unwrap();
-            tick_wakeup.unpark();
-
-            trace!("-- end of outer iteration");
         }
-        info!("exiting");
+
+        // Check if it's time to send a tick
+        if let Some(next) = self.next_fire_time {
+            if Local::now() >= next {
+                // Time to send tick
+                info!("Cron firing at: {}", next);
+                debug!("sending tick");
+
+                if let Ok(()) = self.tick.push(vec![]) {
+                    // Get next schedule time
+                    if let Some(schedule) = self.schedule.as_mut() {
+                        if let Some(next_time) = schedule.next() {
+                            self.next_fire_time = Some(next_time);
+                            info!("Next fire time: {}", next_time);
+                        } else {
+                            self.next_fire_time = None;
+                        }
+                    }
+                    ProcessResult::DidWork(1)
+                } else {
+                    // Output buffer full, try again later
+                    ProcessResult::NoWork
+                }
+            } else {
+                // Not time yet
+                trace!("Next cron fire: {}", next);
+                ProcessResult::NoWork
+            }
+        } else {
+            // Schedule exhausted
+            info!("Cron schedule exhausted, finishing");
+            ProcessResult::Finished
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
