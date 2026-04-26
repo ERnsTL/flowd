@@ -149,13 +149,18 @@ Scheduler → Node.process()
 
 Every IO operation must define:
 
-* timeout duration
+* timeout duration in milliseconds
 * behavior on timeout
 
 Timeout results in:
 
 * failure (NACK)
 * retry (optional)
+
+Defaults:
+
+* Default timeout SHOULD be configured, eg. 5000ms.
+* timeout behavior defaults to `NACK` if no retry policy is configured
 
 ---
 
@@ -170,6 +175,12 @@ Parameters:
 * retry count
 * delay strategy (fixed, exponential)
 * jitter (optional)
+
+Defaults:
+
+* `max_retries = 0`
+* `backoff = fixed(0ms)`
+* retries stop on first permanent error or when `max_retries` is exhausted
 
 ---
 
@@ -213,13 +224,19 @@ Mechanisms:
 * queue requests internally
 * propagate backpressure upstream
 
+Mandatory constraints:
+
+* internal request queues MUST be bounded
+* each IO component MUST declare `max_inflight` and `max_pending`
+* overflow behavior MUST be explicit; default is `NACK` on enqueue rejection
+
 ---
 
 ### 10. Idempotency Requirement
 
 Because of retries:
 
-> IO operations must be idempotent or safe to repeat
+> Non-idempotent operations MUST define a deduplication or idempotency strategy.
 
 Examples:
 
@@ -235,6 +252,16 @@ Errors are classified:
 * transient (retryable)
 * permanent (fail fast)
 
+Each IO component MUST define a deterministic error mapping table
+from external/library errors to `{transient, permanent}`.
+
+
+* ACK after successful external operation
+* NACK after retries exhausted or permanent failure
+
+Each message MUST result in exactly one terminal outcome: ACK or NACK.
+
+
 ---
 
 ### 12. Integration with Delivery Semantics
@@ -242,6 +269,11 @@ Errors are classified:
 * successful IO → ACK
 * failed IO → NACK
 * retry controlled by node logic
+
+Emission point:
+
+* ACK MUST be emitted only after external success is confirmed
+* NACK MUST be emitted on permanent failure or retry exhaustion
 
 ---
 
@@ -426,7 +458,7 @@ Optional
 ## Implementation Notes
 
 * provide IO helper APIs
-* integrate async runtime (shared)
+* integrate async runtime (shared or component-local per ADR-0002 rules)
 * implement retry utilities
 * implement timeout handling
 * expose configuration options
@@ -462,7 +494,8 @@ All IO components operate under the execution constraints defined in ADR-0002.
 Specifically:
 
 - IO must never block scheduler execution
-- process() MUST comply with the non-blocking execution contract defined in ADR-0002. In particular, it MUST NOT perform blocking operations and MUST return control to the scheduler without waiting for external IO or asynchronous completion.
+- process() MUST comply with the non-blocking execution contract defined in ADR-0002. In particular, it MUST NOT perform blocking operations and MUST return control to the scheduler without waiting for external IO or asynchronous completion.
+- async completion MUST use ADR-0002 external readiness signaling (explicit scheduler wakeup), and polling-only completion detection is forbidden.
 - scheduler controls execution timing
 
 

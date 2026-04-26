@@ -4,6 +4,20 @@ Status: Accepted
 Date: 2026-02-15
 
 
+## Terminology
+
+For the purpose of this ADR:
+
+- Component: A reusable processing unit definition (code).
+- Node: A runtime instance of a component within a graph.
+
+Unless explicitly stated otherwise, the terms “node” and “component instance”
+are used interchangeably, with “node” referring to the runtime execution unit.
+
+- Graph: A collection of nodes connected via message-passing edges.
+- Edge: A message transport channel between nodes.
+
+
 ## Context
 
 The flowd runtime implements a Flow-Based Programming (FBP) execution engine with the following initial characteristics:
@@ -90,26 +104,21 @@ The runtime adopts a **hybrid scheduler-based architecture** with the following 
 5. **Budget-based execution control**
 
    * Each node receives a processing budget per activation
-   * Budget may be:
-
-     * Fixed (N messages)
-     * Byte-based
-     * Time-based
-     * Unbounded (-1 for critical nodes)
+   * Budget is defined in work units only and MUST be bounded.
 
 6. **Nodes may have internal event loops**
 
    * Nodes may:
-
      * Spawn threads
      * Use async runtimes (e.g. Tokio)
-     * Wait on external events
+     * Nodes MAY wait on external events ONLY outside of process(),e.g. in async tasks or worker threads.
    * But must expose work non-blockingly to the scheduler
 
-7. **Single async runtime per process (optional)**
+7. **Async Runtime Strategy**
 
-   * Async IO is centralized (not per node)
-   * Scheduler remains synchronous
+   * Components SHOULD use a shared async runtime when supported
+   * Components MAY use a component-local runtime when required
+   * Scheduler remains synchronous and behavior MUST remain equivalent across both patterns
 
 8. **Scheduler governs fairness, not data transport**
 
@@ -175,7 +184,7 @@ Budgets provide:
 
 Example:
 
-* `budget = -1` → realtime control nodes
+* Forbidden: `budget = -1` → realtime control nodes. Unbounded budgets are forbidden. Realtime nodes use higher but bounded budgets.
 * `budget = 10–100` → normal processing
 * `budget = 1–5` → explosive or expensive nodes
 
@@ -344,6 +353,11 @@ Rejected for core runtime; async allowed only at boundaries
 * ADR-0003: Message Model
 * ADR-0004: Backpressure & Budgeting
 * ADR-0005: Hot Reload & Graph Lifecycle
+
+### Normative Language
+
+The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT", and "MAY"
+are to be interpreted as described in RFC 2119 / RFC 8174.
 
 ### Mandatory Integration with ADR-0017 (IO Model)
 
@@ -665,6 +679,8 @@ Strict FIFO scheduling:
 #### Clarification
 
 Readiness signaling MUST be level-triggered.
+
+Scheduler MUST coalesce duplicate wakeups for the same node.
 
 This means:
 
@@ -1077,7 +1093,8 @@ Additionally:
 - process() must never block
 - scheduler is the central execution engine, not an optional layer
 
-Once these constraints are applied, the implementation is aligned with the intended architecture.
+These constraints are normative requirements.
+Conformance MUST be validated by tests and runtime checks.
 
 
 ## 8. Real-Time Components
@@ -1380,6 +1397,8 @@ It complements:
 ### Decision
 
 `process()` MUST be strictly non-blocking.
+`process()` MUST complete within a bounded and minimal time,
+sufficient to ensure scheduler responsiveness.
 
 The following operations are FORBIDDEN inside `process()`:
 
@@ -1446,15 +1465,27 @@ When async work completes:
 1. result MUST be enqueued into an output buffer
 2. scheduler MUST be explicitly woken via waker
 
----
+Async completion MUST follow this order:
+
+1. enqueue output
+2. signal scheduler
+
+Reversing this order is forbidden.
+
+Failure to signal the scheduler after async completion MUST be treated as a critical correctness violation.
+
+Components that do not signal readiness after producing output are considered invalid, as they can cause permanent execution stalls.
 
 ### Forbidden
 
 The following patterns are FORBIDDEN:
 
-* polling for async completion inside `process()`
+* polling external systems or waiting for external completion inside `process()`
 * relying on repeated scheduler invocation
 * passive waiting for external events
+
+Bounded draining of local in-memory completion queues is allowed only as regular
+work processing and MUST NOT be the sole wakeup mechanism.
 
 ---
 
@@ -1463,7 +1494,7 @@ The following patterns are FORBIDDEN:
 The runtime MUST provide:
 
 ```text id="waker_api"
-scheduler_waker.wake(node_id)
+scheduler_waker()  // node-bound, thread-safe, callable from async contexts
 ```
 
 This MUST:
@@ -1484,6 +1515,12 @@ The scheduler MUST implement a time-based wakeup primitive:
 ```text id="wake_at_api"
 wake_at(node_id, timestamp)
 ```
+
+`wake_at` MUST be:
+
+- scheduler-owned
+- cancelable when node finishes
+- idempotent across repeated registrations
 
 ---
 
@@ -1567,6 +1604,11 @@ Components MUST:
 * retry later, OR
 * buffer locally
 
+If backpressure prevents progress:
+
+- process() MUST return NoWork
+- node MUST be re-scheduled via readiness signaling
+
 ---
 
 ### Forbidden
@@ -1575,6 +1617,18 @@ The following are FORBIDDEN:
 
 * panicking on full buffers
 * dropping messages silently
+
+---
+
+### Conformance Checklist (MANDATORY)
+
+A component is ADR-002 conformant only if all conditions are true:
+
+* `process()` is non-blocking and returns in bounded minimal time
+* no network/file IO is performed inside `process()`
+* async/background completion triggers explicit scheduler wakeup
+* timer-driven behavior uses `wake_at` (no time-loop simulation in `process()`)
+* all outputs are emitted through scheduler-controlled execution paths
 
 ---
 
