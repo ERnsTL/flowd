@@ -595,14 +595,20 @@ impl FlowdServer {
                                 continue;
                             }
                             let status_snapshot = {
-                                let mut snapshot = runtime.read().expect("lock poisoned").status_snapshot();
+                                let mut snapshot =
+                                    runtime.read().expect("lock poisoned").status_snapshot();
                                 // Compatibility: tiny test graphs may complete immediately after network:start.
                                 // Allow a short grace window so getstatus reflects completed state.
-                                if snapshot.graph == _payload.graph && snapshot.started && snapshot.running {
+                                if snapshot.graph == _payload.graph
+                                    && snapshot.started
+                                    && snapshot.running
+                                {
                                     for _ in 0..10 {
                                         thread::sleep(Duration::from_millis(20));
-                                        snapshot =
-                                            runtime.read().expect("lock poisoned").status_snapshot();
+                                        snapshot = runtime
+                                            .read()
+                                            .expect("lock poisoned")
+                                            .status_snapshot();
                                         if !snapshot.running {
                                             break;
                                         }
@@ -2760,7 +2766,10 @@ impl FlowdServer {
                                         .expect("lock poisoned")
                                         .stop(graph_inout_clone, false)
                                     {
-                                        log::error!("runtime.stop() failed asynchronously: {}", err);
+                                        log::error!(
+                                            "runtime.stop() failed asynchronously: {}",
+                                            err
+                                        );
                                     }
                                 })
                                 .expect("failed to spawn async network stop thread");

@@ -25,6 +25,7 @@ impl Component for EqualsComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -65,7 +66,10 @@ impl Component for EqualsComponent {
         // Read configuration if not yet configured
         if self.cmp_value.is_none() {
             if let Ok(cmp_data) = self.cmp.pop() {
-                trace!("got cmp value: {}", std::str::from_utf8(&cmp_data).expect("invalid utf-8"));
+                trace!(
+                    "got cmp value: {}",
+                    std::str::from_utf8(&cmp_data).expect("invalid utf-8")
+                );
                 self.cmp_value = Some(cmp_data);
             } else {
                 trace!("no cmp value available yet");

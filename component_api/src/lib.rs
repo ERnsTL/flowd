@@ -17,13 +17,27 @@ pub type ProcessEdgeSinkConnection = rtrb::Producer<MessageBuf>;
 pub use rtrb::PushError; // re-eport for abstraction
 
 pub struct ProcessEdgeSink {
-    pub sink: ProcessEdgeSinkConnection,
-    pub wakeup: Option<WakeupNotify>,
-    pub proc_name: Option<String>,
-    pub signal_ready: Option<Box<dyn Fn() + Send + Sync>>,
+    sink: ProcessEdgeSinkConnection,
+    wakeup: Option<WakeupNotify>,
+    proc_name: Option<String>,
+    signal_ready: Option<SchedulerWaker>,
 }
 
 impl ProcessEdgeSink {
+    pub fn new(
+        sink: ProcessEdgeSinkConnection,
+        wakeup: Option<WakeupNotify>,
+        proc_name: Option<String>,
+        signal_ready: Option<SchedulerWaker>,
+    ) -> Self {
+        Self {
+            sink,
+            wakeup,
+            proc_name,
+            signal_ready,
+        }
+    }
+
     /// Push data into the edge and signal readiness if configured
     pub fn push(&mut self, data: MessageBuf) -> Result<(), PushError<MessageBuf>> {
         match self.sink.push(data) {
@@ -40,6 +54,10 @@ impl ProcessEdgeSink {
             }
             Err(err) => Err(err),
         }
+    }
+
+    pub fn proc_name(&self) -> Option<&str> {
+        self.proc_name.as_deref()
     }
 }
 
@@ -94,15 +112,70 @@ pub enum BudgetClass {
 }
 
 // Node context for scheduler
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NodeContext {
     pub node_id: String,
     pub budget_class: BudgetClass,
     pub remaining_budget: u32,
-    pub ready_signal: std::sync::Arc<std::sync::atomic::AtomicBool>, // level-triggered readiness
     pub last_execution: Instant,
     pub execution_count: u64,
     pub work_units_processed: u64,
+    ready_signal: std::sync::Arc<std::sync::atomic::AtomicBool>, // level-triggered readiness
+    wake_at: Option<Instant>,
+}
+
+impl Debug for NodeContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NodeContext")
+            .field("node_id", &self.node_id)
+            .field("budget_class", &self.budget_class)
+            .field("remaining_budget", &self.remaining_budget)
+            .field("last_execution", &self.last_execution)
+            .field("execution_count", &self.execution_count)
+            .field("work_units_processed", &self.work_units_processed)
+            .finish()
+    }
+}
+
+impl NodeContext {
+    pub fn new(
+        node_id: String,
+        budget_class: BudgetClass,
+        ready_signal: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
+        Self {
+            node_id,
+            budget_class,
+            remaining_budget: 0,
+            last_execution: Instant::now(),
+            execution_count: 0,
+            work_units_processed: 0,
+            ready_signal,
+            wake_at: None,
+        }
+    }
+
+    pub fn signal_ready(&self) {
+        self.ready_signal
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn clear_ready(&self) {
+        self.ready_signal
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.ready_signal.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn wake_at(&mut self, at: Instant) {
+        self.wake_at = Some(at);
+    }
+
+    pub fn take_wake_at(&mut self) -> Option<Instant> {
+        self.wake_at.take()
+    }
 }
 
 // component
@@ -113,6 +186,7 @@ pub trait Component: Send {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<SchedulerWaker>,
     ) -> Self
     where
         Self: Sized;
@@ -268,3 +342,6 @@ pub fn send_network_output_comfortable(graph_inout: &GraphInportOutportHandle, m
 pub fn send_network_previewurl_comfortable(graph_inout: &GraphInportOutportHandle, url: String) {
     (graph_inout.1)(url);
 }
+
+// Scheduler waker type for components to signal readiness from background threads
+pub type SchedulerWaker = Arc<dyn Fn() + Send + Sync>;

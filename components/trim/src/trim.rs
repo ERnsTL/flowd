@@ -20,6 +20,7 @@ impl Component for TrimComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -95,7 +96,9 @@ impl Component for TrimComponent {
 
                 // send it
                 debug!("forwarding trimmed string...");
-                self.out.push(Vec::from(text)).expect("could not push into OUT");
+                self.out
+                    .push(Vec::from(text))
+                    .expect("could not push into OUT");
                 debug!("done");
                 work_units += 1;
                 context.remaining_budget -= 1;

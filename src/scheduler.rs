@@ -1,6 +1,7 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Ordering as CmpOrdering;
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use flowd_component_api::{BudgetClass, Component, NodeContext, ProcessResult};
@@ -21,7 +22,31 @@ struct SchedulerState {
     ready_flags: HashMap<String, std::sync::Arc<AtomicBool>>,
     ready_queue: VecDeque<String>,
     ready_set: HashSet<String>,
+    timers: BinaryHeap<TimerWake>,
+    timer_latest_by_node: HashMap<String, Instant>,
     metrics: SchedulerMetrics,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct TimerWake {
+    when: Instant,
+    node_id: String,
+}
+
+impl Ord for TimerWake {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
+        // Reverse ordering so BinaryHeap pops the earliest deadline first.
+        other
+            .when
+            .cmp(&self.when)
+            .then_with(|| self.node_id.cmp(&other.node_id))
+    }
+}
+
+impl PartialOrd for TimerWake {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
+    }
 }
 
 pub struct ScheduledComponent {
@@ -93,6 +118,8 @@ impl Scheduler {
                 ready_flags: HashMap::new(),
                 ready_queue: VecDeque::new(),
                 ready_set: HashSet::new(),
+                timers: BinaryHeap::new(),
+                timer_latest_by_node: HashMap::new(),
                 metrics: SchedulerMetrics {
                     executions_per_node: HashMap::new(),
                     work_units_per_node: HashMap::new(),
@@ -109,15 +136,7 @@ impl Scheduler {
     pub fn add_node(&self, node_id: String, budget_class: BudgetClass) {
         let mut state = self.state.lock().expect("scheduler state lock poisoned");
         let ready_signal = std::sync::Arc::new(AtomicBool::new(false));
-        let context = NodeContext {
-            node_id: node_id.clone(),
-            budget_class,
-            remaining_budget: 0,
-            ready_signal: ready_signal.clone(),
-            last_execution: Instant::now(),
-            execution_count: 0,
-            work_units_processed: 0,
-        };
+        let context = NodeContext::new(node_id.clone(), budget_class, ready_signal.clone());
 
         state.ready_flags.insert(node_id.clone(), ready_signal);
         state.nodes.insert(node_id.clone(), context);
@@ -136,6 +155,26 @@ impl Scheduler {
             .insert(node_id, ScheduledComponent::new(component));
     }
 
+    pub fn create_waker(
+        scheduler_arc: &Arc<Self>,
+        node_id: String,
+    ) -> Option<flowd_component_api::SchedulerWaker> {
+        let state = scheduler_arc
+            .state
+            .lock()
+            .expect("scheduler state lock poisoned");
+        if state.nodes.contains_key(&node_id) {
+            let scheduler_weak = Arc::downgrade(scheduler_arc);
+            Some(Arc::new(move || {
+                if let Some(scheduler) = scheduler_weak.upgrade() {
+                    let _ = scheduler.signal_ready(&node_id);
+                }
+            }))
+        } else {
+            None
+        }
+    }
+
     pub fn signal_ready(&self, node_id: &str) -> bool {
         let mut state = self.state.lock().expect("scheduler state lock poisoned");
         let Some(flag) = state.ready_flags.get(node_id) else {
@@ -147,6 +186,20 @@ impl Scheduler {
             state.ready_queue.push_back(node_id.to_string());
             state.metrics.queue_depth = state.ready_queue.len();
         }
+        self.condvar.notify_one();
+        true
+    }
+
+    pub fn wake_at(&self, node_id: &str, when: Instant) -> bool {
+        let mut state = self.state.lock().expect("scheduler state lock poisoned");
+        if !state.nodes.contains_key(node_id) {
+            return false;
+        }
+        state.timer_latest_by_node.insert(node_id.to_string(), when);
+        state.timers.push(TimerWake {
+            when,
+            node_id: node_id.to_string(),
+        });
         self.condvar.notify_one();
         true
     }
@@ -171,11 +224,29 @@ impl Scheduler {
         loop {
             let (node_id, mut component, mut context) = {
                 let mut state = self.state.lock().expect("scheduler state lock poisoned");
-                while self.running.load(Ordering::Acquire) && state.ready_queue.is_empty() {
-                    state = self
-                        .condvar
-                        .wait(state)
-                        .expect("scheduler state lock poisoned while waiting");
+                loop {
+                    Self::drain_expired_timers(&mut state);
+                    if !self.running.load(Ordering::Acquire) || !state.ready_queue.is_empty() {
+                        break;
+                    }
+
+                    if let Some(next_wake) = Self::next_valid_timer_deadline(&mut state) {
+                        let now = Instant::now();
+                        if next_wake <= now {
+                            continue;
+                        }
+                        let timeout = next_wake.saturating_duration_since(now);
+                        let (guard, _) = self
+                            .condvar
+                            .wait_timeout(state, timeout)
+                            .expect("scheduler state lock poisoned while waiting with timeout");
+                        state = guard;
+                    } else {
+                        state = self
+                            .condvar
+                            .wait(state)
+                            .expect("scheduler state lock poisoned while waiting");
+                    }
                 }
 
                 if !self.running.load(Ordering::Acquire) {
@@ -210,12 +281,18 @@ impl Scheduler {
                 *work_units += outcome.work_units;
             }
 
-            let ready_flag = context.ready_signal.clone();
+            let ready_flag = context.is_ready();
+            if let Some(when) = context.take_wake_at() {
+                state.timer_latest_by_node.insert(node_id.clone(), when);
+                state.timers.push(TimerWake {
+                    when,
+                    node_id: node_id.clone(),
+                });
+            }
             state.components.insert(node_id.clone(), component);
             state.nodes.insert(node_id.clone(), context);
 
-            let should_requeue =
-                !outcome.finished && (outcome.did_work || ready_flag.load(Ordering::Acquire));
+            let should_requeue = !outcome.finished && (outcome.did_work || ready_flag);
             if should_requeue && state.ready_set.insert(node_id.clone()) {
                 state.ready_queue.push_back(node_id);
                 state.metrics.queue_depth = state.ready_queue.len();
@@ -229,7 +306,8 @@ impl Scheduler {
         context: &mut NodeContext,
     ) -> ExecutionOutcome {
         context.remaining_budget = context.budget_class as u32;
-        context.ready_signal.store(false, Ordering::Release);
+        context.clear_ready();
+        let _ = context.take_wake_at();
 
         let mut outcome = ExecutionOutcome::default();
         loop {
@@ -249,7 +327,7 @@ impl Scheduler {
                 Err(_) => {
                     // Component panicked - mark as finished and don't re-execute
                     outcome.panicked = true;
-                    context.ready_signal.store(false, Ordering::Release);
+                    context.clear_ready();
                     outcome.finished = true;
                     break;
                 }
@@ -263,7 +341,8 @@ impl Scheduler {
                     // while preserving scheduler authority, enforce at least `accounted` budget usage
                     // per reported work unit and never increase remaining budget.
                     let budget_after_component = context.remaining_budget.min(budget_before);
-                    let consumed_by_component = budget_before.saturating_sub(budget_after_component);
+                    let consumed_by_component =
+                        budget_before.saturating_sub(budget_after_component);
                     let consumed = consumed_by_component.max(accounted);
                     context.remaining_budget = budget_before.saturating_sub(consumed);
                     context.work_units_processed += accounted as u64;
@@ -276,7 +355,7 @@ impl Scheduler {
                 }
                 ProcessResult::NoWork => break,
                 ProcessResult::Finished => {
-                    context.ready_signal.store(false, Ordering::Release);
+                    context.clear_ready();
                     outcome.finished = true;
                     break;
                 }
@@ -289,6 +368,43 @@ impl Scheduler {
     pub fn stop(&self) {
         self.running.store(false, Ordering::Release);
         self.condvar.notify_all();
+    }
+
+    fn next_valid_timer_deadline(state: &mut SchedulerState) -> Option<Instant> {
+        loop {
+            let next = state.timers.peek()?;
+            match state.timer_latest_by_node.get(&next.node_id) {
+                Some(latest) if *latest == next.when => return Some(next.when),
+                _ => {
+                    let _ = state.timers.pop();
+                }
+            }
+        }
+    }
+
+    fn drain_expired_timers(state: &mut SchedulerState) {
+        let now = Instant::now();
+        while let Some(next_when) = Self::next_valid_timer_deadline(state) {
+            if next_when > now {
+                break;
+            }
+            let Some(entry) = state.timers.pop() else {
+                break;
+            };
+            match state.timer_latest_by_node.get(&entry.node_id) {
+                Some(latest) if *latest == entry.when => {
+                    state.timer_latest_by_node.remove(&entry.node_id);
+                    if let Some(flag) = state.ready_flags.get(&entry.node_id) {
+                        flag.store(true, Ordering::Release);
+                    }
+                    if state.ready_set.insert(entry.node_id.clone()) {
+                        state.ready_queue.push_back(entry.node_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+        state.metrics.queue_depth = state.ready_queue.len();
     }
 }
 
@@ -307,6 +423,7 @@ mod tests {
             _signals_in: flowd_component_api::ProcessSignalSource,
             _signals_out: flowd_component_api::ProcessSignalSink,
             _graph_inout: flowd_component_api::GraphInportOutportHandle,
+            _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
         ) -> Self {
             Self
         }
@@ -333,6 +450,7 @@ mod tests {
             _signals_in: flowd_component_api::ProcessSignalSource,
             _signals_out: flowd_component_api::ProcessSignalSink,
             _graph_inout: flowd_component_api::GraphInportOutportHandle,
+            _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
         ) -> Self {
             Self
         }
@@ -360,6 +478,7 @@ mod tests {
             _signals_in: flowd_component_api::ProcessSignalSource,
             _signals_out: flowd_component_api::ProcessSignalSink,
             _graph_inout: flowd_component_api::GraphInportOutportHandle,
+            _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
         ) -> Self {
             Self
         }
@@ -375,15 +494,11 @@ mod tests {
     }
 
     fn test_context(budget_class: BudgetClass) -> NodeContext {
-        NodeContext {
-            node_id: "test-node".to_string(),
+        NodeContext::new(
+            "test-node".to_string(),
             budget_class,
-            remaining_budget: 0,
-            ready_signal: std::sync::Arc::new(AtomicBool::new(false)),
-            last_execution: Instant::now(),
-            execution_count: 0,
-            work_units_processed: 0,
-        }
+            std::sync::Arc::new(AtomicBool::new(false)),
+        )
     }
 
     #[test]

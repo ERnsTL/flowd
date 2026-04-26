@@ -25,6 +25,7 @@ impl Component for TextReplaceComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -63,7 +64,8 @@ impl Component for TextReplaceComponent {
             // Read replacement pairs from CONF port
             while self.conf.slots() >= 2 {
                 if let (Ok(from), Ok(to)) = (self.conf.pop(), self.conf.pop()) {
-                    let from_str = String::from_utf8(from).expect("invalid utf-8 in replacement from");
+                    let from_str =
+                        String::from_utf8(from).expect("invalid utf-8 in replacement from");
                     let to_str = String::from_utf8(to).expect("invalid utf-8 in replacement to");
                     trace!("got replacement pair: from={} to={}", from_str, to_str);
                     self.replacements.push((from_str, to_str));
@@ -75,7 +77,10 @@ impl Component for TextReplaceComponent {
             // Check if configuration is complete (CONF port abandoned)
             if self.conf.is_abandoned() {
                 self.config_complete = true;
-                trace!("configuration complete, got {} replacements", self.replacements.len());
+                trace!(
+                    "configuration complete, got {} replacements",
+                    self.replacements.len()
+                );
             } else if self.replacements.is_empty() {
                 // No configuration available yet
                 trace!("no configuration available yet");

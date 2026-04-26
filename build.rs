@@ -125,17 +125,18 @@ fn main() {
     generated.push_str("    signalsource: ProcessSignalSource,\n");
     generated.push_str("    watchdog_signalsink: ProcessSignalSink,\n");
     generated.push_str("    graph_inout: GraphInportOutportHandle,\n");
+    generated.push_str("    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,\n");
     generated.push_str(") -> Option<Box<dyn Component>> {\n");
     generated.push_str("    match name {\n");
     for entry in &config.components.entry {
         generated.push_str(&format!(
-            "        \"{}\" => Some(Box::new({}::new(inports, outports, signalsource, watchdog_signalsink, graph_inout))),\n",
+            "        \"{}\" => Some(Box::new({}::new(inports, outports, signalsource, watchdog_signalsink, graph_inout, scheduler_waker))),\n",
             escape_rust_string(&entry.name),
             entry.struct_name
         ));
     }
     generated.push_str("        _ => {\n");
-    generated.push_str("            let _ = (inports, outports, signalsource, watchdog_signalsink, graph_inout);\n");
+    generated.push_str("            let _ = (inports, outports, signalsource, watchdog_signalsink, graph_inout, scheduler_waker);\n");
     generated.push_str("            None\n");
     generated.push_str("        }\n");
     generated.push_str("    }\n");

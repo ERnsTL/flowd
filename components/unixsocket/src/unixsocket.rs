@@ -10,8 +10,6 @@ use std::io::{ErrorKind, Read, Write};
 use std::time::Duration;
 use uds::UnixSocketAddr;
 
-
-
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
@@ -26,9 +24,8 @@ pub struct UnixSocketClientComponent {
     client_seqpacket: Option<uds::UnixSeqpacketConn>,
     read_timeout: Duration,
     read_buffer: [u8; DEFAULT_READ_BUFFER_SIZE],
+    pending_outbound: std::collections::VecDeque<Vec<u8>>,
 }
-
-
 
 /*
 Situation 2024-04:
@@ -55,7 +52,6 @@ enum SocketType {
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
 
-
 impl Component for UnixSocketClientComponent {
     fn new(
         mut inports: ProcessInports,
@@ -63,6 +59,7 @@ impl Component for UnixSocketClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -91,6 +88,7 @@ impl Component for UnixSocketClientComponent {
             client_seqpacket: None,
             read_timeout: DEFAULT_READ_TIMEOUT,
             read_buffer: [0u8; DEFAULT_READ_BUFFER_SIZE],
+            pending_outbound: std::collections::VecDeque::new(),
         }
     }
 
@@ -109,7 +107,8 @@ impl Component for UnixSocketClientComponent {
                 // Determine if address is abstract or path-based
                 let address_is_abstract = url.has_host();
                 let address_str = if address_is_abstract {
-                    url.host_str().expect("failed to get abstract socket address from URL host")
+                    url.host_str()
+                        .expect("failed to get abstract socket address from URL host")
                 } else {
                     let path = url.path();
                     if path.is_empty() || path == "/" {
@@ -120,7 +119,9 @@ impl Component for UnixSocketClientComponent {
                 };
 
                 // Parse socket type from URL
-                let socket_type = if let Some((_key, value)) = url.query_pairs().find(|(key, _)| key == "socket_type") {
+                let socket_type = if let Some((_key, value)) =
+                    url.query_pairs().find(|(key, _)| key == "socket_type")
+                {
                     match value.to_string().as_str() {
                         "seqpacket" => SocketType::SeqPacket,
                         "stream" => SocketType::Stream,
@@ -137,9 +138,11 @@ impl Component for UnixSocketClientComponent {
 
                 // Create socket address
                 let socket_address = if address_is_abstract {
-                    UnixSocketAddr::from_abstract(address_str).expect("failed to parse abstract socket address")
+                    UnixSocketAddr::from_abstract(address_str)
+                        .expect("failed to parse abstract socket address")
                 } else {
-                    UnixSocketAddr::from_path(address_str).expect("failed to parse path socket address")
+                    UnixSocketAddr::from_path(address_str)
+                        .expect("failed to parse path socket address")
                 };
 
                 // Store configuration
@@ -163,7 +166,9 @@ impl Component for UnixSocketClientComponent {
 
         // Connect if not already connected
         if self.client_seqpacket.is_none() && self.socket_address.is_some() {
-            if let (Some(socket_address), Some(socket_type)) = (&self.socket_address, &self.socket_type) {
+            if let (Some(socket_address), Some(socket_type)) =
+                (&self.socket_address, &self.socket_type)
+            {
                 match socket_type {
                     SocketType::SeqPacket => {
                         match uds::UnixSeqpacketConn::connect_unix_addr(socket_address) {
@@ -196,7 +201,10 @@ impl Component for UnixSocketClientComponent {
 
         // Check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
             // stop signal
             if ip == b"stop" {
                 info!("got stop signal, finishing");
@@ -205,7 +213,10 @@ impl Component for UnixSocketClientComponent {
                 trace!("got ping signal, responding");
                 let _ = self.signals_out.try_send(b"pong".to_vec());
             } else {
-                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
             }
         }
 
@@ -244,6 +255,19 @@ impl Component for UnixSocketClientComponent {
         }
 
         // Receive data within remaining budget
+        while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
+            if let Some(data) = self.pending_outbound.front() {
+                match self.out.push(data.clone()) {
+                    Ok(()) => {
+                        let _ = self.pending_outbound.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
         while context.remaining_budget > 0 {
             if let Some(conn) = &mut self.client_seqpacket {
                 match conn.recv(&mut self.read_buffer) {
@@ -257,10 +281,10 @@ impl Component for UnixSocketClientComponent {
                                     context.remaining_budget -= 1;
                                     debug!("sent received data to output");
                                 }
-                                Err(_) => {
-                                    // Output buffer full, drop data
-                                    debug!("output buffer full, dropping received data");
-                                    work_units += 1; // Count as work even if dropped
+                                Err(flowd_component_api::PushError::Full(returned)) => {
+                                    debug!("output buffer full, buffering received data");
+                                    self.pending_outbound.push_back(returned);
+                                    work_units += 1;
                                     context.remaining_budget -= 1;
                                 }
                             }
@@ -289,7 +313,7 @@ impl Component for UnixSocketClientComponent {
         }
 
         // Check if input is abandoned (EOF)
-        if self.inn.is_abandoned() {
+        if self.inn.is_abandoned() && self.pending_outbound.is_empty() {
             info!("EOF on inport IN, finishing");
             return ProcessResult::Finished;
         }
@@ -362,6 +386,8 @@ pub struct UnixSocketServerComponent {
     connections: std::collections::HashMap<u32, std::os::unix::net::UnixStream>,
     next_client_id: u32,
     read_buffer: [u8; DEFAULT_READ_BUFFER_SIZE],
+    pending_outbound: std::collections::VecDeque<Vec<u8>>,
+    pending_responses: std::collections::HashMap<u32, Vec<u8>>,
 }
 
 impl Component for UnixSocketServerComponent {
@@ -371,6 +397,7 @@ impl Component for UnixSocketServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -399,6 +426,8 @@ impl Component for UnixSocketServerComponent {
             connections: std::collections::HashMap::new(),
             next_client_id: 0,
             read_buffer: [0u8; DEFAULT_READ_BUFFER_SIZE],
+            pending_outbound: std::collections::VecDeque::new(),
+            pending_responses: std::collections::HashMap::new(),
         }
     }
 
@@ -442,7 +471,10 @@ impl Component for UnixSocketServerComponent {
 
         // Check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
             // stop signal
             if ip == b"stop" {
                 info!("got stop signal, finishing");
@@ -451,11 +483,27 @@ impl Component for UnixSocketServerComponent {
                 trace!("got ping signal, responding");
                 let _ = self.signals_out.try_send(b"pong".to_vec());
             } else {
-                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
             }
         }
 
         // Accept new connections within budget
+        while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
+            if let Some(data) = self.pending_outbound.front() {
+                match self.out.push(data.clone()) {
+                    Ok(()) => {
+                        let _ = self.pending_outbound.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(_) => break,
+                }
+            }
+        }
+
         if context.remaining_budget > 0 {
             if let Some(listener) = &self.listener {
                 match listener.accept() {
@@ -497,20 +545,28 @@ impl Component for UnixSocketServerComponent {
             match socket.read(&mut self.read_buffer) {
                 Ok(bytes_in) => {
                     if bytes_in > 0 {
-                        debug!("got {} bytes from unix socket client {}", bytes_in, client_id);
+                        debug!(
+                            "got {} bytes from unix socket client {}",
+                            bytes_in, client_id
+                        );
                         let data = Vec::from(&self.read_buffer[0..bytes_in]);
                         // Frame data with client ID for multi-client support
-                        let framed_data = format!("{}:{}", client_id, String::from_utf8_lossy(&data)).into_bytes();
+                        let framed_data =
+                            format!("{}:{}", client_id, String::from_utf8_lossy(&data))
+                                .into_bytes();
                         match self.out.push(framed_data) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
                                 debug!("sent received data from client {} to output", client_id);
                             }
-                            Err(_) => {
-                                // Output buffer full, drop data
-                                debug!("output buffer full, dropping received data from client {}", client_id);
-                                work_units += 1; // Count as work even if dropped
+                            Err(flowd_component_api::PushError::Full(returned)) => {
+                                debug!(
+                                    "output buffer full, buffering received data from client {}",
+                                    client_id
+                                );
+                                self.pending_outbound.push_back(returned);
+                                work_units += 1;
                                 context.remaining_budget -= 1;
                             }
                         }
@@ -525,7 +581,10 @@ impl Component for UnixSocketServerComponent {
                         // No data available, continue to next connection
                         continue;
                     } else {
-                        error!("failed to read from unix socket client {}: {}", client_id, err);
+                        error!(
+                            "failed to read from unix socket client {}: {}",
+                            client_id, err
+                        );
                         connections_to_remove.push(*client_id);
                     }
                 }
@@ -550,11 +609,15 @@ impl Component for UnixSocketServerComponent {
                                 Ok(_) => {
                                     work_units += 1;
                                     context.remaining_budget -= 1;
-                                    debug!("sent response to unix socket client {}", target_client_id);
+                                    debug!(
+                                        "sent response to unix socket client {}",
+                                        target_client_id
+                                    );
                                 }
                                 Err(err) => {
                                     if err.kind() == ErrorKind::WouldBlock {
-                                        warn!("would block writing response to client {}, dropping packet", target_client_id);
+                                        self.pending_responses
+                                            .insert(target_client_id, actual_response.to_vec());
                                     } else {
                                         warn!("failed to write response to client {}: {}, dropping client", target_client_id, err);
                                         connections_to_remove.push(target_client_id);
@@ -562,10 +625,16 @@ impl Component for UnixSocketServerComponent {
                                 }
                             }
                         } else {
-                            debug!("target client {} not connected, dropping response packet", target_client_id);
+                            debug!(
+                                "target client {} not connected, dropping response packet",
+                                target_client_id
+                            );
                         }
                     } else {
-                        warn!("invalid client ID '{}' in response, dropping packet", client_id_str);
+                        warn!(
+                            "invalid client ID '{}' in response, dropping packet",
+                            client_id_str
+                        );
                     }
                 } else {
                     warn!("response packet missing client ID framing (expected 'CLIENT_ID:data'), dropping packet");
@@ -573,9 +642,37 @@ impl Component for UnixSocketServerComponent {
             }
         }
 
+        let mut responses_to_remove = Vec::new();
+        for (client_id, response_data) in &self.pending_responses {
+            if context.remaining_budget == 0 {
+                break;
+            }
+            if let Some(socket) = self.connections.get_mut(client_id) {
+                match socket.write_all(response_data) {
+                    Ok(_) => {
+                        responses_to_remove.push(*client_id);
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(err) => {
+                        if err.kind() != ErrorKind::WouldBlock {
+                            responses_to_remove.push(*client_id);
+                            connections_to_remove.push(*client_id);
+                        }
+                    }
+                }
+            } else {
+                responses_to_remove.push(*client_id);
+            }
+        }
+        for client_id in responses_to_remove {
+            self.pending_responses.remove(&client_id);
+        }
+
         // Clean up closed connections
         for client_id in connections_to_remove {
             self.connections.remove(&client_id);
+            self.pending_responses.remove(&client_id);
             work_units += 1; // Count cleanup as work
             debug!("cleaned up unix socket connection {}", client_id);
         }

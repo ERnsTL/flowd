@@ -10,8 +10,9 @@ use std::sync::Arc;
 //use std::net::SocketAddr;
 use rustls::RootCertStore;
 use std::io::{BufReader, Read, Write};
-use std::net::ToSocketAddrs;
 use std::net::TcpStream;
+use std::net::ToSocketAddrs;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 pub struct TLSClientComponent {
@@ -22,11 +23,12 @@ pub struct TLSClientComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    server_name: Option<String>,
-    socket_addr: Option<std::net::SocketAddr>,
     conn: Option<rustls::ClientConnection>,
     sock: Option<TcpStream>,
     pending_data: std::collections::VecDeque<Vec<u8>>, // data to send, buffered for backpressure
+    pending_received: std::collections::VecDeque<Vec<u8>>,
+    connect_result: Option<mpsc::Receiver<Result<(rustls::ClientConnection, TcpStream), String>>>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
@@ -38,10 +40,22 @@ const READ_BUFFER: usize = 65536; // is allocated once and re-used for each read
 #[derive(Debug)]
 #[allow(dead_code)]
 enum ConnectionState {
-    Handshaking { conn: rustls::ServerConnection, sock: TcpStream },
-    Active { conn: rustls::ServerConnection, sock: TcpStream, client_id: u32 },
+    Handshaking {
+        conn: rustls::ServerConnection,
+        sock: TcpStream,
+    },
+    Active {
+        conn: rustls::ServerConnection,
+        sock: TcpStream,
+        client_id: u32,
+    },
     #[allow(dead_code)]
-    Writing { conn: rustls::ServerConnection, sock: TcpStream, client_id: u32, data: Vec<u8> },
+    Writing {
+        conn: rustls::ServerConnection,
+        sock: TcpStream,
+        client_id: u32,
+        data: Vec<u8>,
+    },
     #[allow(dead_code)]
     Closed,
 }
@@ -59,6 +73,7 @@ impl Component for TLSClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -82,11 +97,12 @@ impl Component for TLSClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
-            server_name: None,
-            socket_addr: None,
             conn: None,
             sock: None,
             pending_data: std::collections::VecDeque::new(),
+            pending_received: std::collections::VecDeque::new(),
+            connect_result: None,
+            scheduler_waker,
         }
     }
 
@@ -94,35 +110,48 @@ impl Component for TLSClientComponent {
         debug!("TLSClient is now process()ing!");
         let mut work_units = 0u32;
 
-        // Read configuration if not yet configured
-        if self.socket_addr.is_none() {
+        while context.remaining_budget > 0 && !self.pending_received.is_empty() {
+            if let Some(data) = self.pending_received.front().cloned() {
+                match self.out.push(data) {
+                    Ok(()) => {
+                        self.pending_received.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(_)) => break,
+                }
+            }
+        }
+
+        // Read configuration and establish connection asynchronously.
+        if self.conn.is_none() && self.connect_result.is_none() {
             if let Ok(url_vec) = self.conf.pop() {
-                let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-                let url = url::Url::parse(&url_str).expect("failed to parse URL");
-                let addr_str = format!(
-                    "{}:{}",
-                    url.host_str().expect("failed to parse host from URL"),
-                    url.port().expect("failed to parse port from URL")
-                );
-                let socket_addr = addr_str
-                    .to_socket_addrs()
-                    .expect("failed to resolve TLS server host")
-                    .next()
-                    .expect("TLS server host resolved to no address");
+                let url_str = std::str::from_utf8(&url_vec)
+                    .expect("invalid utf-8")
+                    .to_owned();
+                let (tx, rx) = mpsc::channel();
+                let scheduler_waker = self.scheduler_waker.clone();
+                self.connect_result = Some(rx);
+                std::thread::spawn(move || {
+                    let result = (|| -> Result<(rustls::ClientConnection, TcpStream), String> {
+                        let url = url::Url::parse(&url_str).map_err(|e| e.to_string())?;
+                        let host = url
+                            .host_str()
+                            .ok_or_else(|| "failed to parse host from URL".to_string())?
+                            .to_owned();
+                        let port = url
+                            .port()
+                            .ok_or_else(|| "failed to parse port from URL".to_string())?;
+                        let addr_str = format!("{}:{}", host, port);
+                        let socket_addr = addr_str
+                            .to_socket_addrs()
+                            .map_err(|e| e.to_string())?
+                            .next()
+                            .ok_or_else(|| "TLS server host resolved to no address".to_string())?;
+                        let sock = TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT)
+                            .map_err(|e| e.to_string())?;
+                        sock.set_nonblocking(true).map_err(|e| e.to_string())?;
 
-                self.server_name = Some(url.host_str().unwrap().to_owned());
-                self.socket_addr = Some(socket_addr);
-                trace!("got config IP, parsed address: {}", socket_addr);
-
-                // Try to connect
-                match TcpStream::connect_timeout(&socket_addr, CONNECT_TIMEOUT) {
-                    Ok(sock) => {
-                        sock.set_read_timeout(READ_TIMEOUT)
-                            .expect("failed to set read timeout on TCP client");
-                        sock.set_write_timeout(WRITE_TIMEOUT)
-                            .expect("failed to set write timeout on TCP client");
-
-                        // Set up TLS connection
                         let root_store = RootCertStore {
                             roots: webpki_roots::TLS_SERVER_ROOTS.into(),
                         };
@@ -130,21 +159,43 @@ impl Component for TLSClientComponent {
                             .with_root_certificates(root_store)
                             .with_no_client_auth();
                         config.key_log = Arc::new(rustls::KeyLogFile::new());
+                        let server_name = host.try_into().map_err(|_| "invalid server name".to_string())?;
+                        let conn = rustls::ClientConnection::new(Arc::new(config), server_name)
+                            .map_err(|e| e.to_string())?;
+                        Ok((conn, sock))
+                    })();
+                    let _ = tx.send(result);
+                    if let Some(waker) = scheduler_waker {
+                        waker();
+                    }
+                });
+            } else {
+                trace!("no config IP available yet");
+                return ProcessResult::NoWork;
+            }
+        }
 
-                        let server_name = self.server_name.as_ref().unwrap().clone().try_into().unwrap();
-                        let conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
-
+        if self.conn.is_none() {
+            if let Some(rx) = &self.connect_result {
+                match rx.try_recv() {
+                    Ok(Ok((conn, sock))) => {
                         self.conn = Some(conn);
                         self.sock = Some(sock);
-                        debug!("connected to TLS server at {}", socket_addr);
+                        self.connect_result = None;
+                        debug!("connected to TLS server");
                     }
-                    Err(e) => {
-                        warn!("failed to connect to {}: {}", socket_addr, e);
-                        return ProcessResult::NoWork; // Can't proceed without connection
+                    Ok(Err(err)) => {
+                        warn!("failed to connect TLS client: {}", err);
+                        self.connect_result = None;
+                        return ProcessResult::NoWork;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => return ProcessResult::NoWork,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.connect_result = None;
+                        return ProcessResult::NoWork;
                     }
                 }
             } else {
-                trace!("no config IP available yet");
                 return ProcessResult::NoWork;
             }
         }
@@ -318,10 +369,9 @@ impl Component for TLSClientComponent {
                                     debug!("sent received data to output");
                                 }
                                 Err(PushError::Full(_returned_data)) => {
-                                    // Output buffer full - for TLS, we might want to buffer or drop
-                                    // For now, we'll drop since TLS is streaming
-                                    debug!("output buffer full, dropping received data");
-                                    work_units += 1; // Count as work even if dropped
+                                    debug!("output buffer full, buffering received data");
+                                    self.pending_received.push_back(Vec::from(&buf[0..bytes_in]));
+                                    work_units += 1;
                                     context.remaining_budget -= 1;
                                 }
                             }
@@ -349,7 +399,10 @@ impl Component for TLSClientComponent {
         }
 
         // are we done?
-        if self.inn.is_abandoned() && self.pending_data.is_empty() {
+        if self.inn.is_abandoned()
+            && self.pending_data.is_empty()
+            && self.pending_received.is_empty()
+        {
             info!("EOF on inport IN and no pending data, finishing");
             return ProcessResult::Finished;
         }
@@ -428,6 +481,8 @@ pub struct TLSServerComponent {
     listener: Option<std::net::TcpListener>,
     connections: std::collections::HashMap<u32, Connection>,
     next_client_id: u32,
+    pending_outbound: std::collections::VecDeque<Vec<u8>>,
+    pending_responses: std::collections::VecDeque<Vec<u8>>,
 }
 
 impl Component for TLSServerComponent {
@@ -437,6 +492,7 @@ impl Component for TLSServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -477,6 +533,8 @@ impl Component for TLSServerComponent {
             listener: None,
             connections: std::collections::HashMap::new(),
             next_client_id: 0,
+            pending_outbound: std::collections::VecDeque::new(),
+            pending_responses: std::collections::VecDeque::new(),
         }
     }
 
@@ -484,12 +542,28 @@ impl Component for TLSServerComponent {
         debug!("TLSServer is now process()ing!");
         let mut work_units = 0u32;
 
+        while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
+            if let Some(data) = self.pending_outbound.front().cloned() {
+                match self.out.push(data) {
+                    Ok(()) => {
+                        self.pending_outbound.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(_)) => break,
+                }
+            }
+        }
+
         // Read configuration if not yet configured
         if self.server_config.is_none() {
             // Try to read configuration
             if let Ok(listen_addr_bytes) = self.conf.pop() {
-                self.listen_addr = Some(std::str::from_utf8(&listen_addr_bytes)
-                    .expect("invalid utf-8 listen address").to_owned());
+                self.listen_addr = Some(
+                    std::str::from_utf8(&listen_addr_bytes)
+                        .expect("invalid utf-8 listen address")
+                        .to_owned(),
+                );
                 trace!("got listen address: {}", self.listen_addr.as_ref().unwrap());
             }
 
@@ -505,8 +579,8 @@ impl Component for TLSServerComponent {
 
             // If we have all config, set up the server
             if let (Some(listen_addr), Some(cert_data), Some(key_data)) =
-                (&self.listen_addr, &self.cert_data, &self.key_data) {
-
+                (&self.listen_addr, &self.cert_data, &self.key_data)
+            {
                 // Parse certificates and key
                 let certs = rustls_pemfile::certs(&mut BufReader::new(&cert_data[..]))
                     .collect::<Result<Vec<_>, _>>()
@@ -526,7 +600,8 @@ impl Component for TLSServerComponent {
                 // Create listener
                 let listener = std::net::TcpListener::bind(listen_addr)
                     .expect("failed to bind TLS listener socket");
-                listener.set_nonblocking(true)
+                listener
+                    .set_nonblocking(true)
                     .expect("failed to set non-blocking on TLS listener");
                 self.listener = Some(listener);
 
@@ -573,9 +648,10 @@ impl Component for TLSServerComponent {
                             .expect("failed to set write timeout on client socket");
 
                         // Create TLS connection
-                        let conn = rustls::ServerConnection::new(
-                            Arc::new(self.server_config.as_ref().unwrap().clone())
-                        ).expect("failed to create TLS server connection");
+                        let conn = rustls::ServerConnection::new(Arc::new(
+                            self.server_config.as_ref().unwrap().clone(),
+                        ))
+                        .expect("failed to create TLS server connection");
 
                         let client_id = self.next_client_id;
                         self.next_client_id += 1;
@@ -614,12 +690,21 @@ impl Component for TLSServerComponent {
                     match conn.complete_io(sock) {
                         Ok(_) => {
                             // Handshake complete
-                            let conn = std::mem::replace(conn, rustls::ServerConnection::new(
-                                Arc::new(self.server_config.as_ref().unwrap().clone())
-                            ).unwrap());
-                            let sock = std::mem::replace(sock, TcpStream::connect("127.0.0.1:0").unwrap());
+                            let conn = std::mem::replace(
+                                conn,
+                                rustls::ServerConnection::new(Arc::new(
+                                    self.server_config.as_ref().unwrap().clone(),
+                                ))
+                                .unwrap(),
+                            );
+                            let sock =
+                                std::mem::replace(sock, TcpStream::connect("127.0.0.1:0").unwrap());
 
-                            connection.state = ConnectionState::Active { conn, sock, client_id: *client_id };
+                            connection.state = ConnectionState::Active {
+                                conn,
+                                sock,
+                                client_id: *client_id,
+                            };
                             connection.last_active = Instant::now();
                             work_units += 1;
                             context.remaining_budget -= 1;
@@ -640,7 +725,11 @@ impl Component for TLSServerComponent {
                     }
                 }
 
-                ConnectionState::Active { conn, sock, client_id } => {
+                ConnectionState::Active {
+                    conn,
+                    sock,
+                    client_id,
+                } => {
                     // Try to read data from client
                     match conn.read_tls(sock) {
                         Ok(0) => {
@@ -652,7 +741,10 @@ impl Component for TLSServerComponent {
                         Ok(_) => {
                             // Process any new packets
                             if let Err(e) = conn.process_new_packets() {
-                                warn!("failed to process TLS packets for client {}: {}", client_id, e);
+                                warn!(
+                                    "failed to process TLS packets for client {}: {}",
+                                    client_id, e
+                                );
                                 connections_to_remove.push(*client_id);
                                 continue;
                             }
@@ -684,10 +776,9 @@ impl Component for TLSServerComponent {
                                         debug!("sent received data to output");
                                     }
                                     Err(PushError::Full(_returned_data)) => {
-                                        // Output buffer full - for TLS server, we might want to buffer or drop
-                                        // For now, we'll drop since it's streaming
-                                        debug!("output buffer full, dropping received data from client {}", client_id);
-                                        work_units += 1; // Count as work even if dropped
+                                        debug!("output buffer full, buffering received data from client {}", client_id);
+                                        self.pending_outbound.push_back(Vec::from(&buf[0..bytes_in]));
+                                        work_units += 1;
                                         context.remaining_budget -= 1;
                                     }
                                 }
@@ -695,17 +786,28 @@ impl Component for TLSServerComponent {
                         }
                         Err(e) => {
                             if e.kind() != std::io::ErrorKind::WouldBlock {
-                                warn!("failed to read decrypted TLS data from client {}: {}", client_id, e);
+                                warn!(
+                                    "failed to read decrypted TLS data from client {}: {}",
+                                    client_id, e
+                                );
                                 connections_to_remove.push(*client_id);
                             }
                         }
                     }
                 }
 
-                ConnectionState::Writing { conn: _, sock: _, client_id: _, data: _ } => {
+                ConnectionState::Writing {
+                    conn: _,
+                    sock: _,
+                    client_id: _,
+                    data: _,
+                } => {
                     // TODO: Implement response writing
                     // For now, just mark as needing implementation
-                    debug!("response writing not yet implemented for client {}", client_id);
+                    debug!(
+                        "response writing not yet implemented for client {}",
+                        client_id
+                    );
                 }
 
                 ConnectionState::Closed => {
@@ -721,12 +823,22 @@ impl Component for TLSServerComponent {
             debug!("cleaned up TLS connection {}", client_id);
         }
 
+        if let Ok(response_data) = self.resp.pop() {
+            self.pending_responses.push_back(response_data);
+        }
+
         // Check for responses to send (simplified - send to first active connection)
         if context.remaining_budget > 0 {
-            if let Ok(response_data) = self.resp.pop() {
+            if let Some(response_data) = self.pending_responses.front().cloned() {
+                let mut sent = false;
                 // Find first active connection to send response to
                 for connection in self.connections.values_mut() {
-                    if let ConnectionState::Active { conn, sock, client_id } = &mut connection.state {
+                    if let ConnectionState::Active {
+                        conn,
+                        sock,
+                        client_id,
+                    } = &mut connection.state
+                    {
                         match conn.writer().write(&response_data) {
                             Ok(_) => {
                                 match conn.complete_io(sock) {
@@ -734,23 +846,34 @@ impl Component for TLSServerComponent {
                                         connection.last_active = Instant::now();
                                         work_units += 1;
                                         context.remaining_budget -= 1;
+                                        self.pending_responses.pop_front();
                                         debug!("sent response to TLS client {}", client_id);
+                                        sent = true;
                                         break; // Sent to first connection
                                     }
                                     Err(e) => {
                                         if e.kind() != std::io::ErrorKind::WouldBlock {
-                                            warn!("failed to send response to TLS client {}: {}", client_id, e);
+                                            warn!(
+                                                "failed to send response to TLS client {}: {}",
+                                                client_id, e
+                                            );
                                             // Could mark connection for removal
                                         }
                                     }
                                 }
                             }
                             Err(e) => {
-                                warn!("failed to write response to TLS client {}: {}", client_id, e);
+                                warn!(
+                                    "failed to write response to TLS client {}: {}",
+                                    client_id, e
+                                );
                             }
                         }
                         break; // Only try first connection for now
                     }
+                }
+                if !sent && self.connections.is_empty() {
+                    // No active connections available yet; keep data queued.
                 }
             }
         }

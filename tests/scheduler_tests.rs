@@ -2,9 +2,9 @@
 //! These tests validate scheduler behavior in isolation
 
 use flowd_rs::scheduler::Scheduler;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
 /// Mock component for testing scheduler behavior
@@ -31,6 +31,7 @@ impl flowd_component_api::Component for PanicComponent {
         _signals_in: flowd_component_api::ProcessSignalSource,
         _signals_out: flowd_component_api::ProcessSignalSink,
         _graph_inout: flowd_component_api::GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -67,6 +68,7 @@ impl flowd_component_api::Component for MockComponent {
         _signals_in: flowd_component_api::ProcessSignalSource,
         _signals_out: flowd_component_api::ProcessSignalSink,
         _graph_inout: flowd_component_api::GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -74,7 +76,10 @@ impl flowd_component_api::Component for MockComponent {
         MockComponent::new(true)
     }
 
-    fn process(&mut self, _context: &mut flowd_component_api::NodeContext) -> flowd_component_api::ProcessResult {
+    fn process(
+        &mut self,
+        _context: &mut flowd_component_api::NodeContext,
+    ) -> flowd_component_api::ProcessResult {
         let mut count = self.process_count.lock().unwrap();
         *count += 1;
 
@@ -183,9 +188,15 @@ mod tests {
         let heavy_node = "heavy_node".to_string();
         let realtime_node = "realtime_node".to_string();
 
-        scheduler.add_node(normal_node.clone(), flowd_component_api::BudgetClass::Normal);
+        scheduler.add_node(
+            normal_node.clone(),
+            flowd_component_api::BudgetClass::Normal,
+        );
         scheduler.add_node(heavy_node.clone(), flowd_component_api::BudgetClass::Heavy);
-        scheduler.add_node(realtime_node.clone(), flowd_component_api::BudgetClass::Realtime);
+        scheduler.add_node(
+            realtime_node.clone(),
+            flowd_component_api::BudgetClass::Realtime,
+        );
 
         let node_ids = scheduler.node_ids();
         assert_eq!(node_ids.len(), 3);
@@ -193,8 +204,6 @@ mod tests {
         assert!(node_ids.contains(&heavy_node));
         assert!(node_ids.contains(&realtime_node));
     }
-
-
 
     #[test]
     fn test_scheduler_invalid_node_signal() {
@@ -223,7 +232,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(100));
 
         // Scheduler should still be alive after component panic.
-        assert!(!handle.is_finished(), "scheduler thread should keep running");
+        assert!(
+            !handle.is_finished(),
+            "scheduler thread should keep running"
+        );
         assert!(
             panic_count.load(Ordering::SeqCst) >= 1,
             "panic component should have executed at least once"
@@ -249,9 +261,7 @@ mod tests {
         let handle1 = std::thread::spawn(move || runner1.run());
         std::thread::sleep(Duration::from_millis(100));
         scheduler1.stop();
-        handle1
-            .join()
-            .expect("first scheduler should stop cleanly");
+        handle1.join().expect("first scheduler should stop cleanly");
 
         // Second run with a healthy component should also work.
         let scheduler2 = Arc::new(Scheduler::new());

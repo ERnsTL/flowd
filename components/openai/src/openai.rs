@@ -30,9 +30,9 @@ struct OpenAIConfig {
 
 #[derive(Debug)]
 enum OpenAICommand {
-    SetConfig(OpenAIConfig), // set configuration
+    SetConfig(OpenAIConfig),  // set configuration
     SetInitialPrompt(String), // set initial system prompt
-    ChatCompletion(Vec<u8>), // user message bytes
+    ChatCompletion(Vec<u8>),  // user message bytes
 }
 
 #[derive(Debug)]
@@ -64,6 +64,7 @@ const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 async fn async_openai_main(
     mut cmd_rx: mpsc::UnboundedReceiver<OpenAICommand>,
     result_tx: mpsc::UnboundedSender<OpenAIResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut config: Option<OpenAIConfig> = None;
     let mut messages: Vec<ChatCompletionMessage> = Vec::new();
@@ -87,7 +88,8 @@ async fn async_openai_main(
             }
             OpenAICommand::ChatCompletion(msg_bytes) => {
                 if let Some(ref cfg) = config {
-                    let user_message_content = String::from_utf8(msg_bytes).expect("invalid utf-8 in message");
+                    let user_message_content =
+                        String::from_utf8(msg_bytes).expect("invalid utf-8 in message");
 
                     // Prepare messages for this request
                     let request_messages = if cfg.context {
@@ -118,7 +120,8 @@ async fn async_openai_main(
                         .credentials(cfg.credentials.clone())
                         .create();
 
-                    let response_result = tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await;
+                    let response_result =
+                        tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await;
 
                     match response_result {
                         Ok(Ok(response)) => {
@@ -130,22 +133,43 @@ async fn async_openai_main(
                                 messages.push(ai_message.clone());
                             }
 
-                            let content = ai_message.content.as_ref()
+                            let content = ai_message
+                                .content
+                                .as_ref()
                                 .expect("no content in AI response");
 
                             let _ = result_tx.send(OpenAIResult::ChatResponse(content.clone()));
+                            // Wake scheduler to process the result
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                         }
                         Ok(Err(err)) => {
-                            let _ = result_tx.send(OpenAIResult::Error(format!("OpenAI API error: {}", err)));
+                            let _ = result_tx
+                                .send(OpenAIResult::Error(format!("OpenAI API error: {}", err)));
+                            // Wake scheduler to process the error result
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                         }
                         Err(_) => {
                             let _ = result_tx.send(OpenAIResult::Error(format!(
-                                "OpenAI request timed out after {:?}", OPENAI_REQUEST_TIMEOUT
+                                "OpenAI request timed out after {:?}",
+                                OPENAI_REQUEST_TIMEOUT
                             )));
+                            // Wake scheduler to process the error result
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                         }
                     }
                 } else {
-                    let _ = result_tx.send(OpenAIResult::Error("OpenAI not configured".to_string()));
+                    let _ =
+                        result_tx.send(OpenAIResult::Error("OpenAI not configured".to_string()));
+                    // Wake scheduler to process the error result
+                    if let Some(ref waker) = scheduler_waker {
+                        waker();
+                    }
                 }
             }
         }
@@ -159,6 +183,7 @@ impl Component for OpenAIChatComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -171,7 +196,11 @@ impl Component for OpenAIChatComponent {
                 .enable_all()
                 .build()
                 .unwrap();
-            rt.block_on(async_openai_main(cmd_receiver, result_sender));
+            rt.block_on(async_openai_main(
+                cmd_receiver,
+                result_sender,
+                scheduler_waker,
+            ));
         }));
 
         OpenAIChatComponent {
@@ -240,32 +269,37 @@ impl Component for OpenAIChatComponent {
                     let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
 
                     // Get API key
-                    let api_key = url.query_pairs()
+                    let api_key = url
+                        .query_pairs()
                         .find(|(key, _)| key == "apikey")
                         .map(|(_, value)| value.to_string())
                         .expect("no API key found in configuration URL");
 
                     // Get model
-                    let model = url.query_pairs()
+                    let model = url
+                        .query_pairs()
                         .find(|(key, _)| key == "model")
                         .map(|(_, value)| value.to_string())
                         .unwrap_or_else(|| "gpt-3.5-turbo".to_string());
 
                     // Get context
-                    let context_enabled = url.query_pairs()
+                    let context_enabled = url
+                        .query_pairs()
                         .find(|(key, _)| key == "context")
                         .and_then(|(_, value)| value.parse().ok())
                         .unwrap_or(false);
 
                     // Get initial prompt
-                    let initialprompt = url.query_pairs()
+                    let initialprompt = url
+                        .query_pairs()
                         .find(|(key, _)| key == "initialprompt")
                         .and_then(|(_, value)| value.parse().ok())
                         .unwrap_or(false);
 
                     // Set credentials
                     let credentials = if url.host_str().unwrap_or("default") != "default" {
-                        let base_url = format!("{}://{}{}",
+                        let base_url = format!(
+                            "{}://{}{}",
                             url.scheme(),
                             url.host_str().expect("no host in URL"),
                             url.path()
@@ -307,10 +341,14 @@ impl Component for OpenAIChatComponent {
             OpenAIChatState::WaitingForInitialPrompt => {
                 // Check if we have initial prompt on IN port
                 if let Ok(prompt_bytes) = self.inn.pop() {
-                    let prompt_str = String::from_utf8(prompt_bytes).expect("invalid utf-8 in initial prompt");
+                    let prompt_str =
+                        String::from_utf8(prompt_bytes).expect("invalid utf-8 in initial prompt");
 
                     // Send initial prompt to async thread
-                    if let Err(_) = self.cmd_sender.send(OpenAICommand::SetInitialPrompt(prompt_str)) {
+                    if let Err(_) = self
+                        .cmd_sender
+                        .send(OpenAICommand::SetInitialPrompt(prompt_str))
+                    {
                         error!("Failed to send initial prompt command");
                         return ProcessResult::Finished;
                     }
@@ -356,7 +394,10 @@ impl Component for OpenAIChatComponent {
                     if let Ok(msg_bytes) = self.inn.pop() {
                         debug!("Received message to send to OpenAI");
                         // Send chat completion command to async thread
-                        if let Err(_) = self.cmd_sender.send(OpenAICommand::ChatCompletion(msg_bytes)) {
+                        if let Err(_) = self
+                            .cmd_sender
+                            .send(OpenAICommand::ChatCompletion(msg_bytes))
+                        {
                             error!("Failed to send chat completion command");
                             return ProcessResult::Finished;
                         }
@@ -367,7 +408,7 @@ impl Component for OpenAIChatComponent {
 
                 // Signal readiness if we have pending input work
                 if self.inn.slots() > 0 {
-                    context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                    context.signal_ready();
                 }
 
                 if work_units > 0 {
@@ -376,9 +417,7 @@ impl Component for OpenAIChatComponent {
                     ProcessResult::NoWork
                 }
             }
-            OpenAIChatState::Finished => {
-                ProcessResult::Finished
-            }
+            OpenAIChatState::Finished => ProcessResult::Finished,
         }
     }
 

@@ -95,7 +95,7 @@ async fn async_matrix_main(
     result_tx: mpsc::UnboundedSender<MatrixClientResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
-    let scheduler_waker = scheduler_waker.map(std::sync::Arc::new);
+    let scheduler_waker = scheduler_waker;
     let mut client: Option<Client> = None;
     let mut room_id: Option<OwnedRoomId> = None;
     #[allow(unused_assignments)]
@@ -512,9 +512,7 @@ impl Component for MatrixClientComponent {
 
                 // Signal readiness if we have pending input work
                 if self.inn.slots() > 0 {
-                    context
-                        .ready_signal
-                        .store(true, std::sync::atomic::Ordering::Release);
+                    context.signal_ready();
                 }
 
                 if work_units > 0 {

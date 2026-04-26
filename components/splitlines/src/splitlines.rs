@@ -25,6 +25,7 @@ impl Component for SplitLinesComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -96,9 +97,13 @@ impl Component for SplitLinesComponent {
                     debug!("got a text to split");
 
                     // split into lines
-                    let lines: Vec<Vec<u8>> = ip.split(|&x| x == b'\n').map(|x| x.to_vec()).collect();
+                    let lines: Vec<Vec<u8>> =
+                        ip.split(|&x| x == b'\n').map(|x| x.to_vec()).collect();
                     self.line_iter = Some(lines.into_iter());
-                    debug!("created iterator with {} lines", self.line_iter.as_ref().unwrap().len());
+                    debug!(
+                        "created iterator with {} lines",
+                        self.line_iter.as_ref().unwrap().len()
+                    );
                 }
             }
 

@@ -41,12 +41,7 @@ impl RepeatTestHarness {
         let mut outports = MultiMap::new();
         outports.insert(
             "OUT".to_string(),
-            ProcessEdgeSink {
-                sink: output_producer,
-                wakeup: None,
-                proc_name: None,
-                signal_ready: None,
-            },
+            ProcessEdgeSink::new(output_producer, None, None, None),
         );
 
         // Create dummy graph_inout handle (not used in tests)
@@ -65,15 +60,12 @@ impl RepeatTestHarness {
             None, // scheduler_waker
         );
 
-        let context = NodeContext {
-            node_id: "test_repeat".to_string(),
-            budget_class: BudgetClass::Normal,
-            remaining_budget: 32,
-            ready_signal: Arc::new(AtomicBool::new(false)),
-            last_execution: Instant::now(),
-            execution_count: 0,
-            work_units_processed: 0,
-        };
+        let mut context = NodeContext::new(
+            "test_repeat".to_string(),
+            BudgetClass::Normal,
+            Arc::new(AtomicBool::new(false)),
+        );
+        context.remaining_budget = 32;
 
         RepeatTestHarness {
             component,
@@ -175,21 +167,11 @@ impl HTTPClientTestHarness {
         let mut outports = MultiMap::new();
         outports.insert(
             "RESP".to_string(),
-            ProcessEdgeSink {
-                sink: resp_producer,
-                wakeup: None,
-                proc_name: None,
-                signal_ready: None,
-            },
+            ProcessEdgeSink::new(resp_producer, None, None, None),
         );
         outports.insert(
             "ERR".to_string(),
-            ProcessEdgeSink {
-                sink: err_producer,
-                wakeup: None,
-                proc_name: None,
-                signal_ready: None,
-            },
+            ProcessEdgeSink::new(err_producer, None, None, None),
         );
 
         // Create dummy graph_inout handle
@@ -205,15 +187,12 @@ impl HTTPClientTestHarness {
             None, // scheduler_waker
         );
 
-        let context = NodeContext {
-            node_id: "test_http_client".to_string(),
-            budget_class: BudgetClass::Normal,
-            remaining_budget: 32,
-            ready_signal: Arc::new(AtomicBool::new(false)),
-            last_execution: Instant::now(),
-            execution_count: 0,
-            work_units_processed: 0,
-        };
+        let mut context = NodeContext::new(
+            "test_http_client".to_string(),
+            BudgetClass::Normal,
+            Arc::new(AtomicBool::new(false)),
+        );
+        context.remaining_budget = 32;
 
         Ok(HTTPClientTestHarness {
             component,
@@ -373,12 +352,7 @@ impl HTTPServerTestHarness {
         let mut outports = MultiMap::new();
         outports.insert(
             "REQ".to_string(),
-            ProcessEdgeSink {
-                sink: req_producer,
-                wakeup: None,
-                proc_name: None,
-                signal_ready: None,
-            },
+            ProcessEdgeSink::new(req_producer, None, None, None),
         );
 
         // Create dummy graph_inout handle
@@ -394,15 +368,12 @@ impl HTTPServerTestHarness {
             None, // scheduler_waker
         );
 
-        let context = NodeContext {
-            node_id: "test_http_server".to_string(),
-            budget_class: BudgetClass::Normal,
-            remaining_budget: 32,
-            ready_signal: Arc::new(AtomicBool::new(false)),
-            last_execution: Instant::now(),
-            execution_count: 0,
-            work_units_processed: 0,
-        };
+        let mut context = NodeContext::new(
+            "test_http_server".to_string(),
+            BudgetClass::Normal,
+            Arc::new(AtomicBool::new(false)),
+        );
+        context.remaining_budget = 32;
 
         Ok(HTTPServerTestHarness {
             component,

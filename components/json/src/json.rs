@@ -35,6 +35,7 @@ impl Component for JSONQueryComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -88,7 +89,8 @@ impl Component for JSONQueryComponent {
         // Check if we have configuration
         if self.query.is_none() {
             if let Ok(filter_vec) = self.conf.pop() {
-                let filter_str = std::str::from_utf8(&filter_vec).expect("invalid utf-8 in config IP");
+                let filter_str =
+                    std::str::from_utf8(&filter_vec).expect("invalid utf-8 in config IP");
                 debug!("received query: {}", filter_str);
 
                 // Configure

@@ -1035,14 +1035,14 @@ impl Runtime {
                 let scheduler_clone = scheduler_for_signaling.clone();
                 sourceproc.outports.insert(
                     edge.source.port.to_ascii_uppercase(),
-                    ProcessEdgeSink {
-                        sink: sink,
-                        wakeup: None,
-                        proc_name: Some(target_process.clone()),
-                        signal_ready: Some(Box::new(move || {
+                    ProcessEdgeSink::new(
+                        sink,
+                        None,
+                        Some(target_process.clone()),
+                        Some(Arc::new(move || {
                             let _ = scheduler_clone.signal_ready(&target_process);
                         })),
-                    },
+                    ),
                 );
             }
         }
@@ -1073,14 +1073,14 @@ impl Runtime {
             let scheduler_clone = scheduler_for_signaling.clone();
             sourceproc.outports.insert(
                 public_name.clone(),
-                ProcessEdgeSink {
-                    sink: sink,
-                    wakeup: None, // Scheduler handles signaling, no thread wakeup needed
-                    proc_name: Some(target_process.clone()),
-                    signal_ready: Some(Box::new(move || {
+                ProcessEdgeSink::new(
+                    sink,
+                    None, // Scheduler handles signaling, no thread wakeup needed
+                    Some(target_process.clone()),
+                    Some(Arc::new(move || {
                         let _ = scheduler_clone.signal_ready(&target_process);
                     })),
-                },
+                ),
             );
         }
         for (public_name, edge) in graph.outports.iter() {
@@ -1105,12 +1105,12 @@ impl Runtime {
             // arrayports: insert, but remember that this is a multimap
             sourceproc.outports.insert(
                 edge.port.to_ascii_uppercase(),
-                ProcessEdgeSink {
-                    sink: sink,
-                    wakeup: None,
-                    proc_name: Some(format!("{}-OUT", graph.properties.name)),
-                    signal_ready: None,
-                },
+                ProcessEdgeSink::new(
+                    sink,
+                    None,
+                    Some(format!("{}-OUT", graph.properties.name)),
+                    None,
+                ),
             );
         }
 
@@ -1305,15 +1305,7 @@ impl Runtime {
                     }
                     // insert that port
                     let edge0 = edge.pop().unwrap();
-                    outports.insert(
-                        port_name,
-                        ProcessEdgeSink {
-                            sink: edge0.sink,
-                            wakeup: None,
-                            proc_name: edge0.proc_name,
-                            signal_ready: edge0.signal_ready,
-                        },
-                    );
+                    outports.insert(port_name, edge0);
                 }
                 // save the inports (where we put packets into) as the graph inport channel handles; they are "outport handles" because they are being written into (packet sink)
                 graph_inout.inports = Some(outports);

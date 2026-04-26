@@ -135,7 +135,10 @@ mod tests {
                     "empty",
                 ];
                 let long_message = "very_long_message_".repeat(10);
-                let all_messages = test_messages.iter().map(|s| *s).chain(std::iter::once(long_message.as_str()));
+                let all_messages = test_messages
+                    .iter()
+                    .map(|s| *s)
+                    .chain(std::iter::once(long_message.as_str()));
 
                 // Send all test messages
                 for msg in all_messages {
@@ -151,13 +154,21 @@ mod tests {
                 for (i, output) in outputs.iter().enumerate() {
                     if i < test_messages.len() {
                         let expected = test_messages[i].as_bytes();
-                        assert_eq!(output.as_slice(), expected,
+                        assert_eq!(
+                            output.as_slice(),
+                            expected,
                             "Message {} corrupted: expected {:?}, got {:?}",
-                            i, expected, output.as_slice());
+                            i,
+                            expected,
+                            output.as_slice()
+                        );
                     } else {
                         // Check the long message
-                        assert!(output.starts_with(b"very_long_message_"),
-                            "Long message corrupted: got {:?}", output.as_slice());
+                        assert!(
+                            output.starts_with(b"very_long_message_"),
+                            "Long message corrupted: got {:?}",
+                            output.as_slice()
+                        );
                     }
                 }
 

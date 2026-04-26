@@ -38,6 +38,7 @@ impl Component for MQTTPublisherComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -92,7 +93,8 @@ impl Component for MQTTPublisherComponent {
                     debug!("got config URL: {}", url);
 
                     // Parse and connect to MQTT server
-                    let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
+                    let mut mqttoptions =
+                        MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
                     mqttoptions.set_keep_alive(Duration::from_secs(5));
                     let (client, connection) = Client::new(mqttoptions, 10);
 
@@ -122,7 +124,11 @@ impl Component for MQTTPublisherComponent {
                 return ProcessResult::NoWork;
             }
 
-            MQTTPublisherState::Connected { client, connection, topic } => {
+            MQTTPublisherState::Connected {
+                client,
+                connection,
+                topic,
+            } => {
                 let mut work_units = 0;
 
                 // Handle MQTT connection events cooperatively
@@ -136,7 +142,9 @@ impl Component for MQTTPublisherComponent {
                                         rumqttc::ConnectionError::MqttState(err) => {
                                             match err {
                                                 rumqttc::StateError::Io(err) => {
-                                                    if err.kind() == std::io::ErrorKind::ConnectionAborted {
+                                                    if err.kind()
+                                                        == std::io::ErrorKind::ConnectionAborted
+                                                    {
                                                         debug!("MQTT connection aborted, shutting down");
                                                         self.state = MQTTPublisherState::Finished;
                                                         return ProcessResult::Finished;
@@ -170,8 +178,12 @@ impl Component for MQTTPublisherComponent {
 
                 // Publish available messages within remaining budget
                 while context.remaining_budget > 0 && !self.inn.is_empty() {
-                    debug!("got {} packets, forwarding to MQTT topic.", self.inn.slots());
-                    let chunk = self.inn
+                    debug!(
+                        "got {} packets, forwarding to MQTT topic.",
+                        self.inn.slots()
+                    );
+                    let chunk = self
+                        .inn
                         .read_chunk(self.inn.slots())
                         .expect("receive as chunk failed");
 
@@ -279,8 +291,6 @@ pub struct MQTTSubscriberComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-
-
 impl Component for MQTTSubscriberComponent {
     fn new(
         mut inports: ProcessInports,
@@ -288,6 +298,7 @@ impl Component for MQTTSubscriberComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -341,7 +352,8 @@ impl Component for MQTTSubscriberComponent {
                     debug!("got config URL: {}", url);
 
                     // Parse and connect to MQTT server
-                    let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
+                    let mut mqttoptions =
+                        MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
                     mqttoptions.set_keep_alive(Duration::from_secs(5));
                     let (mut client, connection) = Client::new(mqttoptions, 10);
 
@@ -363,7 +375,10 @@ impl Component for MQTTSubscriberComponent {
                         return ProcessResult::Finished;
                     }
 
-                    info!("MQTT subscriber connected and subscribed to topic: {}", topic);
+                    info!(
+                        "MQTT subscriber connected and subscribed to topic: {}",
+                        topic
+                    );
                     self.state = MQTTSubscriberState::Connected {
                         client,
                         connection,
@@ -379,7 +394,11 @@ impl Component for MQTTSubscriberComponent {
                 return ProcessResult::NoWork;
             }
 
-            MQTTSubscriberState::Connected { client, connection, topic } => {
+            MQTTSubscriberState::Connected {
+                client,
+                connection,
+                topic,
+            } => {
                 // Check signals
                 if let Ok(ip) = self.signals_in.try_recv() {
                     trace!(
@@ -415,7 +434,10 @@ impl Component for MQTTSubscriberComponent {
                         Ok(event) => {
                             match event {
                                 Ok(Incoming(Publish(packet))) => {
-                                    debug!("Received payload from MQTT topic: {:?}", packet.payload);
+                                    debug!(
+                                        "Received payload from MQTT topic: {:?}",
+                                        packet.payload
+                                    );
 
                                     // Try to send it to output
                                     match self.out.push(packet.payload.to_vec()) {

@@ -19,6 +19,7 @@ impl Component for FlowdVisComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -86,7 +87,7 @@ impl Component for FlowdVisComponent {
 
         // Signal readiness if we have pending input work
         if self.inn.slots() > 0 {
-            context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+            context.signal_ready();
         }
 
         if work_units > 0 {

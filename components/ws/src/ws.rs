@@ -14,8 +14,13 @@ use tungstenite::protocol::Message;
 #[derive(Debug)]
 enum WSClientState {
     WaitingForConfig,
-    Connecting { url: String, connect_start: std::time::Instant },
-    Connected { client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>> },
+    Connecting {
+        url: String,
+        connect_start: std::time::Instant,
+    },
+    Connected {
+        client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+    },
     Finished,
 }
 
@@ -26,15 +31,21 @@ pub struct WSClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: WSClientState,
-    connect_result: Option<mpsc::Receiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>>,
+    connect_result: Option<
+        mpsc::Receiver<
+            Result<
+                tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+                tungstenite::Error,
+            >,
+        >,
+    >,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     //graph_inout: GraphInportOutportHandle,
 }
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(7);
-
-
 
 impl Component for WSClientComponent {
     fn new(
@@ -43,6 +54,7 @@ impl Component for WSClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -67,6 +79,7 @@ impl Component for WSClientComponent {
             signals_out: signals_out,
             state: WSClientState::WaitingForConfig,
             connect_result: None,
+            scheduler_waker,
             //graph_inout: graph_inout,
         }
     }
@@ -119,12 +132,14 @@ impl Component for WSClientComponent {
                 if self.connect_result.is_none() {
                     let (tx, rx) = mpsc::channel();
                     self.connect_result = Some(rx);
-                    let ready_signal = context.ready_signal.clone();
                     let url_clone = url.clone();
+                    let scheduler_waker = self.scheduler_waker.clone();
                     std::thread::spawn(move || {
                         let result = tungstenite::client::connect(&url_clone).map(|(ws, _)| ws);
                         let _ = tx.send(result);
-                        ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                        if let Some(waker) = scheduler_waker {
+                            waker();
+                        }
                     });
                 }
 
@@ -138,7 +153,6 @@ impl Component for WSClientComponent {
                                     warn!("failed to set client socket timeouts: {}", err);
                                 }
                                 self.state = WSClientState::Connected { client };
-                                context.ready_signal.store(false, std::sync::atomic::Ordering::Release);
                                 return ProcessResult::DidWork(1);
                             }
                             Err(err) => {
@@ -148,7 +162,10 @@ impl Component for WSClientComponent {
                             }
                         }
                     } else if connect_start.elapsed() > CONNECT_TIMEOUT {
-                        error!("timed out connecting to WebSocket server after {:?}", CONNECT_TIMEOUT);
+                        error!(
+                            "timed out connecting to WebSocket server after {:?}",
+                            CONNECT_TIMEOUT
+                        );
                         self.state = WSClientState::Finished;
                         return ProcessResult::Finished;
                     }
@@ -165,7 +182,8 @@ impl Component for WSClientComponent {
                     let to_process = available.min(context.remaining_budget as usize);
                     if to_process > 0 {
                         debug!("sending {} packets into WebSocket...", to_process);
-                        let chunk = self.inn
+                        let chunk = self
+                            .inn
                             .read_chunk(to_process)
                             .expect("receive as chunk failed");
 
@@ -195,7 +213,9 @@ impl Component for WSClientComponent {
                     debug!("got message from WebSocket, repeating...");
                     match client.read() {
                         Ok(msg) => {
-                            self.out.push(msg.into_data()).expect("could not push into OUT");
+                            self.out
+                                .push(msg.into_data())
+                                .expect("could not push into OUT");
                             debug!("done");
                             work_units += 1;
                             context.remaining_budget -= 1;
@@ -327,6 +347,7 @@ impl Component for WSServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -411,7 +432,11 @@ impl Component for WSServerComponent {
                 return ProcessResult::NoWork;
             }
 
-            WSServerState::Listening { listener, connections, next_connection_id } => {
+            WSServerState::Listening {
+                listener,
+                connections,
+                next_connection_id,
+            } => {
                 let mut work_units = 0;
 
                 // Accept new connections
@@ -439,7 +464,10 @@ impl Component for WSServerComponent {
                                     context.remaining_budget -= 1;
                                 }
                                 Err(e) => {
-                                    error!("failed to accept/upgrade to WebSocket connection: {}", e);
+                                    error!(
+                                        "failed to accept/upgrade to WebSocket connection: {}",
+                                        e
+                                    );
                                 }
                             }
                         }
@@ -465,7 +493,9 @@ impl Component for WSServerComponent {
                     match websocket.read() {
                         Ok(message) => {
                             debug!("got message from connection {}, pushing to OUT", conn_id);
-                            self.out.push(message.into_data()).expect("could not push IP into OUT");
+                            self.out
+                                .push(message.into_data())
+                                .expect("could not push IP into OUT");
                             work_units += 1;
                             context.remaining_budget -= 1;
                         }

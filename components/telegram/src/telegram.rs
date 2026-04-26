@@ -4,7 +4,6 @@ use flowd_component_api::{
     ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
-use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 
 // component-specific
@@ -69,7 +68,7 @@ async fn async_telegram_main(
     result_tx: mpsc::UnboundedSender<TelegramBotResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
-    let scheduler_waker = scheduler_waker.map(std::sync::Arc::new);
+    let scheduler_waker = scheduler_waker;
     let mut bot: Option<Bot> = None;
     let mut chat_id: i64 = 0;
     let mut dispatcher_handle: Option<tokio::task::JoinHandle<()>> = None;
@@ -358,7 +357,7 @@ impl Component for TelegramBotComponent {
 
                 // Signal readiness if we have pending input work
                 if self.inn.slots() > 0 {
-                    context.ready_signal.store(true, Ordering::Release);
+                    context.signal_ready();
                 }
 
                 if work_units > 0 {

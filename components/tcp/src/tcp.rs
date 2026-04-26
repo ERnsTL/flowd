@@ -59,6 +59,7 @@ pub struct TCPClientComponent {
     state: ClientState,
     socket_addr: Option<SocketAddr>,
     pending_data: std::collections::VecDeque<Vec<u8>>, // data to send, buffered for backpressure
+    pending_received: std::collections::VecDeque<Vec<u8>>,
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
@@ -73,57 +74,55 @@ impl TCPClientComponent {
         loop {
             // Try to receive a command
             match command_rx.try_recv() {
-                Ok(command) => {
-                    match command {
-                        ClientCommand::Connect(addr) => {
-                            debug!("Worker: attempting to connect to {}", addr);
-                            match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-                                Ok(s) => {
-                                    if let Err(e) = s.set_read_timeout(READ_TIMEOUT) {
-                                        let _ = result_tx.send(ClientResult::Error(e));
-                                        continue;
-                                    }
-                                    if let Err(e) = s.set_write_timeout(WRITE_TIMEOUT) {
-                                        let _ = result_tx.send(ClientResult::Error(e));
-                                        continue;
-                                    }
-                                    stream = Some(s);
-                                    let _ = result_tx.send(ClientResult::Connected);
-                                    debug!("Worker: connected to {}", addr);
+                Ok(command) => match command {
+                    ClientCommand::Connect(addr) => {
+                        debug!("Worker: attempting to connect to {}", addr);
+                        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+                            Ok(s) => {
+                                if let Err(e) = s.set_read_timeout(READ_TIMEOUT) {
+                                    let _ = result_tx.send(ClientResult::Error(e));
+                                    continue;
                                 }
-                                Err(e) => {
-                                    debug!("Worker: failed to connect to {}: {}", addr, e);
-                                    let _ = result_tx.send(ClientResult::ConnectionFailed(e));
+                                if let Err(e) = s.set_write_timeout(WRITE_TIMEOUT) {
+                                    let _ = result_tx.send(ClientResult::Error(e));
+                                    continue;
                                 }
+                                stream = Some(s);
+                                let _ = result_tx.send(ClientResult::Connected);
+                                debug!("Worker: connected to {}", addr);
                             }
-                        }
-                        ClientCommand::SendData(data) => {
-                            if let Some(ref mut s) = stream {
-                                match s.write_all(&data) {
-                                    Ok(()) => {
-                                        let _ = s.flush();
-                                        let _ = result_tx.send(ClientResult::DataSent);
-                                        debug!("Worker: sent {} bytes", data.len());
-                                    }
-                                    Err(e) => {
-                                        debug!("Worker: failed to send data: {}", e);
-                                        let _ = result_tx.send(ClientResult::Error(e));
-                                    }
-                                }
-                            } else {
-                                let _ = result_tx.send(ClientResult::Error(std::io::Error::new(
-                                    std::io::ErrorKind::NotConnected,
-                                    "No active connection"
-                                )));
+                            Err(e) => {
+                                debug!("Worker: failed to connect to {}: {}", addr, e);
+                                let _ = result_tx.send(ClientResult::ConnectionFailed(e));
                             }
-                        }
-                        ClientCommand::Disconnect => {
-                            stream = None;
-                            let _ = result_tx.send(ClientResult::ConnectionClosed);
-                            debug!("Worker: disconnected");
                         }
                     }
-                }
+                    ClientCommand::SendData(data) => {
+                        if let Some(ref mut s) = stream {
+                            match s.write_all(&data) {
+                                Ok(()) => {
+                                    let _ = s.flush();
+                                    let _ = result_tx.send(ClientResult::DataSent);
+                                    debug!("Worker: sent {} bytes", data.len());
+                                }
+                                Err(e) => {
+                                    debug!("Worker: failed to send data: {}", e);
+                                    let _ = result_tx.send(ClientResult::Error(e));
+                                }
+                            }
+                        } else {
+                            let _ = result_tx.send(ClientResult::Error(std::io::Error::new(
+                                std::io::ErrorKind::NotConnected,
+                                "No active connection",
+                            )));
+                        }
+                    }
+                    ClientCommand::Disconnect => {
+                        stream = None;
+                        let _ = result_tx.send(ClientResult::ConnectionClosed);
+                        debug!("Worker: disconnected");
+                    }
+                },
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     // No command, try to read data if connected
                     if let Some(ref mut s) = stream {
@@ -189,6 +188,7 @@ impl Component for TCPClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -227,12 +227,26 @@ impl Component for TCPClientComponent {
             state: ClientState::Disconnected,
             socket_addr: None,
             pending_data: std::collections::VecDeque::new(),
+            pending_received: std::collections::VecDeque::new(),
         }
     }
 
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("TCPClient is now process()ing!");
         let mut work_units = 0u32;
+
+        while context.remaining_budget > 0 && !self.pending_received.is_empty() {
+            if let Some(data) = self.pending_received.front().cloned() {
+                match self.out.push(data) {
+                    Ok(()) => {
+                        self.pending_received.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(_)) => break,
+                }
+            }
+        }
 
         // Read configuration if not yet configured
         if self.socket_addr.is_none() {
@@ -287,9 +301,9 @@ impl Component for TCPClientComponent {
                             work_units += 1;
                             debug!("forwarded received data to output");
                         }
-                        Err(PushError::Full(_)) => {
-                            // Output buffer full, drop data
-                            debug!("output buffer full, dropping received data");
+                        Err(PushError::Full(returned)) => {
+                            debug!("output buffer full, buffering received data");
+                            self.pending_received.push_back(returned);
                             work_units += 1;
                         }
                     }
@@ -387,7 +401,10 @@ impl Component for TCPClientComponent {
         }
 
         // are we done?
-        if self.inn.is_abandoned() && self.pending_data.is_empty() {
+        if self.inn.is_abandoned()
+            && self.pending_data.is_empty()
+            && self.pending_received.is_empty()
+        {
             info!("EOF on inport IN and no pending data, finishing");
             let _ = self.command_tx.send(ClientCommand::Disconnect);
             return ProcessResult::Finished;
@@ -475,6 +492,7 @@ pub struct TCPServerComponent {
     connections: HashMap<u32, Connection>,
     next_client_id: u32,
     pending_responses: HashMap<u32, Vec<u8>>, // client_id -> response data
+    pending_outbound: std::collections::VecDeque<Vec<u8>>,
 }
 
 impl Component for TCPServerComponent {
@@ -484,6 +502,7 @@ impl Component for TCPServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -512,6 +531,7 @@ impl Component for TCPServerComponent {
             connections: HashMap::new(),
             next_client_id: 0,
             pending_responses: HashMap::new(),
+            pending_outbound: std::collections::VecDeque::new(),
         }
     }
 
@@ -571,6 +591,20 @@ impl Component for TCPServerComponent {
             }
         }
 
+        // Drain buffered outbound packets before reading new client data.
+        while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
+            if let Some(data) = self.pending_outbound.front() {
+                match self.out.push(data.clone()) {
+                    Ok(()) => {
+                        let _ = self.pending_outbound.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(PushError::Full(_)) => break,
+                }
+            }
+        }
+
         // Accept new connections (within budget)
         if context.remaining_budget > 0 {
             if let Some(listener) = &self.listener {
@@ -625,11 +659,15 @@ impl Component for TCPServerComponent {
                         let data = Vec::from(&buf[0..bytes_read]);
 
                         // Update last active time
-                        let ConnectionState::Active { ref mut last_active } = connection.state;
+                        let ConnectionState::Active {
+                            ref mut last_active,
+                        } = connection.state;
                         *last_active = Instant::now();
 
                         // Frame data with client ID for multi-client support
-                        let framed_data = format!("{}:{}", client_id, String::from_utf8_lossy(&data)).into_bytes();
+                        let framed_data =
+                            format!("{}:{}", client_id, String::from_utf8_lossy(&data))
+                                .into_bytes();
                         match self.out.push(framed_data) {
                             Ok(()) => {
                                 work_units += 1;
@@ -637,9 +675,12 @@ impl Component for TCPServerComponent {
                                 debug!("sent received data from client {} to output", client_id);
                             }
                             Err(PushError::Full(_)) => {
-                                // Output buffer full, drop the data for now
-                                debug!("output buffer full, dropping received data from client {}", client_id);
-                                work_units += 1; // Count as work even if dropped
+                                debug!("output buffer full, buffering received data from client {}", client_id);
+                                self.pending_outbound.push_back(
+                                    format!("{}:{}", client_id, String::from_utf8_lossy(&data))
+                                        .into_bytes(),
+                                );
+                                work_units += 1;
                                 context.remaining_budget -= 1;
                             }
                         }
@@ -684,34 +725,54 @@ impl Component for TCPServerComponent {
                                     context.remaining_budget -= 1;
 
                                     // Update last active time
-                                    let ConnectionState::Active { ref mut last_active } = connection.state;
+                                    let ConnectionState::Active {
+                                        ref mut last_active,
+                                    } = connection.state;
                                     *last_active = Instant::now();
                                 }
                                 Err(e) => {
                                     match e.kind() {
                                         ErrorKind::WouldBlock => {
                                             // Would block, buffer for later retry
-                                            self.pending_responses.insert(target_client_id, actual_response.to_vec());
+                                            self.pending_responses
+                                                .insert(target_client_id, actual_response.to_vec());
                                             work_units += 1;
                                             context.remaining_budget -= 1;
-                                            debug!("buffered response for client {} (would block)", target_client_id);
+                                            debug!(
+                                                "buffered response for client {} (would block)",
+                                                target_client_id
+                                            );
                                         }
-                                        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset | ErrorKind::NotConnected => {
-                                            warn!("connection to client {} broken, removing", target_client_id);
+                                        ErrorKind::BrokenPipe
+                                        | ErrorKind::ConnectionReset
+                                        | ErrorKind::NotConnected => {
+                                            warn!(
+                                                "connection to client {} broken, removing",
+                                                target_client_id
+                                            );
                                             connections_to_remove.push(target_client_id);
                                         }
                                         _ => {
-                                            warn!("failed to write to TCP client {}: {}", target_client_id, e);
+                                            warn!(
+                                                "failed to write to TCP client {}: {}",
+                                                target_client_id, e
+                                            );
                                             connections_to_remove.push(target_client_id);
                                         }
                                     }
                                 }
                             }
                         } else {
-                            debug!("target client {} not connected, dropping response packet", target_client_id);
+                            debug!(
+                                "target client {} not connected, dropping response packet",
+                                target_client_id
+                            );
                         }
                     } else {
-                        warn!("invalid client ID '{}' in response, dropping packet", client_id_str);
+                        warn!(
+                            "invalid client ID '{}' in response, dropping packet",
+                            client_id_str
+                        );
                     }
                 } else {
                     warn!("response packet missing client ID framing (expected 'CLIENT_ID:data'), dropping packet");
@@ -736,7 +797,9 @@ impl Component for TCPServerComponent {
                         responses_to_remove.push(*client_id);
 
                         // Update last active time
-                        let ConnectionState::Active { ref mut last_active } = connection.state;
+                        let ConnectionState::Active {
+                            ref mut last_active,
+                        } = connection.state;
                         *last_active = Instant::now();
                     }
                     Err(e) => {
@@ -745,7 +808,10 @@ impl Component for TCPServerComponent {
                                 // Still would block, leave in buffer
                             }
                             _ => {
-                                warn!("failed to write buffered response to TCP client {}: {}", client_id, e);
+                                warn!(
+                                    "failed to write buffered response to TCP client {}: {}",
+                                    client_id, e
+                                );
                                 connections_to_remove.push(*client_id);
                                 responses_to_remove.push(*client_id);
                             }
@@ -772,7 +838,10 @@ impl Component for TCPServerComponent {
         }
 
         // Check for abandoned input ports
-        if self.resp.is_abandoned() && self.pending_responses.is_empty() {
+        if self.resp.is_abandoned()
+            && self.pending_responses.is_empty()
+            && self.pending_outbound.is_empty()
+        {
             info!("RESP input abandoned and no pending responses, finishing");
             return ProcessResult::Finished;
         }

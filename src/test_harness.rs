@@ -17,9 +17,7 @@ impl TestHarness {
             "test".to_string(),
         ));
 
-        TestHarness {
-            harness,
-        }
+        TestHarness { harness }
     }
 
     /// Get access to the underlying BenchRuntimeHarness
@@ -31,8 +29,6 @@ impl TestHarness {
     pub fn harness_mut(&mut self) -> &mut BenchRuntimeHarness {
         &mut self.harness
     }
-
-
 
     /// Add a component under test
     pub fn add_component_under_test(&mut self, component_name: &str, node_id: &str) -> &mut Self {
@@ -67,7 +63,13 @@ impl TestHarness {
     }
 
     /// Connect components in the test graph
-    pub fn connect(&mut self, from_node: &str, from_port: &str, to_node: &str, to_port: &str) -> &mut Self {
+    pub fn connect(
+        &mut self,
+        from_node: &str,
+        from_port: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> &mut Self {
         let graph_name = self
             .harness
             .graph
@@ -104,28 +106,38 @@ impl TestHarness {
 
     /// Add graph inport for external input
     pub fn add_graph_inport(&mut self, public_name: &str, node: &str, port: &str) -> &mut Self {
-        self.harness.graph.write().expect("lock poisoned").add_inport(
-            public_name.to_string(),
-            GraphPort {
-                process: node.to_string(),
-                port: port.to_string(),
-                metadata: GraphPortMetadata { x: 0, y: 0 },
-            },
-        ).expect("Failed to add graph inport");
+        self.harness
+            .graph
+            .write()
+            .expect("lock poisoned")
+            .add_inport(
+                public_name.to_string(),
+                GraphPort {
+                    process: node.to_string(),
+                    port: port.to_string(),
+                    metadata: GraphPortMetadata { x: 0, y: 0 },
+                },
+            )
+            .expect("Failed to add graph inport");
 
         self
     }
 
     /// Add graph outport for external output
     pub fn add_graph_outport(&mut self, public_name: &str, node: &str, port: &str) -> &mut Self {
-        self.harness.graph.write().expect("lock poisoned").add_outport(
-            public_name.to_string(),
-            GraphPort {
-                process: node.to_string(),
-                port: port.to_string(),
-                metadata: GraphPortMetadata { x: 400, y: 0 },
-            },
-        ).expect("Failed to add graph outport");
+        self.harness
+            .graph
+            .write()
+            .expect("lock poisoned")
+            .add_outport(
+                public_name.to_string(),
+                GraphPort {
+                    process: node.to_string(),
+                    port: port.to_string(),
+                    metadata: GraphPortMetadata { x: 400, y: 0 },
+                },
+            )
+            .expect("Failed to add graph outport");
 
         self
     }
@@ -181,8 +193,14 @@ impl TestHarness {
     }
 
     /// Wait for output on a graph outport
-    pub fn wait_for_output(&self, outport: &str, expected_count: usize, timeout: Duration) -> std::result::Result<(), std::io::Error> {
-        self.harness.wait_for_outport_data(outport, expected_count, timeout)
+    pub fn wait_for_output(
+        &self,
+        outport: &str,
+        expected_count: usize,
+        timeout: Duration,
+    ) -> std::result::Result<(), std::io::Error> {
+        self.harness
+            .wait_for_outport_data(outport, expected_count, timeout)
     }
 
     /// Collect outputs from a graph outport
@@ -197,7 +215,8 @@ impl TestHarness {
 
     /// Assert sequence equality for outputs
     pub fn assert_outputs_sequence_equal(&self, outport: &str, expected: &[&[u8]]) {
-        self.harness.assert_outputs_sequence_equal(outport, expected);
+        self.harness
+            .assert_outputs_sequence_equal(outport, expected);
     }
 
     /// Assert no message loss
@@ -237,7 +256,7 @@ impl TestHarness {
 
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
-            format!("Condition not met within {} cycles", max_cycles)
+            format!("Condition not met within {} cycles", max_cycles),
         ))
     }
 
@@ -280,16 +299,23 @@ impl TestHarness {
     /// Assert backpressure behavior - verify bounded memory usage and eventual processing
     /// This test validates the core backpressure invariant: bounded edges prevent unbounded memory growth
     /// and ensure all messages are eventually processed, without timing assumptions.
-    pub fn assert_backpressure_behavior(&self, input_port: &str, output_port: &str, test_data: &[&[u8]]) {
+    pub fn assert_backpressure_behavior(
+        &self,
+        input_port: &str,
+        output_port: &str,
+        test_data: &[&[u8]],
+    ) {
         // Send all messages at once to potentially saturate bounded edges
         for data in test_data {
-            self.send_input(input_port, data).expect("Failed to send input");
+            self.send_input(input_port, data)
+                .expect("Failed to send input");
         }
 
         // Send additional messages to test that system remains stable under load
         for i in 0..5 {
             let extra_data = format!("backpressure_test_msg_{}", i);
-            self.send_input(input_port, extra_data.as_bytes()).expect("Failed to send backpressure test input");
+            self.send_input(input_port, extra_data.as_bytes())
+                .expect("Failed to send backpressure test input");
         }
 
         let total_expected = test_data.len() + 5;
@@ -349,7 +375,7 @@ impl TestHarness {
         input_port: &str,
         output_port: &str,
         inputs: &[&[u8]],
-        setup_fn: F
+        setup_fn: F,
     ) where
         F: Fn(&Self) -> std::result::Result<(), std::io::Error>,
     {
@@ -361,7 +387,8 @@ impl TestHarness {
         self.clear_outputs();
         setup_fn(self).expect("Setup failed for first run");
         for input in inputs {
-            self.send_input(input_port, input).expect("Failed to send input in first run");
+            self.send_input(input_port, input)
+                .expect("Failed to send input in first run");
         }
         self.wait_for_output(output_port, inputs.len(), Duration::from_secs(2))
             .expect("First run timed out");
@@ -371,7 +398,8 @@ impl TestHarness {
         self.clear_outputs();
         setup_fn(self).expect("Setup failed for second run");
         for input in inputs {
-            self.send_input(input_port, input).expect("Failed to send input in second run");
+            self.send_input(input_port, input)
+                .expect("Failed to send input in second run");
         }
         self.wait_for_output(output_port, inputs.len(), Duration::from_secs(2))
             .expect("Second run timed out");

@@ -1,7 +1,7 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource, PushError,
+    ProcessSignalSink, ProcessSignalSource, PushError, PROCESSEDGE_BUFSIZE,
 };
 use log::{debug, info, trace, warn};
 
@@ -11,6 +11,7 @@ use staart::TailedFile;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
+use std::sync::mpsc;
 
 pub struct FileReaderComponent {
     conf: ProcessEdgeSource,
@@ -21,6 +22,8 @@ pub struct FileReaderComponent {
     // Runtime state
     filenames: std::collections::VecDeque<Vec<u8>>,
     pending_files: std::collections::VecDeque<Vec<u8>>, // files to send, buffered for backpressure
+    pending_read: Option<mpsc::Receiver<Result<Vec<u8>, std::io::Error>>>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
 impl Component for FileReaderComponent {
@@ -30,6 +33,7 @@ impl Component for FileReaderComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -50,6 +54,8 @@ impl Component for FileReaderComponent {
             //graph_inout: graph_inout,
             filenames: std::collections::VecDeque::new(),
             pending_files: std::collections::VecDeque::new(),
+            pending_read: None,
+            scheduler_waker,
         }
     }
 
@@ -60,7 +66,10 @@ impl Component for FileReaderComponent {
         // Read configuration filenames if we haven't buffered them all yet
         while self.filenames.is_empty() && !self.conf.is_abandoned() {
             if let Ok(filename) = self.conf.pop() {
-                trace!("got filename: {}", std::str::from_utf8(&filename).expect("invalid utf-8"));
+                trace!(
+                    "got filename: {}",
+                    std::str::from_utf8(&filename).expect("invalid utf-8")
+                );
                 self.filenames.push_back(filename);
             } else {
                 break;
@@ -106,67 +115,69 @@ impl Component for FileReaderComponent {
             }
         }
 
-        // Then, process new filenames within remaining budget
-        while context.remaining_budget > 0 && !self.filenames.is_empty() {
-            // stay responsive to stop/ping even while processing files
-            if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
-                    info!("got stop signal while processing, finishing");
-                    return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
-            }
-
+        // Start one asynchronous file read when idle.
+        if self.pending_read.is_none() && !self.filenames.is_empty() {
             if let Some(filename) = self.filenames.front() {
-                let file_path = std::str::from_utf8(filename).expect("non utf-8 data");
-                debug!("processing filename: {}", &file_path);
+                let file_path = std::str::from_utf8(filename)
+                    .expect("non utf-8 data")
+                    .to_owned();
+                debug!("starting async read for {}", file_path);
+                let (tx, rx) = mpsc::channel();
+                let scheduler_waker = self.scheduler_waker.clone();
+                std::thread::spawn(move || {
+                    let result = std::fs::read(&file_path);
+                    let _ = tx.send(result);
+                    if let Some(waker) = scheduler_waker {
+                        waker();
+                    }
+                });
+                self.pending_read = Some(rx);
+            }
+        }
 
-                // read whole file
-                //TODO may be big file - add chunking
-                //TODO enclose files in brackets to know where its stream of chunks start and end
-                debug!("reading file...");
-                match std::fs::read(file_path) {
-                    Ok(contents) => {
-                        // Try to send it
-                        debug!("forwarding file contents...");
+        // Complete async read if available.
+        if context.remaining_budget > 0 {
+            if let Some(rx) = &self.pending_read {
+                match rx.try_recv() {
+                    Ok(Ok(contents)) => {
                         match self.out.push(contents) {
-                            Ok(()) => {
-                                self.filenames.pop_front();
-                                work_units += 1;
-                                context.remaining_budget -= 1;
-                                debug!("done");
-                            }
+                            Ok(()) => {}
                             Err(PushError::Full(returned_content)) => {
-                                // Output buffer full, buffer internally for later retry
-                                debug!("output buffer full, buffering file content internally");
                                 self.pending_files.push_back(returned_content);
-                                self.filenames.pop_front(); // We processed the file, just couldn't send
-                                work_units += 1;
-                                context.remaining_budget -= 1;
-                                // Continue processing more files that might fit
                             }
                         }
-                    }
-                    Err(e) => {
-                        warn!("failed to read file {}: {}", file_path, e);
-                        self.filenames.pop_front(); // Skip this file
-                        work_units += 1; // Count as work even if failed
+                        self.pending_read = None;
+                        self.filenames.pop_front();
+                        work_units += 1;
                         context.remaining_budget -= 1;
                     }
+                    Ok(Err(e)) => {
+                        if let Some(filename) = self.filenames.front() {
+                            warn!(
+                                "failed to read file {}: {}",
+                                std::str::from_utf8(filename).unwrap_or("<invalid utf-8>"),
+                                e
+                            );
+                        }
+                        self.pending_read = None;
+                        self.filenames.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.pending_read = None;
+                    }
                 }
-            } else {
-                break;
             }
         }
 
         // are we done?
-        if self.filenames.is_empty() && self.conf.is_abandoned() && self.pending_files.is_empty() {
+        if self.filenames.is_empty()
+            && self.conf.is_abandoned()
+            && self.pending_files.is_empty()
+            && self.pending_read.is_none()
+        {
             info!("EOF on inport NAMES and all files processed, finishing");
             return ProcessResult::Finished;
         }
@@ -233,6 +244,7 @@ impl Component for FileTailerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -433,7 +445,10 @@ pub struct FileWriterComponent {
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
     filename: Option<String>,
-    file: Option<BufWriter<File>>,
+    writer_tx: Option<mpsc::SyncSender<Vec<u8>>>,
+    writer_result_rx: Option<mpsc::Receiver<std::io::Result<()>>>,
+    pending_writes: std::collections::VecDeque<Vec<u8>>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
 const BUFFER_SIZE: usize = 65536;
@@ -445,6 +460,7 @@ impl Component for FileWriterComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -464,7 +480,10 @@ impl Component for FileWriterComponent {
             signals_out: signals_out,
             //graph_inout: graph_inout,
             filename: None,
-            file: None,
+            writer_tx: None,
+            writer_result_rx: None,
+            pending_writes: std::collections::VecDeque::new(),
+            scheduler_waker,
         }
     }
 
@@ -473,24 +492,45 @@ impl Component for FileWriterComponent {
         let mut work_units = 0u32;
 
         // Read configuration if not yet configured
-        if self.filename.is_none() {
+        if self.filename.is_none() || self.writer_tx.is_none() {
             if let Ok(file_name_bytes) = self.conf.pop() {
-                let file_name = std::str::from_utf8(&file_name_bytes).expect("failed to parse filename as UTF-8");
+                let file_name = std::str::from_utf8(&file_name_bytes)
+                    .expect("failed to parse filename as UTF-8");
                 trace!("got filename: {}", file_name);
                 self.filename = Some(file_name.to_string());
-
-                // Open the file
-                match File::create(file_name) {
-                    Ok(file) => {
-                        let buffer = BufWriter::with_capacity(BUFFER_SIZE, file);
-                        self.file = Some(buffer);
-                        trace!("opened file for writing");
+                let (data_tx, data_rx) = mpsc::sync_channel::<Vec<u8>>(PROCESSEDGE_BUFSIZE);
+                let (result_tx, result_rx) = mpsc::channel::<std::io::Result<()>>();
+                let file_name_owned = file_name.to_string();
+                let scheduler_waker = self.scheduler_waker.clone();
+                std::thread::spawn(move || {
+                    let file = match File::create(&file_name_owned) {
+                        Ok(file) => file,
+                        Err(e) => {
+                            let _ = result_tx.send(Err(e));
+                            if let Some(waker) = scheduler_waker {
+                                waker();
+                            }
+                            return;
+                        }
+                    };
+                    let mut buffer = BufWriter::with_capacity(BUFFER_SIZE, file);
+                    let _ = result_tx.send(Ok(()));
+                    if let Some(waker) = scheduler_waker.as_ref() {
+                        waker();
                     }
-                    Err(e) => {
-                        warn!("failed to open file {}: {}", file_name, e);
-                        return ProcessResult::NoWork; // Can't proceed without file
+                    while let Ok(packet) = data_rx.recv() {
+                        let write_result = buffer
+                            .write_all(packet.as_slice())
+                            .and_then(|_| buffer.flush());
+                        let _ = result_tx.send(write_result);
+                        if let Some(waker) = scheduler_waker.as_ref() {
+                            waker();
+                        }
                     }
-                }
+                });
+                self.writer_tx = Some(data_tx);
+                self.writer_result_rx = Some(result_rx);
+                work_units += 1;
             } else {
                 trace!("no config filename available yet");
                 return ProcessResult::NoWork;
@@ -518,57 +558,43 @@ impl Component for FileWriterComponent {
             }
         }
 
-        // Write available chunks within remaining budget
-        while context.remaining_budget > 0 {
-            // stay responsive to stop/ping even while writing
-            if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
-                    info!("got stop signal while processing, finishing");
-                    return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+        if let Some(result_rx) = &self.writer_result_rx {
+            while let Ok(result) = result_rx.try_recv() {
+                if let Err(e) = result {
+                    warn!("failed to write to file: {}", e);
                 }
+                work_units += 1;
             }
+        }
 
-            if let Some(buffer) = &mut self.file {
-                // Try to read a chunk
-                if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
-                    if chunk.is_empty() {
-                        break; // No more data available
+        if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
+            for ip in chunk {
+                self.pending_writes.push_back(ip);
+            }
+        }
+
+        while context.remaining_budget > 0 && !self.pending_writes.is_empty() {
+            if let (Some(tx), Some(packet)) = (&self.writer_tx, self.pending_writes.front().cloned()) {
+                match tx.try_send(packet) {
+                    Ok(()) => {
+                        self.pending_writes.pop_front();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
                     }
-
-                    debug!("got {} packets to write", chunk.len());
-
-                    for ip in chunk.into_iter() {
-                        if let Err(e) = buffer.write(ip.as_slice()) {
-                            warn!("failed to write IP to buffer: {}", e);
-                            // Continue with other IPs
-                        }
+                    Err(mpsc::TrySendError::Full(_)) => break,
+                    Err(mpsc::TrySendError::Disconnected(_)) => {
+                        warn!("file writer worker disconnected");
+                        self.writer_tx = None;
+                        break;
                     }
-
-                    // Flush the buffer
-                    if let Err(e) = buffer.flush() {
-                        warn!("failed to flush buffer to file: {}", e);
-                    }
-
-                    work_units += 1;
-                    context.remaining_budget -= 1;
-                } else {
-                    break; // No more data
                 }
             } else {
-                // File not opened
                 break;
             }
         }
 
         // Check for EOF on input
-        if self.inn.is_abandoned() {
+        if self.inn.is_abandoned() && self.pending_writes.is_empty() {
             info!("EOF on inport IN, finishing");
             return ProcessResult::Finished;
         }

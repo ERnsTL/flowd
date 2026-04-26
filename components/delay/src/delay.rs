@@ -68,6 +68,7 @@ impl Component for DelayComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self {
         DelayComponent {
             conf: inports
@@ -198,7 +199,9 @@ impl Component for DelayComponent {
 
         // If we have pending packets, set ready signal to be re-queued when time comes
         if !self.pending_packets.is_empty() {
-            context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+            if let Some(next_ready) = self.pending_packets.front().map(|pkt| pkt.ready_time) {
+                context.wake_at(next_ready);
+            }
         }
 
         if work_units > 0 {

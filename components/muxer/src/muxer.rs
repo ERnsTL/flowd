@@ -20,6 +20,7 @@ impl Component for MuxerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -153,6 +154,7 @@ impl Component for Demux3Component {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self {
         Demux3Component {
             inn: inports
@@ -279,5 +281,3 @@ impl Component for Demux3Component {
         }
     }
 }
-
-

@@ -2,8 +2,8 @@
 //! Tests for high-load scenarios, parallel execution, and scheduler fairness
 
 use flowd_rs::test_harness::TestHarness;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 const STRESS_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -70,8 +70,11 @@ mod tests {
                     let handle = thread::spawn(move || {
                         // Each thread sends its share of messages
                         for msg_id in 0..messages_per_thread {
-                            let message = format!("concurrent_msg_thread{}_msg{}", thread_id, msg_id);
-                            tx_clone.send(message).expect("Failed to send message through channel");
+                            let message =
+                                format!("concurrent_msg_thread{}_msg{}", thread_id, msg_id);
+                            tx_clone
+                                .send(message)
+                                .expect("Failed to send message through channel");
                         }
                     });
                     handles.push(handle);
@@ -169,7 +172,6 @@ mod tests {
                     for msg in 0..burst_size {
                         h.send_input("IN", format!("burst{}_msg{}", burst, msg).as_bytes())?;
                     }
-
                 }
 
                 let total_messages = 3 * burst_size;
@@ -218,7 +220,6 @@ mod tests {
                     for msg in 0..(message_count / 10) {
                         h.send_input("IN", format!("stable_batch{}_msg{}", batch, msg).as_bytes())?;
                     }
-
                 }
 
                 // Wait for all outputs to be processed
@@ -255,11 +256,15 @@ mod tests {
 
                 // Verify all patterns are preserved (component isolation)
                 for pattern in &patterns {
-                    let pattern_count = outputs.iter()
+                    let pattern_count = outputs
+                        .iter()
                         .filter(|output| output.starts_with(pattern.as_bytes()))
                         .count();
-                    assert_eq!(pattern_count, 50,
-                        "Pattern {} should have 50 messages, got {}", pattern, pattern_count);
+                    assert_eq!(
+                        pattern_count, 50,
+                        "Pattern {} should have 50 messages, got {}",
+                        pattern, pattern_count
+                    );
                 }
 
                 Ok(())

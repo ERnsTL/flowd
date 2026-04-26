@@ -28,6 +28,7 @@ impl Component for CronComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -128,8 +129,14 @@ impl Component for CronComponent {
             } else {
                 // Not time yet
                 trace!("Next cron fire: {}", next);
-                // Set ready signal to be re-queued when time comes
-                context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                let now = Local::now();
+                if next > now {
+                    if let Ok(dur) = (next - now).to_std() {
+                        context.wake_at(std::time::Instant::now() + dur);
+                    }
+                } else {
+                    context.signal_ready();
+                }
                 ProcessResult::NoWork
             }
         } else {

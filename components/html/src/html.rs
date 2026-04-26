@@ -31,6 +31,7 @@ impl Component for HTMLStripComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -203,6 +204,7 @@ impl Component for HTMLQueryComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -256,7 +258,8 @@ impl Component for HTMLQueryComponent {
         // Check if we have configuration
         if self.query.is_none() {
             if let Ok(query_vec) = self.conf.pop() {
-                let query_str = std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
+                let query_str =
+                    std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
                 debug!("received XPath query: {}", query_str);
                 match xpath::parse(query_str) {
                     Ok(xpath_query) => {
@@ -284,7 +287,8 @@ impl Component for HTMLQueryComponent {
                 debug!("got a packet, processing...");
 
                 // Process packet
-                match html::parse(std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8")) {
+                match html::parse(std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8"))
+                {
                     Ok(document) => {
                         let xpath_item_tree = XpathItemTree::from(&document);
                         match xpath_query.apply(&xpath_item_tree) {

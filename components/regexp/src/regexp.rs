@@ -25,6 +25,7 @@ impl Component for RegexpExtractComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -73,7 +74,8 @@ impl Component for RegexpExtractComponent {
         // Check if we have configuration
         if self.regexp.is_none() {
             if let Ok(regexp_vec) = self.conf.pop() {
-                let regexp_str = std::str::from_utf8(&regexp_vec).expect("invalid utf-8 in config IP");
+                let regexp_str =
+                    std::str::from_utf8(&regexp_vec).expect("invalid utf-8 in config IP");
                 debug!("received regexp: {}", regexp_str);
                 match Regex::new(regexp_str) {
                     Ok(regexp) => {

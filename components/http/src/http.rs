@@ -1893,14 +1893,8 @@ impl Component for HTTPServerComponent {
                                                 out_req_locked.get_mut(route_index)
                                             {
                                                 out_req_one
-                                                    .sink
                                                     .push(body.to_vec())
                                                     .expect("could not push IP into FBP network");
-                                                out_req_one
-                                                    .wakeup
-                                                    .as_ref()
-                                                    .expect("got no wakeup handle on REQ outport")
-                                                    .unpark();
                                                 true
                                             } else {
                                                 false

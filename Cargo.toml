@@ -14,7 +14,7 @@ name = "flowd-rs"
 members = [".", "component_api", "components/*"]
 
 [features]
-default = []
+default = ["enforce-process-non-blocking-contract"]
 allow-module-components = []
 enforce-process-non-blocking-contract = []
 
