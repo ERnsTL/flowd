@@ -179,10 +179,7 @@ impl Component for WSClientComponent {
                     debug!("got message from WebSocket, repeating...");
                     match client.read() {
                         Ok(msg) => {
-                            self.out.sink.push(msg.into_data()).expect("could not push into OUT");
-                            if let Some(wakeup) = &self.out.wakeup {
-                                wakeup.unpark();
-                            }
+                            self.out.push(msg.into_data()).expect("could not push into OUT");
                             debug!("done");
                             work_units += 1;
                             context.remaining_budget -= 1;
@@ -452,10 +449,7 @@ impl Component for WSServerComponent {
                     match websocket.read() {
                         Ok(message) => {
                             debug!("got message from connection {}, pushing to OUT", conn_id);
-                            self.out.sink.push(message.into_data()).expect("could not push IP into OUT");
-                            if let Some(wakeup) = &self.out.wakeup {
-                                wakeup.unpark();
-                            }
+                            self.out.push(message.into_data()).expect("could not push IP into OUT");
                             work_units += 1;
                             context.remaining_budget -= 1;
                         }
