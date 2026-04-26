@@ -37,6 +37,7 @@ impl Component for RedisPublisherComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -130,13 +131,22 @@ impl Component for RedisPublisherComponent {
                 return ProcessResult::NoWork;
             }
 
-            RedisPublisherState::Connected { ref mut connection, channel, pipeline, .. } => {
+            RedisPublisherState::Connected {
+                ref mut connection,
+                channel,
+                pipeline,
+                ..
+            } => {
                 let mut work_units = 0;
 
                 // Publish available messages within remaining budget
                 while context.remaining_budget > 0 && !self.inn.is_empty() {
-                    debug!("got {} packets, forwarding to redis channel.", self.inn.slots());
-                    let chunk = self.inn
+                    debug!(
+                        "got {} packets, forwarding to redis channel.",
+                        self.inn.slots()
+                    );
+                    let chunk = self
+                        .inn
                         .read_chunk(self.inn.slots())
                         .expect("receive as chunk failed");
 
@@ -237,8 +247,9 @@ impl Component for RedisPublisherComponent {
 enum RedisSubscriberState {
     WaitingForConfig,
     Connected {
-        pubsub: redis::PubSub<'static>,
+        connection: redis::Connection,
         channel: String,
+        subscribed: bool,
     },
     Finished,
 }
@@ -262,6 +273,7 @@ impl Component for RedisSubscriberComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -326,29 +338,22 @@ impl Component for RedisSubscriberComponent {
                         .expect("failed to convert channel name to str");
                     debug!("channel: {}", channel);
 
-                    // Connect to Redis and create PubSub
+                    // Connect to Redis. We keep the owned connection in component state and
+                    // create a short-lived PubSub view per process() call to avoid unsafe
+                    // lifetime extension tricks.
                     let client = redis::Client::open(url_str).expect("failed to open client");
-                    let mut connection = client
+                    let connection = client
                         .get_connection()
                         .expect("failed to get connection on client");
-                    let mut pubsub = connection.as_pubsub();
 
-                    // Subscribe to the channel
-                    pubsub
-                        .subscribe(channel)
-                        .expect("failed to subscribe to channel");
-                    pubsub
-                        .set_read_timeout(RECV_TIMEOUT)
-                        .expect("failed to set read timeout");
-
-                    // Use unsafe code to extend the lifetime of pubsub
-                    // This is necessary because PubSub borrows from Connection
-                    let pubsub_static = unsafe { std::mem::transmute::<redis::PubSub<'_>, redis::PubSub<'static>>(pubsub) };
-
-                    info!("Redis subscriber connected and subscribed to channel: {}", channel);
+                    info!(
+                        "Redis subscriber connected and subscribed to channel: {}",
+                        channel
+                    );
                     self.state = RedisSubscriberState::Connected {
-                        pubsub: pubsub_static,
+                        connection,
                         channel: channel.to_owned(),
+                        subscribed: false,
                     };
                     return ProcessResult::DidWork(1);
                 }
@@ -360,36 +365,67 @@ impl Component for RedisSubscriberComponent {
                 return ProcessResult::NoWork;
             }
 
-            RedisSubscriberState::Connected { ref mut pubsub, channel } => {
-                info!("Redis subscriber listening on channel: {}", channel);
-
+            RedisSubscriberState::Connected {
+                connection,
+                channel,
+                subscribed,
+            } => {
                 let mut work_units = 0;
+                let mut must_finish = false;
 
-                // Receive messages cooperatively within remaining budget
-                while context.remaining_budget > 0 {
-                    match pubsub.get_message() {
-                        Ok(msg) => {
-                            let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
-                            debug!("Received payload from redis channel '{}': {:?}", channel, payload);
+                // Keep PubSub borrow scoped so we can safely mutate component state afterwards.
+                {
+                    let mut pubsub = connection.as_pubsub();
+                    if !*subscribed {
+                        if let Err(err) = pubsub.subscribe(channel.as_str()) {
+                            error!("failed to subscribe to channel: {}", err);
+                            must_finish = true;
+                        } else if let Err(err) = pubsub.set_read_timeout(RECV_TIMEOUT) {
+                            error!("failed to set read timeout: {}", err);
+                            must_finish = true;
+                        } else {
+                            *subscribed = true;
+                            debug!("Redis subscriber listening on channel: {}", channel);
+                        }
+                    }
 
-                            // Try to send it to output
-                            match self.out.push(payload) {
-                                Ok(()) => {
-                                    debug!("forwarded redis payload");
-                                    work_units += 1;
-                                    context.remaining_budget -= 1;
+                    if !must_finish {
+                        // Receive messages cooperatively within remaining budget
+                        while context.remaining_budget > 0 {
+                            match pubsub.get_message() {
+                                Ok(msg) => {
+                                    let payload: Vec<u8> =
+                                        msg.get_payload().expect("failed to get message payload");
+                                    debug!(
+                                        "Received payload from redis channel '{}': {:?}",
+                                        channel, payload
+                                    );
+
+                                    // Try to send it to output
+                                    match self.out.push(payload) {
+                                        Ok(()) => {
+                                            debug!("forwarded redis payload");
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
+                                        }
+                                        Err(_) => {
+                                            // Output buffer full, stop processing for now
+                                            break;
+                                        }
+                                    }
                                 }
                                 Err(_) => {
-                                    // Output buffer full, stop processing for now
+                                    // No message available or timeout, yield to scheduler
                                     break;
                                 }
                             }
                         }
-                        Err(_) => {
-                            // No message available or timeout, yield to scheduler
-                            break;
-                        }
                     }
+                }
+
+                if must_finish {
+                    self.state = RedisSubscriberState::Finished;
+                    return ProcessResult::Finished;
                 }
 
                 if work_units > 0 {

@@ -12,7 +12,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
-
 enum SubprocessState {
     Idle,
     Running {
@@ -69,6 +68,7 @@ impl Component for CmdComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -113,14 +113,18 @@ impl Component for CmdComponent {
         if !self.config_loaded {
             if let Ok(cmd_ip) = self.cmd.pop() {
                 let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
-                let mut cmd_words = shell_words::split(cmd_line).expect("failed to parse command-line");
+                let mut cmd_words =
+                    shell_words::split(cmd_line).expect("failed to parse command-line");
                 if cmd_words.len() > 0 {
                     let cmd_args1: Vec<String> = cmd_words.drain(1..).collect();
                     self.cmd_args = cmd_args1.iter().map(|x| OsString::from(x)).collect();
                 }
                 let cmd_program1 = cmd_words.pop().expect("could not pop program name");
                 self.cmd_program = Some(OsStr::new(&cmd_program1).to_os_string());
-                debug!("loaded program {:?} with args {:?}", self.cmd_program, self.cmd_args);
+                debug!(
+                    "loaded program {:?} with args {:?}",
+                    self.cmd_program, self.cmd_args
+                );
             } else {
                 trace!("no CMD config yet");
                 return ProcessResult::NoWork;
@@ -133,11 +137,22 @@ impl Component for CmdComponent {
                 while let Some(arg) = parser.next().expect("could not call next()") {
                     match arg {
                         Long("retry") => {
-                            self.retry = parser.value().expect("could not get parser value").parse().expect("could not parse value");
+                            self.retry = parser
+                                .value()
+                                .expect("could not get parser value")
+                                .parse()
+                                .expect("could not parse value");
                         }
                         Long("mode") => {
-                            let mode_str: OsString = parser.value().expect("could not get parser value").parse::<OsString>().expect("could not parse value");
-                            match mode_str.to_str().expect("could not convert mode_str to str") {
+                            let mode_str: OsString = parser
+                                .value()
+                                .expect("could not get parser value")
+                                .parse::<OsString>()
+                                .expect("could not parse value");
+                            match mode_str
+                                .to_str()
+                                .expect("could not convert mode_str to str")
+                            {
                                 "one" => self.mode = Mode::One,
                                 "each" => self.mode = Mode::Each,
                                 _ => unreachable!(),
@@ -156,11 +171,20 @@ impl Component for CmdComponent {
 
         // Check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!("received signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
             if ip == b"stop" {
                 info!("got stop signal, finishing");
                 // Cleanup any running subprocess
-                if let SubprocessState::Running { child, stdin_thread, stdout_thread, .. } = &mut self.state {
+                if let SubprocessState::Running {
+                    child,
+                    stdin_thread,
+                    stdout_thread,
+                    ..
+                } = &mut self.state
+                {
                     let _ = child.kill();
                     let _ = child.wait();
                     if let Some(thread) = stdin_thread.take() {
@@ -175,7 +199,10 @@ impl Component for CmdComponent {
                 trace!("got ping signal, responding");
                 let _ = self.signals_out.try_send(b"pong".to_vec());
             } else {
-                warn!("received unknown signal ip: {}", std::str::from_utf8(&ip).expect("invalid utf-8"));
+                warn!(
+                    "received unknown signal ip: {}",
+                    std::str::from_utf8(&ip).expect("invalid utf-8")
+                );
             }
         }
 
@@ -194,13 +221,16 @@ impl Component for CmdComponent {
                                     .spawn()
                                     .expect("could not start sub-process");
 
-                                let child_stdout = child.stdout.take().expect("could not get stdout");
+                                let child_stdout =
+                                    child.stdout.take().expect("could not get stdout");
                                 let writer = child.stdin.take().expect("could not get stdin");
 
                                 // Start stdin thread
                                 let stdin_thread = std::thread::spawn(move || {
                                     let mut writer = writer;
-                                    writer.write_all(ip.as_slice()).expect("could not write to stdin");
+                                    writer
+                                        .write_all(ip.as_slice())
+                                        .expect("could not write to stdin");
                                     drop(writer);
                                 });
 
@@ -229,16 +259,27 @@ impl Component for CmdComponent {
                     }
                 }
             }
-            SubprocessState::Running { child, stdin_thread, stdout_rx, stdout_thread } => {
+            SubprocessState::Running {
+                child,
+                stdin_thread,
+                stdout_rx,
+                stdout_thread,
+            } => {
                 let mut work_done = 0u32;
 
                 // Check for output
                 if context.remaining_budget > 0 {
                     match stdout_rx.try_recv() {
                         Ok(line) => {
-                            self.out.push(line).expect("could not push to OUT");
-                            work_done += 1;
-                            context.remaining_budget -= 1;
+                            match self.out.push(line) {
+                                Ok(()) => {
+                                    work_done += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                Err(_) => {
+                                    debug!("OUT backpressured; will retry subprocess output later");
+                                }
+                            }
                         }
                         Err(mpsc::TryRecvError::Empty) => {}
                         Err(mpsc::TryRecvError::Disconnected) => {
@@ -392,11 +433,10 @@ mod tests {
         assert!(in_port_names.contains(&"CMD"));
         assert!(in_port_names.contains(&"CONF"));
 
-        let out_port_names: Vec<&str> = metadata.out_ports.iter().map(|p| p.name.as_str()).collect();
+        let out_port_names: Vec<&str> =
+            metadata.out_ports.iter().map(|p| p.name.as_str()).collect();
         assert!(out_port_names.contains(&"OUT"));
     }
-
-
 
     #[test]
     fn test_shell_words_parsing_logic() {
@@ -422,5 +462,3 @@ mod tests {
         assert!(shell_words::split("echo 'unclosed").is_err());
     }
 }
-
-

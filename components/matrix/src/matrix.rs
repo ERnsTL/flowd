@@ -1,7 +1,7 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
-    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports,
-    ProcessResult, ProcessSignalSink, ProcessSignalSource,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 use tokio::sync::mpsc;
@@ -93,7 +93,9 @@ const MATRIX_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 async fn async_matrix_main(
     mut cmd_rx: mpsc::UnboundedReceiver<MatrixClientCommand>,
     result_tx: mpsc::UnboundedSender<MatrixClientResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
+    let scheduler_waker = scheduler_waker.map(std::sync::Arc::new);
     let mut client: Option<Client> = None;
     let mut room_id: Option<OwnedRoomId> = None;
     #[allow(unused_assignments)]
@@ -109,17 +111,29 @@ async fn async_matrix_main(
                     .homeserver_url(homeserver_url)
                     .build()
                     .into_future();
-                let new_client = match tokio::time::timeout(MATRIX_CLIENT_INIT_TIMEOUT, client_fut).await {
-                    Ok(Ok(c)) => c,
-                    Ok(Err(e)) => {
-                        let _ = result_tx.send(MatrixClientResult::Error(format!("Client init failed: {}", e)));
-                        continue;
-                    }
-                    Err(_) => {
-                        let _ = result_tx.send(MatrixClientResult::Error("Client init timed out".to_string()));
-                        continue;
-                    }
-                };
+                let new_client =
+                    match tokio::time::timeout(MATRIX_CLIENT_INIT_TIMEOUT, client_fut).await {
+                        Ok(Ok(c)) => c,
+                        Ok(Err(e)) => {
+                            let _ = result_tx.send(MatrixClientResult::Error(format!(
+                                "Client init failed: {}",
+                                e
+                            )));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
+                            continue;
+                        }
+                        Err(_) => {
+                            let _ = result_tx.send(MatrixClientResult::Error(
+                                "Client init timed out".to_string(),
+                            ));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
+                            continue;
+                        }
+                    };
 
                 // Login
                 if let Err(e) = new_client
@@ -128,7 +142,11 @@ async fn async_matrix_main(
                     .initial_device_display_name("flowd")
                     .await
                 {
-                    let _ = result_tx.send(MatrixClientResult::Error(format!("Login failed: {}", e)));
+                    let _ =
+                        result_tx.send(MatrixClientResult::Error(format!("Login failed: {}", e)));
+                    if let Some(ref waker) = scheduler_waker {
+                        waker();
+                    }
                     continue;
                 }
                 debug!("logged in as username={}", config.username);
@@ -137,7 +155,12 @@ async fn async_matrix_main(
                 let user_id_tmp = match new_client.user_id() {
                     Some(id) => id.to_owned(),
                     None => {
-                        let _ = result_tx.send(MatrixClientResult::Error("Failed to get user ID".to_string()));
+                        let _ = result_tx.send(MatrixClientResult::Error(
+                            "Failed to get user ID".to_string(),
+                        ));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                         continue;
                     }
                 };
@@ -147,16 +170,28 @@ async fn async_matrix_main(
                 // Join room if specified
                 if let Some(room_name) = config.room_name {
                     match new_client
-                        .join_room_by_id(&RoomId::parse(&room_name).expect("failed to parse room ID"))
+                        .join_room_by_id(
+                            &RoomId::parse(&room_name).expect("failed to parse room ID"),
+                        )
                         .await
                     {
                         Ok(room) => {
-                            let room_name = room.display_name().await.map(|n| n.to_string()).unwrap_or_else(|_| "unknown".to_string());
+                            let room_name = room
+                                .display_name()
+                                .await
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|_| "unknown".to_string());
                             debug!("joined room={}", room_name);
                             room_id = Some(room.room_id().to_owned());
                         }
                         Err(e) => {
-                            let _ = result_tx.send(MatrixClientResult::Error(format!("Failed to join room: {}", e)));
+                            let _ = result_tx.send(MatrixClientResult::Error(format!(
+                                "Failed to join room: {}",
+                                e
+                            )));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                             continue;
                         }
                     }
@@ -166,7 +201,13 @@ async fn async_matrix_main(
                 let response = match new_client.sync_once(SyncSettings::default()).await {
                     Ok(r) => r,
                     Err(e) => {
-                        let _ = result_tx.send(MatrixClientResult::Error(format!("Initial sync failed: {}", e)));
+                        let _ = result_tx.send(MatrixClientResult::Error(format!(
+                            "Initial sync failed: {}",
+                            e
+                        )));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                         continue;
                     }
                 };
@@ -175,6 +216,7 @@ async fn async_matrix_main(
                 let client_ref = new_client.clone();
                 let result_tx_clone = result_tx.clone();
                 let user_id_ref = user_id.clone();
+                let scheduler_waker_clone = scheduler_waker.clone();
                 let handle = tokio::spawn(async move {
                     let handler = move |event: OriginalSyncRoomMessageEvent, room: Room| async move {
                         if room.state() != RoomState::Joined {
@@ -190,7 +232,12 @@ async fn async_matrix_main(
                                 return;
                             }
                         }
-                        let _ = result_tx_clone.send(MatrixClientResult::MessageReceived(text_content.body.as_bytes().to_vec()));
+                        let _ = result_tx_clone.send(MatrixClientResult::MessageReceived(
+                            text_content.body.as_bytes().to_vec(),
+                        ));
+                        if let Some(ref waker) = scheduler_waker_clone {
+                            waker();
+                        }
                     };
                     client_ref.add_event_handler(handler);
 
@@ -203,34 +250,61 @@ async fn async_matrix_main(
                 client = Some(new_client);
                 dispatcher_handle = Some(handle);
                 let _ = result_tx.send(MatrixClientResult::ClientInitialized);
+                if let Some(ref waker) = scheduler_waker {
+                    waker();
+                }
             }
             MatrixClientCommand::SendMessage(msg_bytes) => {
                 if let (Some(ref client_ref), Some(ref room_id_inner)) = (&client, &room_id) {
-                    let text = String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
+                    let text =
+                        String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
                     let content = RoomMessageEventContent::text_plain(&text);
                     if let Some(room) = client_ref.get_room(room_id_inner) {
                         let send_result = tokio::time::timeout(
                             MATRIX_SEND_TIMEOUT,
                             room.send(content).into_future(),
-                        ).await;
+                        )
+                        .await;
                         match send_result {
                             Ok(Ok(_)) => {
                                 let _ = result_tx.send(MatrixClientResult::MessageSent);
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                             Ok(Err(err)) => {
-                                let _ = result_tx.send(MatrixClientResult::Error(format!("Send failed: {}", err)));
+                                let _ = result_tx.send(MatrixClientResult::Error(format!(
+                                    "Send failed: {}",
+                                    err
+                                )));
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                             Err(_) => {
                                 let _ = result_tx.send(MatrixClientResult::Error(format!(
-                                    "Send timed out after {:?}", MATRIX_SEND_TIMEOUT
+                                    "Send timed out after {:?}",
+                                    MATRIX_SEND_TIMEOUT
                                 )));
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                         }
                     } else {
-                        let _ = result_tx.send(MatrixClientResult::Error("Room not found".to_string()));
+                        let _ =
+                            result_tx.send(MatrixClientResult::Error("Room not found".to_string()));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 } else {
-                    let _ = result_tx.send(MatrixClientResult::Error("Client not initialized or no room set".to_string()));
+                    let _ = result_tx.send(MatrixClientResult::Error(
+                        "Client not initialized or no room set".to_string(),
+                    ));
+                    if let Some(ref waker) = scheduler_waker {
+                        waker();
+                    }
                 }
             }
 
@@ -252,6 +326,7 @@ impl Component for MatrixClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -264,7 +339,11 @@ impl Component for MatrixClientComponent {
                 .enable_all()
                 .build()
                 .unwrap();
-            rt.block_on(async_matrix_main(cmd_receiver, result_sender));
+            rt.block_on(async_matrix_main(
+                cmd_receiver,
+                result_sender,
+                scheduler_waker,
+            ));
         }));
 
         MatrixClientComponent {
@@ -330,14 +409,26 @@ impl Component for MatrixClientComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str = std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
+                    let url_str =
+                        std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
                     let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
 
-                    let homeserver = url.host_str().expect("failed to get homeserver from URL hostname").to_string();
+                    let homeserver = url
+                        .host_str()
+                        .expect("failed to get homeserver from URL hostname")
+                        .to_string();
                     let username = url.username().to_string();
-                    let password = url.password().expect("failed to get password from URL").to_string();
+                    let password = url
+                        .password()
+                        .expect("failed to get password from URL")
+                        .to_string();
                     let room_name = if !url.path().is_empty() {
-                        Some(url.path().strip_prefix('/').expect("failed to get room name from URL path").to_string())
+                        Some(
+                            url.path()
+                                .strip_prefix('/')
+                                .expect("failed to get room name from URL path")
+                                .to_string(),
+                        )
                     } else {
                         None
                     };
@@ -352,7 +443,10 @@ impl Component for MatrixClientComponent {
                     self.config = Some(config.clone());
 
                     // Send init command to async thread
-                    if let Err(_) = self.cmd_sender.send(MatrixClientCommand::InitClient(config)) {
+                    if let Err(_) = self
+                        .cmd_sender
+                        .send(MatrixClientCommand::InitClient(config))
+                    {
                         error!("Failed to send init client command");
                         return ProcessResult::Finished;
                     }
@@ -404,7 +498,10 @@ impl Component for MatrixClientComponent {
                     if let Ok(msg_bytes) = self.inn.pop() {
                         debug!("Received message to send to Matrix");
                         // Send message command to async thread
-                        if let Err(_) = self.cmd_sender.send(MatrixClientCommand::SendMessage(msg_bytes)) {
+                        if let Err(_) = self
+                            .cmd_sender
+                            .send(MatrixClientCommand::SendMessage(msg_bytes))
+                        {
                             error!("Failed to send message command");
                             return ProcessResult::Finished;
                         }
@@ -415,7 +512,9 @@ impl Component for MatrixClientComponent {
 
                 // Signal readiness if we have pending input work
                 if self.inn.slots() > 0 {
-                    context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+                    context
+                        .ready_signal
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
 
                 if work_units > 0 {
@@ -424,9 +523,7 @@ impl Component for MatrixClientComponent {
                     ProcessResult::NoWork
                 }
             }
-            MatrixClientState::Finished => {
-                ProcessResult::Finished
-            }
+            MatrixClientState::Finished => ProcessResult::Finished,
         }
     }
 

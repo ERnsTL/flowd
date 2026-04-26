@@ -63,20 +63,33 @@ enum ZeroconfResponderResult {
 async fn async_responder_main(
     mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfResponderCommand>,
     result_tx: mpsc::UnboundedSender<ZeroconfResponderResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut responder: Option<ServiceDaemon> = None;
 
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             ZeroconfResponderCommand::Register(config) => {
-                debug!("Registering mDNS service: {} {}", config.service_name, config.instance_name);
+                debug!(
+                    "Registering mDNS service: {} {}",
+                    config.service_name, config.instance_name
+                );
                 match register_service(&config).await {
                     Ok(daemon) => {
                         responder = Some(daemon);
                         let _ = result_tx.send(ZeroconfResponderResult::Registered);
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                     Err(e) => {
-                        let _ = result_tx.send(ZeroconfResponderResult::Error(format!("Registration failed: {}", e)));
+                        let _ = result_tx.send(ZeroconfResponderResult::Error(format!(
+                            "Registration failed: {}",
+                            e
+                        )));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 }
             }
@@ -93,7 +106,9 @@ async fn async_responder_main(
     }
 }
 
-async fn register_service(config: &ZeroconfResponderConfig) -> Result<ServiceDaemon, Box<dyn std::error::Error + Send + Sync>> {
+async fn register_service(
+    config: &ZeroconfResponderConfig,
+) -> Result<ServiceDaemon, Box<dyn std::error::Error + Send + Sync>> {
     let responder = ServiceDaemon::new()?;
     let my_service = ServiceInfo::new(
         &config.service_name,
@@ -110,6 +125,7 @@ async fn register_service(config: &ZeroconfResponderConfig) -> Result<ServiceDae
 async fn async_browser_main(
     mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfBrowserCommand>,
     result_tx: mpsc::UnboundedSender<ZeroconfBrowserResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut browser: Option<ServiceDaemon> = None;
     let mut receiver: Option<mdns_sd::Receiver<ServiceEvent>> = None;
@@ -125,7 +141,13 @@ async fn async_browser_main(
                         debug!("mDNS browsing started successfully");
                     }
                     Err(e) => {
-                        let _ = result_tx.send(ZeroconfBrowserResult::Error(format!("Browse failed: {}", e)));
+                        let _ = result_tx.send(ZeroconfBrowserResult::Error(format!(
+                            "Browse failed: {}",
+                            e
+                        )));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 }
             }
@@ -149,17 +171,10 @@ async fn async_browser_main(
                     debug!("Service resolved: {}", info.get_fullname());
 
                     // Extract instance name from fullname
-                    let instance_name_this = info
-                        .get_fullname()
-                        .split('.')
-                        .next()
-                        .unwrap_or("");
+                    let instance_name_this = info.get_fullname().split('.').next().unwrap_or("");
 
                     // Format as URL
-                    let address = info
-                        .get_addresses()
-                        .iter()
-                        .next();
+                    let address = info.get_addresses().iter().next();
                     if let Some(addr) = address {
                         let address_str = if addr.is_ipv6() {
                             format!("[{}]", addr)
@@ -173,6 +188,9 @@ async fn async_browser_main(
                             instance_name_this
                         );
                         let _ = result_tx.send(ZeroconfBrowserResult::ServiceFound(result));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 }
                 other_event => {
@@ -183,7 +201,12 @@ async fn async_browser_main(
     }
 }
 
-async fn start_browse(config: &ZeroconfBrowserConfig) -> Result<(ServiceDaemon, mdns_sd::Receiver<ServiceEvent>), Box<dyn std::error::Error + Send + Sync>> {
+async fn start_browse(
+    config: &ZeroconfBrowserConfig,
+) -> Result<
+    (ServiceDaemon, mdns_sd::Receiver<ServiceEvent>),
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let client = ServiceDaemon::new()?;
     let receiver = client.browse(config.service_name.as_str())?;
     Ok((client, receiver))
@@ -196,6 +219,7 @@ impl Component for ZeroconfResponderComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -205,7 +229,11 @@ impl Component for ZeroconfResponderComponent {
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async_responder_main(cmd_receiver, result_sender));
+            rt.block_on(async_responder_main(
+                cmd_receiver,
+                result_sender,
+                scheduler_waker,
+            ));
         }));
 
         ZeroconfResponderComponent {
@@ -259,7 +287,8 @@ impl Component for ZeroconfResponderComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str = std::str::from_utf8(&conf_vec).expect("configuration URL is invalid utf-8");
+                    let url_str =
+                        std::str::from_utf8(&conf_vec).expect("configuration URL is invalid utf-8");
                     let url = url::Url::parse(&url_str).expect("failed to parse URL");
 
                     // get instance name
@@ -290,17 +319,22 @@ impl Component for ZeroconfResponderComponent {
                         service_name,
                         instance_name,
                         host_name,
-                        address: url.host_str()
+                        address: url
+                            .host_str()
                             .expect("failed to get socket address from connection URL")
                             .to_owned(),
-                        port: url.port()
+                        port: url
+                            .port()
                             .expect("failed to get port from configuration URL"),
                     };
 
                     self.config = Some(config.clone());
 
                     // Send register command to async thread
-                    if let Err(_) = self.cmd_sender.send(ZeroconfResponderCommand::Register(config)) {
+                    if let Err(_) = self
+                        .cmd_sender
+                        .send(ZeroconfResponderCommand::Register(config))
+                    {
                         error!("Failed to send register command");
                         return ProcessResult::Finished;
                     }
@@ -438,6 +472,7 @@ impl Component for ZeroconfBrowserComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -447,7 +482,11 @@ impl Component for ZeroconfBrowserComponent {
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async_browser_main(cmd_receiver, result_sender));
+            rt.block_on(async_browser_main(
+                cmd_receiver,
+                result_sender,
+                scheduler_waker,
+            ));
         }));
 
         ZeroconfBrowserComponent {

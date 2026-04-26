@@ -39,10 +39,13 @@ impl CountComponent {
 
         self.out
             .push(final_count.clone().into_bytes())
-            .expect("could not push into OUT");
+            .unwrap_or_else(|_| warn!("could not push final count into OUT due to backpressure"));
 
         // Send network output with the final count
-        flowd_component_api::send_network_output_comfortable(&self.graph_inout, final_count.clone());
+        flowd_component_api::send_network_output_comfortable(
+            &self.graph_inout,
+            final_count.clone(),
+        );
 
         final_count
     }
@@ -55,6 +58,7 @@ impl Component for CountComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,

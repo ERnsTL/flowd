@@ -67,7 +67,9 @@ const TELEGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 async fn async_telegram_main(
     mut cmd_rx: mpsc::UnboundedReceiver<TelegramBotCommand>,
     result_tx: mpsc::UnboundedSender<TelegramBotResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
+    let scheduler_waker = scheduler_waker.map(std::sync::Arc::new);
     let mut bot: Option<Bot> = None;
     let mut chat_id: i64 = 0;
     let mut dispatcher_handle: Option<tokio::task::JoinHandle<()>> = None;
@@ -79,12 +81,14 @@ async fn async_telegram_main(
                 let new_bot = Bot::new(token);
                 let bot_ref = new_bot.clone();
                 let result_tx_clone = result_tx.clone();
+                let scheduler_waker_dispatch = scheduler_waker.clone();
 
                 // Start message dispatcher
                 let handle = tokio::spawn(async move {
-                    let handler = Update::filter_message().endpoint(
-                        move |_bot: Bot, msg: Message| {
+                    let handler =
+                        Update::filter_message().endpoint(move |_bot: Bot, msg: Message| {
                             let result_tx = result_tx_clone.clone();
+                            let scheduler_waker_clone = scheduler_waker_dispatch.clone();
                             async move {
                                 // Store chat ID for responses
                                 // Note: In a real implementation, this would need thread-safe storage
@@ -92,12 +96,17 @@ async fn async_telegram_main(
 
                                 // Send message to component
                                 if let Some(text) = msg.text() {
-                                    let _ = result_tx.send(TelegramBotResult::MessageReceived(text.as_bytes().to_vec(), msg.chat.id.0));
+                                    let _ = result_tx.send(TelegramBotResult::MessageReceived(
+                                        text.as_bytes().to_vec(),
+                                        msg.chat.id.0,
+                                    ));
+                                    if let Some(ref waker) = scheduler_waker_clone {
+                                        waker();
+                                    }
                                 }
                                 ResponseResult::Ok(())
                             }
-                        },
-                    );
+                        });
 
                     let mut builder = Dispatcher::builder(bot_ref, handler).build();
                     let _ = builder.dispatch().await;
@@ -106,6 +115,9 @@ async fn async_telegram_main(
                 bot = Some(new_bot);
                 dispatcher_handle = Some(handle);
                 let _ = result_tx.send(TelegramBotResult::BotInitialized);
+                if let Some(ref waker) = scheduler_waker {
+                    waker();
+                }
             }
             TelegramBotCommand::SendMessage(text) => {
                 if let Some(bot_ref) = &bot {
@@ -114,26 +126,48 @@ async fn async_telegram_main(
                         let send_result = tokio::time::timeout(
                             TELEGRAM_SEND_TIMEOUT,
                             bot_ref.send_message(ChatId(chat_id), text).send(),
-                        ).await;
+                        )
+                        .await;
 
                         match send_result {
                             Ok(Ok(_)) => {
                                 let _ = result_tx.send(TelegramBotResult::MessageSent);
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                             Ok(Err(err)) => {
-                                let _ = result_tx.send(TelegramBotResult::Error(format!("Send failed: {}", err)));
+                                let _ = result_tx.send(TelegramBotResult::Error(format!(
+                                    "Send failed: {}",
+                                    err
+                                )));
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                             Err(_) => {
                                 let _ = result_tx.send(TelegramBotResult::Error(format!(
-                                    "Send timed out after {:?}", TELEGRAM_SEND_TIMEOUT
+                                    "Send timed out after {:?}",
+                                    TELEGRAM_SEND_TIMEOUT
                                 )));
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
+                                }
                             }
                         }
                     } else {
-                        let _ = result_tx.send(TelegramBotResult::Error("No chat ID set".to_string()));
+                        let _ =
+                            result_tx.send(TelegramBotResult::Error("No chat ID set".to_string()));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 } else {
-                    let _ = result_tx.send(TelegramBotResult::Error("Bot not initialized".to_string()));
+                    let _ =
+                        result_tx.send(TelegramBotResult::Error("Bot not initialized".to_string()));
+                    if let Some(ref waker) = scheduler_waker {
+                        waker();
+                    }
                 }
             }
             TelegramBotCommand::SetChatId(new_chat_id) => {
@@ -158,6 +192,7 @@ impl Component for TelegramBotComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -167,7 +202,11 @@ impl Component for TelegramBotComponent {
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async_telegram_main(cmd_receiver, result_sender));
+            rt.block_on(async_telegram_main(
+                cmd_receiver,
+                result_sender,
+                scheduler_waker,
+            ));
         }));
 
         TelegramBotComponent {
@@ -233,7 +272,8 @@ impl Component for TelegramBotComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let token_str = std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
+                    let token_str =
+                        std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
 
                     let config = TelegramBotConfig {
                         bot_token: token_str.to_string(),
@@ -242,7 +282,10 @@ impl Component for TelegramBotComponent {
                     self.config = Some(config.clone());
 
                     // Send init command to async thread
-                    if let Err(_) = self.cmd_sender.send(TelegramBotCommand::InitBot(token_str.to_string())) {
+                    if let Err(_) = self
+                        .cmd_sender
+                        .send(TelegramBotCommand::InitBot(token_str.to_string()))
+                    {
                         error!("Failed to send init bot command");
                         return ProcessResult::Finished;
                     }
@@ -267,9 +310,13 @@ impl Component for TelegramBotComponent {
                                 context.remaining_budget -= 1;
                             }
                             TelegramBotResult::MessageReceived(msg_bytes, chat_id) => {
-                                debug!("Received message from Telegram chat {}, forwarding to output", chat_id);
+                                debug!(
+                                    "Received message from Telegram chat {}, forwarding to output",
+                                    chat_id
+                                );
                                 // Set chat ID for future responses
-                                let _ = self.cmd_sender.send(TelegramBotCommand::SetChatId(chat_id));
+                                let _ =
+                                    self.cmd_sender.send(TelegramBotCommand::SetChatId(chat_id));
                                 if let Err(_) = self.out.push(msg_bytes) {
                                     error!("Failed to send message to output");
                                     return ProcessResult::Finished;
@@ -295,10 +342,12 @@ impl Component for TelegramBotComponent {
                 if context.remaining_budget > 0 {
                     if let Ok(msg_bytes) = self.inn.pop() {
                         debug!("Received message to send to Telegram");
-                        let text = String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
+                        let text = String::from_utf8(msg_bytes)
+                            .expect("failed to convert message to UTF-8");
 
                         // Send message command to async thread
-                        if let Err(_) = self.cmd_sender.send(TelegramBotCommand::SendMessage(text)) {
+                        if let Err(_) = self.cmd_sender.send(TelegramBotCommand::SendMessage(text))
+                        {
                             error!("Failed to send message command");
                             return ProcessResult::Finished;
                         }
@@ -318,9 +367,7 @@ impl Component for TelegramBotComponent {
                     ProcessResult::NoWork
                 }
             }
-            TelegramBotState::Finished => {
-                ProcessResult::Finished
-            }
+            TelegramBotState::Finished => ProcessResult::Finished,
         }
     }
 
