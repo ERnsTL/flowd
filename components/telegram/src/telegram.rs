@@ -4,6 +4,7 @@ use flowd_component_api::{
     ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
+use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 
 // component-specific
@@ -196,10 +197,12 @@ impl Component for TelegramBotComponent {
         }
     }
 
-    fn process(&mut self, _context: &mut NodeContext) -> ProcessResult {
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("TelegramBot process() called");
 
-        // Check signals first
+        let mut work_units = 0u32;
+
+        // Check signals first (signals are handled regardless of budget)
         if let Ok(ip) = self.signals_in.try_recv() {
             trace!(
                 "received signal ip: {}",
@@ -246,59 +249,77 @@ impl Component for TelegramBotComponent {
 
                     self.state = TelegramBotState::Active;
                     debug!("Telegram bot initialization initiated");
-                    return ProcessResult::DidWork(1);
+                    work_units += 1; // Initialization work
+                    return ProcessResult::DidWork(work_units);
                 } else {
                     // No CONF config yet
                     return ProcessResult::NoWork;
                 }
             }
             TelegramBotState::Active => {
-                // Check for incoming messages from async thread
-                if let Ok(result) = self.result_receiver.try_recv() {
-                    match result {
-                        TelegramBotResult::BotInitialized => {
-                            debug!("Telegram bot initialized successfully");
-                            return ProcessResult::DidWork(1);
-                        }
-                        TelegramBotResult::MessageReceived(msg_bytes, chat_id) => {
-                            debug!("Received message from Telegram chat {}, forwarding to output", chat_id);
-                            // Set chat ID for future responses
-                            let _ = self.cmd_sender.send(TelegramBotCommand::SetChatId(chat_id));
-                            if let Err(_) = self.out.push(msg_bytes) {
-                                error!("Failed to send message to output");
-                                return ProcessResult::Finished;
+                // Check for incoming messages from async thread within budget
+                if context.remaining_budget > 0 {
+                    if let Ok(result) = self.result_receiver.try_recv() {
+                        match result {
+                            TelegramBotResult::BotInitialized => {
+                                debug!("Telegram bot initialized successfully");
+                                work_units += 1;
+                                context.remaining_budget -= 1;
                             }
-                            return ProcessResult::DidWork(1);
-                        }
-                        TelegramBotResult::MessageSent => {
-                            debug!("Message sent successfully to Telegram");
-                            return ProcessResult::DidWork(1);
-                        }
-                        TelegramBotResult::Error(e) => {
-                            error!("Telegram operation error: {}", e);
-                            return ProcessResult::DidWork(1); // Continue despite error
+                            TelegramBotResult::MessageReceived(msg_bytes, chat_id) => {
+                                debug!("Received message from Telegram chat {}, forwarding to output", chat_id);
+                                // Set chat ID for future responses
+                                let _ = self.cmd_sender.send(TelegramBotCommand::SetChatId(chat_id));
+                                if let Err(_) = self.out.push(msg_bytes) {
+                                    error!("Failed to send message to output");
+                                    return ProcessResult::Finished;
+                                }
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            TelegramBotResult::MessageSent => {
+                                debug!("Message sent successfully to Telegram");
+                                work_units += 1;
+                                context.remaining_budget -= 1;
+                            }
+                            TelegramBotResult::Error(e) => {
+                                error!("Telegram operation error: {}", e);
+                                work_units += 1; // Error handling is work
+                                context.remaining_budget -= 1;
+                            }
                         }
                     }
                 }
 
-                // Check for outgoing messages to send
-                if let Ok(msg_bytes) = self.inn.pop() {
-                    debug!("Received message to send to Telegram");
-                    let text = String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
+                // Check for outgoing messages to send within remaining budget
+                if context.remaining_budget > 0 {
+                    if let Ok(msg_bytes) = self.inn.pop() {
+                        debug!("Received message to send to Telegram");
+                        let text = String::from_utf8(msg_bytes).expect("failed to convert message to UTF-8");
 
-                    // Send message command to async thread
-                    if let Err(_) = self.cmd_sender.send(TelegramBotCommand::SendMessage(text)) {
-                        error!("Failed to send message command");
-                        return ProcessResult::Finished;
+                        // Send message command to async thread
+                        if let Err(_) = self.cmd_sender.send(TelegramBotCommand::SendMessage(text)) {
+                            error!("Failed to send message command");
+                            return ProcessResult::Finished;
+                        }
+                        work_units += 1;
+                        context.remaining_budget -= 1;
                     }
-                    return ProcessResult::DidWork(1);
                 }
 
-                // No work to do
-                return ProcessResult::NoWork;
+                // Signal readiness if we have pending input work
+                if self.inn.slots() > 0 {
+                    context.ready_signal.store(true, Ordering::Release);
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
+                } else {
+                    ProcessResult::NoWork
+                }
             }
             TelegramBotState::Finished => {
-                return ProcessResult::Finished;
+                ProcessResult::Finished
             }
         }
     }
