@@ -83,7 +83,7 @@ flowd-telegram = { path = "components/telegram" }
 flowd-matrix = { path = "components/matrix" }
 flowd-sexp = { path = "components/sexp" }
 flowd-delay = { path = "components/delay" }
-flowd-vis = { path = "components/flowd-vis" }
+flowd-vis = { path = "components/vis" }
 flowd-panic = { path = "components/panic" }
 
 # for build.rs
