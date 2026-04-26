@@ -1,6 +1,7 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -10,11 +11,23 @@ use std::time::Duration;
 
 const REDIS_IO_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
+enum RedisPublisherState {
+    WaitingForConfig,
+    Connected {
+        client: redis::Client,
+        connection: redis::Connection,
+        channel: String,
+        pipeline: redis::Pipeline,
+    },
+    Finished,
+}
+
 pub struct RedisPublisherComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: RedisPublisherState,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -42,176 +55,142 @@ impl Component for RedisPublisherComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: RedisPublisherState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(mut self) {
-        debug!("RedisPublisher is now run()ning!");
-        let conf = &mut self.conf;
-        let inn = &mut self.inn; //TODO optimize these references, not really needed for them to be referenes, can just consume?
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("RedisPublisher process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-
-        // prepare connection arguments
-        // get destination from URL
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
-        //TODO optimize re-use the query_pairs iterator? wont find anything after first .find() call
-        let channel_queryparam = url
-            .query_pairs()
-            .find(|(key, _)| key.eq("channel"))
-            .expect("failed to get channel name from connection URL channel parameter");
-        let channel_bytes = channel_queryparam.1.as_bytes();
-        let channel =
-            std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
-        debug!("channel: {}", channel);
-
-        // connect
-        let client = redis::Client::open(url_str).expect("failed to open client");
-        let mut connection = client
-            .get_connection()
-            .expect("failed to get connection on client");
-        connection
-            .set_read_timeout(REDIS_IO_TIMEOUT)
-            .expect("failed to set redis read timeout");
-        connection
-            .set_write_timeout(REDIS_IO_TIMEOUT)
-            .expect("failed to set redis write timeout");
-        let mut pipe_lpush = redis::pipe();
-
-        // signal handling
-        //TODO optimize - currently not used because we use connection error (connection aborted) to stop the thread
-        // but there can be other reasons for connection close or an error...
-        //let (eventthread_signalsink, eventthread_signalsource) = std::sync::mpsc::sync_channel::<()>(0);
-
-        // handle connection events
-        //TODO automatic reconnection
-        //NOTE: currently this is not using async so we need no async handler thread
-        /*
-        let event_handler_thread = thread::Builder::new().name(format!("{}/EV", thread::current().name().expect("failed to get current thread name"))).spawn(move || {
-            //TODO optimize - we dont want to poll for shutdown, so we currently use the Ok or Err distinction - maybe it can be more efficient with an iter() based solution?
-            // but there can be other reasons for connection close or an error...
-            while let Ok(event) = connection.recv() {
-                match event {
-                    Err(err) => {
-                        trace!("Event Err = {:?}", err);
-                    },
-                    _ => {
-                        trace!("Event = {:?}", event);
-                        // nothing to do, not interested in any events
-                        //TODO really?
-                    }
-                }
-            }
-            debug!("exiting");
-        }).expect("failed to spawn eventloop listener thread");
-        */
-
-        // FBP main loop
-        loop {
-            trace!("begin of iteration");
-
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = RedisPublisherState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                }
+                )
             }
-
-            // check in port
-            /*
-            loop {
-                if let Ok(_ip) = inn.pop() {
-                    debug!("got a packet, dropping it.");
-                } else {
-                    break;
-                }
-            }
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    debug!("repeating packet...");
-                    out.push(ip).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
-                }
-            }
-            */
-            while !inn.is_empty() {
-                //_ = inn.pop().ok();
-                //debug!("got a packet, dropping it.");
-
-                debug!("got {} packets, forwarding to redis channel.", inn.slots());
-                let chunk = inn
-                    .read_chunk(inn.slots())
-                    .expect("receive as chunk failed");
-                for ip in chunk.into_iter() {
-                    //TODO is iterator faster or as_slices() or as_mut_slices() ?
-                    //TODO optimize so that the channel name is already fixed - does the channel name get cloned for every push?
-                    //TODO optimize - does it make sense to use PubSub object?
-                    //pipe_lpush.lpush(channel, ip).ignore();  //TODO add error handling
-                    //NOTE: there is also a command which pops an items off, but moves it to a backup queue where it stays until confirmed/removed when the message has been fully processed
-                    pipe_lpush.publish(channel, ip).ignore();
-                }
-                // NOTE: no commit_all() necessary, because into_iter() does that automatically
-
-                // send all queries at once
-                if let Err(err) = pipe_lpush.query::<()>(&mut connection) {
-                    if err.kind() == RedisErrorKind::Io {
-                        warn!(
-                            "redis publish timed out or failed with I/O error, dropping current batch and continuing: {}",
-                            err
-                        );
-                    } else {
-                        error!("failed to publish into redis channel: {}", err);
-                    }
-                }
-                pipe_lpush.clear();
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                // input closed, nothing more to do
-                info!("EOF on inport, shutting down");
-                break;
-            }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
 
-        // stop redis event thread - close channel
-        //drop(eventthread_signalsink);
-        // close redis connection -> redis event thread will exit from special connection error ConnectionAborted
-        //TODO there is no close() method anywhere - how to close the connection or the client?
-        drop(pipe_lpush);
-        drop(connection);
-        drop(client);
-        // wait for event thread to exit
-        //event_handler_thread.join().expect("failed to join eventloop listener thread");
+        match &mut self.state {
+            RedisPublisherState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(url_vec) = self.conf.pop() {
+                    let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                    debug!("got config URL: {}", url_str);
 
-        info!("exiting");
+                    // Parse connection arguments and get channel from URL
+                    let url = url::Url::parse(&url_str).expect("failed to parse URL");
+                    let channel_queryparam = url
+                        .query_pairs()
+                        .find(|(key, _)| key.eq("channel"))
+                        .expect("failed to get channel name from connection URL channel parameter");
+                    let channel_bytes = channel_queryparam.1.as_bytes();
+                    let channel = std::str::from_utf8(channel_bytes)
+                        .expect("failed to convert channel name to str");
+                    debug!("channel: {}", channel);
+
+                    // Connect to Redis
+                    let client = redis::Client::open(url_str).expect("failed to open client");
+                    let mut connection = client
+                        .get_connection()
+                        .expect("failed to get connection on client");
+                    connection
+                        .set_read_timeout(REDIS_IO_TIMEOUT)
+                        .expect("failed to set redis read timeout");
+                    connection
+                        .set_write_timeout(REDIS_IO_TIMEOUT)
+                        .expect("failed to set redis write timeout");
+
+                    let pipeline = redis::pipe();
+
+                    self.state = RedisPublisherState::Connected {
+                        client,
+                        connection,
+                        channel: channel.to_owned(),
+                        pipeline,
+                    };
+                    return ProcessResult::DidWork(1);
+                }
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
+
+            RedisPublisherState::Connected { ref mut connection, channel, pipeline, .. } => {
+                let mut work_units = 0;
+
+                // Publish available messages within remaining budget
+                while context.remaining_budget > 0 && !self.inn.is_empty() {
+                    debug!("got {} packets, forwarding to redis channel.", self.inn.slots());
+                    let chunk = self.inn
+                        .read_chunk(self.inn.slots())
+                        .expect("receive as chunk failed");
+
+                    for ip in chunk.into_iter() {
+                        debug!("publishing message to Redis channel: {}", channel);
+                        pipeline.publish(channel.as_str(), ip).ignore();
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+
+                        if context.remaining_budget == 0 {
+                            break;
+                        }
+                    }
+
+                    if context.remaining_budget == 0 {
+                        break;
+                    }
+                }
+
+                // Execute the pipeline if we have work to do
+                if work_units > 0 {
+                    if let Err(err) = pipeline.query::<()>(connection) {
+                        if err.kind() == RedisErrorKind::Io {
+                            warn!(
+                                "redis publish timed out or failed with I/O error, dropping current batch and continuing: {}",
+                                err
+                            );
+                        } else {
+                            error!("failed to publish into redis channel: {}", err);
+                            self.state = RedisPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                    pipeline.clear();
+                }
+
+                // Check if input is abandoned
+                if self.inn.is_abandoned() {
+                    info!("EOF on inport, shutting down");
+                    self.state = RedisPublisherState::Finished;
+                    return ProcessResult::Finished;
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
+                } else {
+                    ProcessResult::NoWork
+                }
+            }
+
+            RedisPublisherState::Finished => ProcessResult::Finished,
+        }
     }
 
     fn get_metadata() -> ComponentComponentPayload
@@ -257,11 +236,21 @@ impl Component for RedisPublisherComponent {
     }
 }
 
+enum RedisSubscriberState {
+    WaitingForConfig,
+    Connected {
+        pubsub: redis::PubSub<'static>,
+        channel: String,
+    },
+    Finished,
+}
+
 pub struct RedisSubscriberComponent {
     conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
+    state: RedisSubscriberState,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -292,105 +281,125 @@ impl Component for RedisSubscriberComponent {
                 .unwrap(),
             signals_in: signals_in,
             signals_out: signals_out,
+            state: RedisSubscriberState::WaitingForConfig,
             //graph_inout: graph_inout,
         }
     }
 
-    fn run(self) {
-        debug!("RedisSubscriber is now run()ning!");
-        let mut conf = self.conf;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("RedisSubscriber process() called");
 
-        // check config port
-        trace!("read config IP");
-        //TODO wait for a while? config IP could come from a file or other previous component and therefore take a bit
-        let Ok(url_vec) = conf.pop() else {
-            error!("no config IP received - exiting");
-            return;
-        };
-        let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
-
-        // prepare connection arguments
-        // get destination from URL
-        let url = url::Url::parse(&url_str).expect("failed to parse URL");
-        //TODO fix - URLs are ASCII, there is .as_ascii() but requires some more conversions and is unstable feature
-        let channel_queryparam = url
-            .query_pairs()
-            .find(|kv| kv.0.eq("channel"))
-            .expect("failed to get channel name from connection URL channel parameter");
-        let channel_bytes = channel_queryparam.1.as_bytes();
-        let channel =
-            std::str::from_utf8(channel_bytes).expect("failed to convert channel name to str");
-        debug!("channel: {}", channel);
-
-        // connect
-        let client = redis::Client::open(url_str).expect("failed to open client");
-        let mut connection = client
-            .get_connection()
-            .expect("failed to get connection on client");
-        let mut pubsub = connection.as_pubsub();
-        // subscribe to given topic
-        //TODO enable reconnection - or is this done automatically via .iter()?
-        pubsub
-            .subscribe(channel)
-            .expect("failed to subscribe to channel");
-        pubsub
-            .set_read_timeout(RECV_TIMEOUT)
-            .expect("failed to set read timeout"); //TODO optimize Some packaging
-
-        // main loop
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            //TODO optimize, there is also try_recv() and recv_timeout()
-            if let Ok(ip) = self.signals_in.try_recv() {
-                //TODO optimize string conversions
-                trace!(
-                    "received signal ip: {}",
+        // Check signals first
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                self.state = RedisSubscriberState::Finished;
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                )
+            }
+        }
+
+        match &mut self.state {
+            RedisSubscriberState::WaitingForConfig => {
+                // Try to get configuration
+                if let Ok(url_vec) = self.conf.pop() {
+                    let url_str = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+                    debug!("got config URL: {}", url_str);
+
+                    // Parse connection arguments and get channel from URL
+                    let url = url::Url::parse(&url_str).expect("failed to parse URL");
+                    let channel_queryparam = url
+                        .query_pairs()
+                        .find(|(key, _)| key.eq("channel"))
+                        .expect("failed to get channel name from connection URL channel parameter");
+                    let channel_bytes = channel_queryparam.1.as_bytes();
+                    let channel = std::str::from_utf8(channel_bytes)
+                        .expect("failed to convert channel name to str");
+                    debug!("channel: {}", channel);
+
+                    // Connect to Redis and create PubSub
+                    let client = redis::Client::open(url_str).expect("failed to open client");
+                    let mut connection = client
+                        .get_connection()
+                        .expect("failed to get connection on client");
+                    let mut pubsub = connection.as_pubsub();
+
+                    // Subscribe to the channel
+                    pubsub
+                        .subscribe(channel)
+                        .expect("failed to subscribe to channel");
+                    pubsub
+                        .set_read_timeout(RECV_TIMEOUT)
+                        .expect("failed to set read timeout");
+
+                    // Use unsafe code to extend the lifetime of pubsub
+                    // This is necessary because PubSub borrows from Connection
+                    let pubsub_static = unsafe { std::mem::transmute::<redis::PubSub<'_>, redis::PubSub<'static>>(pubsub) };
+
+                    self.state = RedisSubscriberState::Connected {
+                        pubsub: pubsub_static,
+                        channel: channel.to_owned(),
+                    };
+                    return ProcessResult::DidWork(1);
+                }
+                // No config yet, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
+
+            RedisSubscriberState::Connected { ref mut pubsub, .. } => {
+                let mut work_units = 0;
+
+                // Receive messages cooperatively within remaining budget
+                while context.remaining_budget > 0 {
+                    match pubsub.get_message() {
+                        Ok(msg) => {
+                            let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
+                            debug!("Received payload from redis channel: {:?}", payload);
+
+                            // Try to send it to output
+                            match self.out.push(payload) {
+                                Ok(()) => {
+                                    debug!("forwarded redis payload");
+                                    work_units += 1;
+                                    context.remaining_budget -= 1;
+                                }
+                                Err(_) => {
+                                    // Output buffer full, stop processing for now
+                                    break;
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            // No message available or timeout, yield to scheduler
+                            break;
+                        }
+                    }
+                }
+
+                if work_units > 0 {
+                    ProcessResult::DidWork(work_units)
                 } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
+                    ProcessResult::NoWork
                 }
             }
 
-            // receive packets
-            while let Ok(msg) = pubsub.get_message() {
-                //TODO optimize get_payload() there is some FromRedisType conversion involved
-                let payload: Vec<u8> = msg.get_payload().expect("failed to get message payload");
-                debug!("Received payload from redis channel: {:?}", payload);
-
-                // send it
-                debug!("forwarding redis payload...");
-                out.push(payload).expect("could not push into OUT"); //TODO optimize conversion
-                out_wakeup.unpark();
-                debug!("done");
-            }
-            //TODO handle Err case - is is temporary error or permanent error?
-
-            // are we done?
-            //TODO handle EOF on redis connection? or does it automatically reconnect? what if it fails to reconnect and we better shut down?
-            //TODO add automatic reconnection via crate "connection-manager" feature
-
-            trace!("-- end of iteration");
-            //NOTE: dont park thread here - this is done by recv_timeout()
+            RedisSubscriberState::Finished => ProcessResult::Finished,
         }
-        info!("exiting");
     }
 
     fn get_metadata() -> ComponentComponentPayload
