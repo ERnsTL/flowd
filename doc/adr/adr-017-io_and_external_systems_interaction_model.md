@@ -494,32 +494,3 @@ Specifically:
 * Should connection pooling be managed centrally?
 * Should adaptive rate limiting be supported?
 * Should IO metrics be built-in or external?
-
----
-
----
-
-# 🧠 Einordnung (wichtig)
-
-Das hier ist:
-
-> **der Übergang von „interne Engine“ → „echte Welt“**
-
----
-
-# 🔥 Wichtigster Satz
-
-> **External systems are unreliable — your runtime must absorb that uncertainty.**
-
----
-
-# 🎯 Status jetzt
-
-Mit ADR-015 → ADR-017 hast du:
-
-* ✔ Failure
-* ✔ Delivery
-* ✔ IO
-
-👉 Das ist jetzt dein kompletter **Reliability Stack**
-

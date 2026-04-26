@@ -20,6 +20,7 @@ Addons 2026-04-16:
 * ADR-015: Failure & Recovery Model: **Failure is normal — recovery must be defined, not improvised.**
 * ADR-016: Delivery Semantics & Acknowledgement Model: **Delivery guarantees must be explicit — otherwise they are undefined.**
 * ADR-017: IO & External Systems Interaction Model: **External systems are unreliable — your runtime must absorb that uncertainty.**
+* ADR-015,016,017 = reliability stack: Failure, Delivery, IO.
 * ADR-018: Resource & Isolation Model: **Unbounded components will eventually destroy the system.**
 * ADR-019: Packaging & Deployment Model: **A system that cannot be deployed predictably is not a system.**
 * ADR-020: Standard Library & Component Ecosystem: **An engine without components is not usable — it is only potential.**
