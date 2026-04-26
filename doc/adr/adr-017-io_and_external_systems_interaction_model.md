@@ -1,10 +1,3 @@
-Perfekt — das ist jetzt der Punkt, wo flowd auf die reale Welt trifft.
-Hier entscheidet sich, ob dein System stabil bleibt oder von externen Abhängigkeiten zerlegt wird.
-
-Ich baue dir das bewusst strikt und vollständig: Timeouts, Retries, Idempotenz, Backpressure gegen externe Systeme, Async sauber eingebettet in dein Scheduler-Modell.
-
----
-
 # ADR-0017: IO & External Systems Interaction Model
 
 ## Status
