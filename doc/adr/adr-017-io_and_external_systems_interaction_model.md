@@ -455,7 +455,16 @@ Operators must:
 
   * scheduler must not be blocked
 
----
+### Dependency on ADR-0002 (Scheduler Model)
+
+All IO components operate under the execution constraints defined in ADR-0002.
+
+Specifically:
+
+- IO must never block scheduler execution
+- process() must return immediately
+- scheduler controls execution timing
+
 
 ## Key Insight
 
@@ -514,12 +523,3 @@ Mit ADR-015 → ADR-017 hast du:
 
 👉 Das ist jetzt dein kompletter **Reliability Stack**
 
----
-
-# 🚀 Nächster Schritt
-
-👉 ADR-018: **Resource & Isolation Model**
-
-Das ist jetzt wichtig, damit dein System nicht durch „böse“ oder fehlerhafte Komponenten stirbt.
-
-Sag einfach 👍

@@ -338,12 +338,47 @@ Rejected for core runtime; async allowed only at boundaries
 * Simplifies reasoning about system behavior
 
 
-## Related Decisions
+## Related Decisions, Interaction With Other ADRs
 
 * ADR-0001: Compile-Time Component Integration
 * ADR-0003: Message Model
 * ADR-0004: Backpressure & Budgeting
 * ADR-0005: Hot Reload & Graph Lifecycle
+
+### Mandatory Integration with ADR-0017 (IO Model)
+
+All components performing external IO MUST comply with ADR-0017.
+
+In particular:
+
+- process() MUST remain non-blocking (ADR-002)
+- all IO MUST be asynchronous or offloaded (ADR-0017)
+- completion of async work MUST signal the scheduler (ADR-002 + ADR-0017)
+- polling-only designs are forbidden
+
+ADR-002 defines execution semantics.
+ADR-0017 defines external interaction semantics.
+
+Both are required for a correct implementation.
+
+### External Readiness Signaling (MANDATORY)
+
+The scheduler relies on explicit readiness signaling to resume execution.
+
+Any component performing asynchronous or background work MUST:
+
+- enqueue results into its output buffers
+- signal the scheduler upon availability of new work
+
+Polling-only designs are forbidden.
+
+The scheduler MUST NOT rely on implicit polling of components
+for externally generated events.
+
+External events MUST result in:
+
+- message enqueue
+- explicit scheduler wakeup
 
 
 ## Open Questions
@@ -1314,3 +1349,288 @@ Heavy observability / tracing from start:
 * high overhead
 * unnecessary complexity
 * distracts from core runtime behavior
+
+
+## External Execution, Async Integration and Time-Based Scheduling
+
+### Status
+
+Binding clarification
+
+---
+
+## 1. Scope
+
+This section defines mandatory rules for:
+
+* asynchronous execution
+* external IO integration
+* readiness signaling
+* time-based scheduling
+
+It complements:
+
+* ADR-0002 (scheduler model)
+* ADR-0017 (external IO model)
+
+---
+
+## 2. Non-Blocking Execution Contract
+
+### Decision
+
+`process()` MUST be strictly non-blocking.
+
+The following operations are FORBIDDEN inside `process()`:
+
+* network IO
+* file IO
+* blocking synchronization (mutex wait, join, sleep)
+* waiting on async results
+* long-running loops
+
+All such work MUST be executed in:
+
+* background threads, OR
+* async tasks
+
+---
+
+### Enforcement
+
+Violations MUST be treated as:
+
+> critical runtime errors
+
+---
+
+---
+
+## 3. Async Execution Model
+
+### Decision
+
+Components MAY perform background work using:
+
+* threads
+* async runtimes (e.g. Tokio)
+
+### Constraints
+
+Components MUST:
+
+* fully encapsulate async execution
+* never block `process()`
+* communicate results via output queues only
+
+---
+
+### Explicit Rule
+
+> The scheduler MUST never depend on component-internal execution state.
+
+---
+
+---
+
+## 4. External Readiness Signaling (MANDATORY)
+
+### Decision
+
+Components performing background or async work MUST signal the scheduler.
+
+### Required Behavior
+
+When async work completes:
+
+1. result MUST be enqueued into an output buffer
+2. scheduler MUST be explicitly woken via waker
+
+---
+
+### Forbidden
+
+The following patterns are FORBIDDEN:
+
+* polling for async completion inside `process()`
+* relying on repeated scheduler invocation
+* passive waiting for external events
+
+---
+
+### Required API
+
+The runtime MUST provide:
+
+```text id="waker_api"
+scheduler_waker.wake(node_id)
+```
+
+This MUST:
+
+* mark the node as ready
+* wake the scheduler if it is idle
+
+---
+
+---
+
+## 5. Time-Based Scheduling (MANDATORY)
+
+### Decision
+
+The scheduler MUST implement a time-based wakeup primitive:
+
+```text id="wake_at_api"
+wake_at(node_id, timestamp)
+```
+
+---
+
+### Semantics
+
+* `timestamp` is an absolute time
+* node MUST NOT be scheduled before timestamp
+* node MUST be scheduled as soon as possible after timestamp
+* scheduling delay MUST be minimal and bounded
+
+---
+
+### Scheduler Requirements
+
+The scheduler MUST:
+
+* maintain a timer queue (min-heap or equivalent)
+* integrate timer events with readiness queue
+* block efficiently when idle
+* wake up on:
+
+  * new readiness signals
+  * earliest timer expiration
+
+---
+
+### Forbidden
+
+Components MUST NOT:
+
+* implement time delays via loops
+* repeatedly signal readiness for waiting
+* check time inside `process()` to simulate timers
+
+---
+
+### Required Behavior
+
+Timer-driven components MUST:
+
+* register wakeup via `wake_at`
+* return `NoWork` until scheduled again
+
+---
+
+---
+
+## 6. Idle Behavior
+
+### Decision
+
+The scheduler MUST NOT busy-wait.
+
+---
+
+### Required Behavior
+
+When idle, scheduler MUST block until:
+
+* a node is woken via `scheduler_waker`
+* a timer expires
+
+---
+
+---
+
+## 7. Backpressure Compliance
+
+### Decision
+
+Backpressure MUST be preserved in all execution paths.
+
+---
+
+### Required Behavior
+
+If an output buffer is full:
+
+Components MUST:
+
+* retry later, OR
+* buffer locally
+
+---
+
+### Forbidden
+
+The following are FORBIDDEN:
+
+* panicking on full buffers
+* dropping messages silently
+
+---
+
+---
+
+## 8. Optional Shared Async Runtime
+
+### Decision
+
+The runtime MAY provide a shared async runtime.
+
+---
+
+### Rules
+
+Components SHOULD use shared runtime when:
+
+* supported by external libraries
+
+Components MAY create their own runtime when:
+
+* required by external libraries
+* isolation is needed
+
+---
+
+### Explicit Rule
+
+> The system MUST support both patterns without behavioral differences.
+
+---
+
+---
+
+## 9. Deterministic Scheduling Boundary
+
+### Decision
+
+All execution MUST re-enter the scheduler before producing observable effects.
+
+---
+
+### Meaning
+
+* async tasks MUST NOT directly execute downstream logic
+* all outputs MUST pass through scheduler-controlled execution
+
+---
+
+---
+
+## 10. Final Principle
+
+> The scheduler is the only authority for execution.
+>
+> External work may happen anywhere,
+> but execution always returns to the scheduler.
+
+---
