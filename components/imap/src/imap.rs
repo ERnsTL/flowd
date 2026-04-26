@@ -96,7 +96,7 @@ impl Component for IMAPAppendComponent {
 
                     // Parse and connect to IMAP server
                     let parsed_url = parse_url(url);
-                    let (mut imap_session, mailbox) = login_and_connect(&parsed_url);
+                    let (imap_session, mailbox) = login_and_connect(&parsed_url);
                     debug!("IMAP connection established to mailbox: {}", mailbox);
                     self.state = IMAPAppendState::Connected {
                         imap_session,
@@ -204,7 +204,6 @@ enum IMAPFetchIdleState {
     WaitingForConfig,
     Connected {
         imap_session: imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
-        mailbox: String,
     },
     Finished,
 }
@@ -292,7 +291,6 @@ impl Component for IMAPFetchIdleComponent {
 
                     self.state = IMAPFetchIdleState::Connected {
                         imap_session,
-                        mailbox: mailbox.to_owned(),
                     };
                     return ProcessResult::DidWork(1);
                 }
@@ -304,7 +302,7 @@ impl Component for IMAPFetchIdleComponent {
                 return ProcessResult::NoWork;
             }
 
-            IMAPFetchIdleState::Connected { ref mut imap_session, mailbox: _ } => {
+            IMAPFetchIdleState::Connected { ref mut imap_session } => {
                 // Perform timeout-based IDLE operation
                 match idle_cooperative(imap_session, context) {
                     Ok(IdleResult::MailboxChanged) => {
@@ -480,7 +478,7 @@ enum IdleResult {
 
 fn idle_cooperative(
     imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
-    context: &mut NodeContext,
+    _context: &mut NodeContext,
 ) -> Result<IdleResult, ()> {
     // Use a shorter timeout for cooperative processing
     let cooperative_timeout = Duration::from_millis(100);
