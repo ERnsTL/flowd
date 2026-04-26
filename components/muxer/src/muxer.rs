@@ -3,8 +3,7 @@ use flowd_component_api::{
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
-use log::{debug, info, trace, warn};
-use std::thread;
+use log::{debug, info, trace};
 
 pub struct MuxerComponent {
     inn: Vec<ProcessEdgeSource>,
@@ -281,40 +280,4 @@ impl Component for Demux3Component {
     }
 }
 
-fn push_blocking(
-    sink: &mut flowd_component_api::ProcessEdgeSinkConnection,
-    wake: &thread::Thread,
-    mut packet: Vec<u8>,
-    signals_in: &ProcessSignalSource,
-    signals_out: &ProcessSignalSink,
-) -> bool {
-    loop {
-        match sink.push(packet) {
-            Ok(()) => {
-                wake.unpark();
-                return false;
-            }
-            Err(PushError::Full(returned)) => {
-                packet = returned;
-                wake.unpark();
-                if let Ok(signal) = signals_in.try_recv() {
-                    trace!(
-                        "received signal ip while waiting for outport: {}",
-                        std::str::from_utf8(&signal).expect("invalid utf-8")
-                    );
-                    if signal == b"stop" {
-                        return true;
-                    } else if signal == b"ping" {
-                        let _ = signals_out.try_send(b"pong".to_vec());
-                    } else {
-                        warn!(
-                            "received unknown signal ip: {}",
-                            std::str::from_utf8(&signal).expect("invalid utf-8")
-                        );
-                    }
-                }
-                thread::yield_now();
-            }
-        }
-    }
-}
+
