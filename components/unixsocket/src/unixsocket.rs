@@ -10,6 +10,8 @@ use std::io::{ErrorKind, Read, Write};
 use std::time::Duration;
 use uds::UnixSocketAddr;
 
+
+
 pub struct UnixSocketClientComponent {
     conf: ProcessEdgeSource,
     inn: ProcessEdgeSource,
@@ -52,7 +54,6 @@ enum SocketType {
 
 const DEFAULT_READ_BUFFER_SIZE: usize = 65536;
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(500);
-const DEFAULT_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 
 
 impl Component for UnixSocketClientComponent {
@@ -461,13 +462,9 @@ impl Component for UnixSocketServerComponent {
                     Ok((socket, addr)) => {
                         debug!("accepted new unix socket connection from {:?}", addr);
 
-                        // Set timeouts on the socket
-                        if let Err(e) = socket.set_read_timeout(Some(DEFAULT_READ_TIMEOUT)) {
-                            error!("failed to set read timeout on client socket: {}", e);
-                            return ProcessResult::NoWork;
-                        }
-                        if let Err(e) = socket.set_write_timeout(DEFAULT_WRITE_TIMEOUT) {
-                            error!("failed to set write timeout on client socket: {}", e);
+                        // Set socket to non-blocking mode
+                        if let Err(e) = socket.set_nonblocking(true) {
+                            error!("failed to set non-blocking on client socket: {}", e);
                             return ProcessResult::NoWork;
                         }
 
@@ -556,8 +553,8 @@ impl Component for UnixSocketServerComponent {
                                     debug!("sent response to unix socket client {}", target_client_id);
                                 }
                                 Err(err) => {
-                                    if err.kind() == ErrorKind::WouldBlock || err.kind() == ErrorKind::TimedOut {
-                                        warn!("timed out writing response to client {}, dropping packet", target_client_id);
+                                    if err.kind() == ErrorKind::WouldBlock {
+                                        warn!("would block writing response to client {}, dropping packet", target_client_id);
                                     } else {
                                         warn!("failed to write response to client {}: {}, dropping client", target_client_id, err);
                                         connections_to_remove.push(target_client_id);

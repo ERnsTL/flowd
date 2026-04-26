@@ -14,5 +14,8 @@ log = "0.4"
 url = "2"
 uds = "0.4.2"
 
+# for non-blocking I/O
+mio = { version = "0.8", features = ["net", "os-poll"] }
+
 [package.metadata.flowd]
 compatible = "0.5"
