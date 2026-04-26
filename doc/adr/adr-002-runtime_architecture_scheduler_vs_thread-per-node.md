@@ -1397,8 +1397,13 @@ It complements:
 ### Decision
 
 `process()` MUST be strictly non-blocking.
-`process()` MUST complete within a bounded and minimal time,
-sufficient to ensure scheduler responsiveness.
+`process()` MUST complete within a bounded time.
+
+The execution time of `process()` MUST be short enough to guarantee
+scheduler fairness and responsiveness across all nodes.
+
+Implementations MUST define and enforce a maximum execution time
+(e.g. via runtime checks or CI validation).
 
 The following operations are FORBIDDEN inside `process()`:
 
