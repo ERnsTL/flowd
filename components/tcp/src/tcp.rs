@@ -10,7 +10,34 @@ use log::{debug, info, trace, warn};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+#[derive(Debug)]
+enum ClientCommand {
+    Connect(SocketAddr),
+    SendData(Vec<u8>),
+    Disconnect,
+}
+
+#[derive(Debug)]
+enum ClientResult {
+    Connected,
+    ConnectionFailed(std::io::Error),
+    DataSent,
+    DataReceived(Vec<u8>),
+    ConnectionClosed,
+    Error(std::io::Error),
+}
+
+#[derive(Debug, Clone)]
+enum ClientState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error(String),
+}
 
 pub struct TCPClientComponent {
     conf: ProcessEdgeSource,
@@ -19,9 +46,15 @@ pub struct TCPClientComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
+
+    // Worker thread communication
+    command_tx: Sender<ClientCommand>,
+    result_rx: Receiver<ClientResult>,
+    worker_handle: Option<JoinHandle<()>>,
+
     // Runtime state
+    state: ClientState,
     socket_addr: Option<SocketAddr>,
-    stream: Option<TcpStream>,
     pending_data: std::collections::VecDeque<Vec<u8>>, // data to send, buffered for backpressure
 }
 
@@ -29,6 +62,122 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
 const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 4096;
+
+impl TCPClientComponent {
+    fn worker_thread(command_rx: Receiver<ClientCommand>, result_tx: Sender<ClientResult>) {
+        let mut stream: Option<TcpStream> = None;
+
+        loop {
+            // Try to receive a command
+            match command_rx.try_recv() {
+                Ok(command) => {
+                    match command {
+                        ClientCommand::Connect(addr) => {
+                            debug!("Worker: attempting to connect to {}", addr);
+                            match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+                                Ok(s) => {
+                                    if let Err(e) = s.set_read_timeout(READ_TIMEOUT) {
+                                        let _ = result_tx.send(ClientResult::Error(e));
+                                        continue;
+                                    }
+                                    if let Err(e) = s.set_write_timeout(WRITE_TIMEOUT) {
+                                        let _ = result_tx.send(ClientResult::Error(e));
+                                        continue;
+                                    }
+                                    stream = Some(s);
+                                    let _ = result_tx.send(ClientResult::Connected);
+                                    debug!("Worker: connected to {}", addr);
+                                }
+                                Err(e) => {
+                                    debug!("Worker: failed to connect to {}: {}", addr, e);
+                                    let _ = result_tx.send(ClientResult::ConnectionFailed(e));
+                                }
+                            }
+                        }
+                        ClientCommand::SendData(data) => {
+                            if let Some(ref mut s) = stream {
+                                match s.write_all(&data) {
+                                    Ok(()) => {
+                                        let _ = s.flush();
+                                        let _ = result_tx.send(ClientResult::DataSent);
+                                        debug!("Worker: sent {} bytes", data.len());
+                                    }
+                                    Err(e) => {
+                                        debug!("Worker: failed to send data: {}", e);
+                                        let _ = result_tx.send(ClientResult::Error(e));
+                                    }
+                                }
+                            } else {
+                                let _ = result_tx.send(ClientResult::Error(std::io::Error::new(
+                                    std::io::ErrorKind::NotConnected,
+                                    "No active connection"
+                                )));
+                            }
+                        }
+                        ClientCommand::Disconnect => {
+                            stream = None;
+                            let _ = result_tx.send(ClientResult::ConnectionClosed);
+                            debug!("Worker: disconnected");
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // No command, try to read data if connected
+                    if let Some(ref mut s) = stream {
+                        let mut buf = [0; READ_BUFFER];
+                        match s.read(&mut buf) {
+                            Ok(bytes_read) => {
+                                if bytes_read > 0 {
+                                    let data = Vec::from(&buf[0..bytes_read]);
+                                    let _ = result_tx.send(ClientResult::DataReceived(data));
+                                    debug!("Worker: received {} bytes", bytes_read);
+                                } else {
+                                    // Connection closed by peer
+                                    stream = None;
+                                    let _ = result_tx.send(ClientResult::ConnectionClosed);
+                                    debug!("Worker: connection closed by peer");
+                                }
+                            }
+                            Err(e) => {
+                                match e.kind() {
+                                    ErrorKind::WouldBlock => {
+                                        // No data available, continue
+                                    }
+                                    _ => {
+                                        // Read error
+                                        debug!("Worker: read error: {}", e);
+                                        stream = None;
+                                        let _ = result_tx.send(ClientResult::Error(e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Main thread disconnected, exit
+                    debug!("Worker: command channel disconnected, exiting");
+                    break;
+                }
+            }
+
+            // Small sleep to prevent busy looping
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        debug!("Worker thread exiting");
+    }
+}
+
+impl Drop for TCPClientComponent {
+    fn drop(&mut self) {
+        // Send disconnect command and wait for worker to finish
+        let _ = self.command_tx.send(ClientCommand::Disconnect);
+        if let Some(handle) = self.worker_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
 
 impl Component for TCPClientComponent {
     fn new(
@@ -41,6 +190,15 @@ impl Component for TCPClientComponent {
     where
         Self: Sized,
     {
+        // Create communication channels for worker thread
+        let (command_tx, command_rx) = mpsc::channel::<ClientCommand>();
+        let (result_tx, result_rx) = mpsc::channel::<ClientResult>();
+
+        // Spawn worker thread
+        let worker_handle = Some(thread::spawn(move || {
+            Self::worker_thread(command_rx, result_tx);
+        }));
+
         TCPClientComponent {
             conf: inports
                 .remove("CONF")
@@ -60,8 +218,11 @@ impl Component for TCPClientComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             //graph_inout: graph_inout,
+            command_tx,
+            result_rx,
+            worker_handle,
+            state: ClientState::Disconnected,
             socket_addr: None,
-            stream: None,
             pending_data: std::collections::VecDeque::new(),
         }
     }
@@ -88,22 +249,15 @@ impl Component for TCPClientComponent {
                 self.socket_addr = Some(addr);
                 trace!("got config IP, parsed address: {}", addr);
 
-                // Try to connect
-                match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-                    Ok(stream) => {
-                        stream
-                            .set_read_timeout(READ_TIMEOUT)
-                            .expect("failed to set read timeout on TCP client");
-                        stream
-                            .set_write_timeout(WRITE_TIMEOUT)
-                            .expect("failed to set write timeout on TCP client");
-                        self.stream = Some(stream);
-                        debug!("connected to {}", addr);
-                    }
-                    Err(e) => {
-                        warn!("failed to connect to {}: {}", addr, e);
-                        return ProcessResult::NoWork; // Can't proceed without connection
-                    }
+                // Initiate connection via worker thread
+                if let Err(e) = self.command_tx.send(ClientCommand::Connect(addr)) {
+                    warn!("failed to send connect command to worker: {}", e);
+                    self.state = ClientState::Error("Failed to communicate with worker".to_string());
+                } else {
+                    self.state = ClientState::Connecting;
+                    work_units += 1;
+                    context.remaining_budget -= 1;
+                    debug!("initiated connection to {}", addr);
                 }
             } else {
                 trace!("no config IP available yet");
@@ -111,7 +265,51 @@ impl Component for TCPClientComponent {
             }
         }
 
-        // check signals
+        // Check for results from worker thread
+        while let Ok(result) = self.result_rx.try_recv() {
+            match result {
+                ClientResult::Connected => {
+                    self.state = ClientState::Connected;
+                    work_units += 1;
+                    debug!("connection established");
+                }
+                ClientResult::ConnectionFailed(e) => {
+                    self.state = ClientState::Error(format!("Connection failed: {}", e));
+                    work_units += 1;
+                    warn!("connection failed: {}", e);
+                }
+                ClientResult::DataReceived(data) => {
+                    match self.out.push(data) {
+                        Ok(()) => {
+                            work_units += 1;
+                            debug!("forwarded received data to output");
+                        }
+                        Err(PushError::Full(_)) => {
+                            // Output buffer full, drop data
+                            debug!("output buffer full, dropping received data");
+                            work_units += 1;
+                        }
+                    }
+                }
+                ClientResult::DataSent => {
+                    // Data was sent successfully
+                    work_units += 1;
+                    debug!("data sent confirmation received");
+                }
+                ClientResult::ConnectionClosed => {
+                    self.state = ClientState::Disconnected;
+                    work_units += 1;
+                    debug!("connection closed by peer");
+                }
+                ClientResult::Error(e) => {
+                    self.state = ClientState::Error(format!("Worker error: {}", e));
+                    work_units += 1;
+                    warn!("worker error: {}", e);
+                }
+            }
+        }
+
+        // Check signals
         if let Ok(ip) = self.signals_in.try_recv() {
             trace!(
                 "received signal ip: {}",
@@ -120,6 +318,7 @@ impl Component for TCPClientComponent {
             // stop signal
             if ip == b"stop" {
                 info!("got stop signal, finishing");
+                let _ = self.command_tx.send(ClientCommand::Disconnect);
                 return ProcessResult::Finished;
             } else if ip == b"ping" {
                 trace!("got ping signal, responding");
@@ -132,33 +331,21 @@ impl Component for TCPClientComponent {
             }
         }
 
-        // Send pending data first
+        // Send pending data within remaining budget
         while context.remaining_budget > 0 && !self.pending_data.is_empty() {
-            if let Some(stream) = &mut self.stream {
-                if let Some(pending_data) = self.pending_data.front() {
-                    match stream.write(pending_data) {
-                        Ok(_) => {
-                            stream.flush().expect("failed to flush TCP stream");
-                            self.pending_data.pop_front();
-                            work_units += 1;
-                            context.remaining_budget -= 1;
-                            debug!("sent pending data to TCP server");
-                        }
-                        Err(e) => {
-                            if e.kind() == ErrorKind::WouldBlock {
-                                // Would block, try again later
-                                break;
-                            } else {
-                                warn!("failed to write to TCP stream: {}", e);
-                                // Connection error, clear stream to force reconnection
-                                self.stream = None;
-                                break;
-                            }
-                        }
+            if let ClientState::Connected = self.state {
+                if let Some(data) = self.pending_data.front().cloned() {
+                    if let Err(e) = self.command_tx.send(ClientCommand::SendData(data)) {
+                        warn!("failed to send data command to worker: {}", e);
+                        break;
                     }
+                    self.pending_data.pop_front();
+                    work_units += 1;
+                    context.remaining_budget -= 1;
+                    debug!("sent pending data to worker thread");
                 }
             } else {
-                // No connection, can't send
+                // Not connected, can't send
                 break;
             }
         }
@@ -173,36 +360,22 @@ impl Component for TCPClientComponent {
                 debug!("got {} packets to send", chunk.len());
 
                 for ip in chunk.into_iter() {
-                    if let Some(stream) = &mut self.stream {
-                        match stream.write(&ip) {
-                            Ok(_) => {
-                                stream.flush().expect("failed to flush TCP stream");
-                                work_units += 1;
-                                context.remaining_budget -= 1;
-                                debug!("sent data to TCP server");
-                            }
-                            Err(e) => {
-                                if e.kind() == ErrorKind::WouldBlock {
-                                    // Buffer for later
-                                    self.pending_data.push_back(ip);
-                                    work_units += 1;
-                                    context.remaining_budget -= 1;
-                                    debug!("buffered data for later send");
-                                } else {
-                                    warn!("failed to write to TCP stream: {}", e);
-                                    // Connection error, clear stream to force reconnection
-                                    self.stream = None;
-                                    self.pending_data.push_back(ip); // Keep for retry
-                                    break;
-                                }
-                            }
+                    if let ClientState::Connected = self.state {
+                        let data_to_send = ip.clone();
+                        if let Err(e) = self.command_tx.send(ClientCommand::SendData(ip)) {
+                            warn!("failed to send data command to worker: {}", e);
+                            self.pending_data.push_back(data_to_send); // Buffer for retry
+                            break;
                         }
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                        debug!("sent data to worker thread");
                     } else {
-                        // No connection, buffer data
+                        // Not connected, buffer data
                         self.pending_data.push_back(ip);
                         work_units += 1;
                         context.remaining_budget -= 1;
-                        debug!("buffered data (no connection)");
+                        debug!("buffered data (not connected)");
                     }
                 }
             } else {
@@ -210,59 +383,10 @@ impl Component for TCPClientComponent {
             }
         }
 
-        // Receive data within remaining budget
-        while context.remaining_budget > 0 {
-            if let Some(stream) = &mut self.stream {
-                let mut buf = [0; READ_BUFFER];
-                match stream.read(&mut buf) {
-                    Ok(bytes_in) => {
-                        if bytes_in > 0 {
-                            debug!("got {} bytes from TCP server", bytes_in);
-                            let data = Vec::from(&buf[0..bytes_in]);
-                            match self.out.push(data) {
-                                Ok(()) => {
-                                    work_units += 1;
-                                    context.remaining_budget -= 1;
-                                    debug!("sent received data to output");
-                                }
-                                Err(PushError::Full(_returned_data)) => {
-                                    // Output buffer full - for TCP, we might want to buffer or drop
-                                    // For now, we'll drop since TCP is streaming
-                                    debug!("output buffer full, dropping received data");
-                                    work_units += 1; // Count as work even if dropped
-                                    context.remaining_budget -= 1;
-                                }
-                            }
-                        } else {
-                            // Connection closed by server
-                            debug!("TCP connection closed by server");
-                            self.stream = None;
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        match e.kind() {
-                            ErrorKind::WouldBlock => {
-                                // No data available, normal
-                                break;
-                            }
-                            _ => {
-                                warn!("failed to read from TCP stream: {}", e);
-                                self.stream = None;
-                                break;
-                            }
-                        }
-                    }
-                }
-            } else {
-                // No connection, can't receive
-                break;
-            }
-        }
-
         // are we done?
         if self.inn.is_abandoned() && self.pending_data.is_empty() {
             info!("EOF on inport IN and no pending data, finishing");
+            let _ = self.command_tx.send(ClientCommand::Disconnect);
             return ProcessResult::Finished;
         }
 
