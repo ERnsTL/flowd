@@ -11,14 +11,17 @@ use std::convert::Infallible;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 // Hyper imports for the old run() method
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer, StatusCode};
+use hyper::{
+    Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer,
+    StatusCode,
+};
 use tokio::sync::oneshot;
 
 // Time formatting is handled by SystemTime
@@ -62,11 +65,26 @@ pub struct HttpResponse {
 #[allow(unused)]
 enum HttpParseState {
     RequestLine,
-    Headers { headers: HashMap<String, String> },
-    Body { content_length: usize, received: usize, buffer: Vec<u8> },
-    ChunkedBody { chunks: Vec<Vec<u8>>, chunk_size: Option<usize>, buffer: Vec<u8> },
-    Trailers { headers: HashMap<String, String>, chunks: Vec<Vec<u8>> },
-    Complete { request: HttpRequest },
+    Headers {
+        headers: HashMap<String, String>,
+    },
+    Body {
+        content_length: usize,
+        received: usize,
+        buffer: Vec<u8>,
+    },
+    ChunkedBody {
+        chunks: Vec<Vec<u8>>,
+        chunk_size: Option<usize>,
+        buffer: Vec<u8>,
+    },
+    Trailers {
+        headers: HashMap<String, String>,
+        chunks: Vec<Vec<u8>>,
+    },
+    Complete {
+        request: HttpRequest,
+    },
 }
 
 #[derive(Debug)]
@@ -84,8 +102,15 @@ enum ConnectionState {
         buffer: Vec<u8>,
         request: Option<HttpRequest>,
     },
-    ProcessingRequest { request: HttpRequest, client_id: u32 },
-    WritingResponse { request_id: u64, response_state: HttpResponseState, client_id: u32 },
+    ProcessingRequest {
+        request: HttpRequest,
+        client_id: u32,
+    },
+    WritingResponse {
+        request_id: u64,
+        response_state: HttpResponseState,
+        client_id: u32,
+    },
     KeepAlive,
     Closed,
 }
@@ -112,7 +137,10 @@ fn parse_chunk_size(hex_str: &str) -> Option<usize> {
 }
 
 // Helper function to match routes with path parameters (e.g., /users/{id})
-fn match_route_with_params(request_path: &str, route_pattern: &str) -> Option<HashMap<String, String>> {
+fn match_route_with_params(
+    request_path: &str,
+    route_pattern: &str,
+) -> Option<HashMap<String, String>> {
     let request_parts: Vec<&str> = request_path.split('/').collect();
     let route_parts: Vec<&str> = route_pattern.split('/').collect();
 
@@ -291,7 +319,8 @@ fn format_response(response: &HttpResponse) -> Vec<u8> {
         if let Ok(duration) = SystemTime::now().duration_since(UNIX_EPOCH) {
             let datetime = time::OffsetDateTime::from_unix_timestamp(duration.as_secs() as i64)
                 .unwrap_or_else(|_| time::OffsetDateTime::UNIX_EPOCH);
-            let formatted = datetime.format(&time::format_description::well_known::Rfc2822)
+            let formatted = datetime
+                .format(&time::format_description::well_known::Rfc2822)
                 .unwrap_or_else(|_| "Mon, 01 Jan 2024 00:00:00 GMT".to_string());
             result.extend_from_slice(b"Date: ");
             result.extend_from_slice(formatted.as_bytes());
@@ -306,7 +335,12 @@ fn format_response(response: &HttpResponse) -> Vec<u8> {
     }
 
     // Check if response should be chunked
-    let use_chunked = response.body.len() > 8192 || response.headers.get("transfer-encoding").map(|v| v.to_lowercase()) == Some("chunked".to_string());
+    let use_chunked = response.body.len() > 8192
+        || response
+            .headers
+            .get("transfer-encoding")
+            .map(|v| v.to_lowercase())
+            == Some("chunked".to_string());
 
     if use_chunked {
         // Use chunked encoding
@@ -370,6 +404,7 @@ struct Connection {
 #[derive(Debug)]
 enum HttpClientCommand {
     MakeRequest(String), // URL to request
+    Shutdown,
 }
 
 #[derive(Debug)]
@@ -401,43 +436,77 @@ pub struct HTTPClientComponent {
     // Runtime state
     state: HttpClientState,
     pending_responses: std::collections::VecDeque<Vec<u8>>, // responses to send, buffered for backpressure
-    pending_errors: std::collections::VecDeque<Vec<u8>>,    // errors to send, buffered for backpressure
+    pending_errors: std::collections::VecDeque<Vec<u8>>, // errors to send, buffered for backpressure
 }
 
 impl HTTPClientComponent {
-    fn worker_thread(command_rx: Receiver<HttpClientCommand>, result_tx: Sender<HttpClientResult>, client: reqwest::blocking::Client) {
+    fn worker_thread(
+        command_rx: Receiver<HttpClientCommand>,
+        result_tx: Sender<HttpClientResult>,
+        client: reqwest::blocking::Client,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+    ) {
         loop {
             // Try to receive a command
             match command_rx.try_recv() {
-                Ok(command) => {
-                    match command {
-                        HttpClientCommand::MakeRequest(url) => {
-                            debug!("Worker: making HTTP request to {}", url);
-                            match client.get(&url).send() {
-                                Ok(resp) => {
-                                    debug!("Worker: got response, reading body...");
-                                    match resp.bytes() {
-                                        Ok(body_bytes) => {
-                                            let body = body_bytes.to_vec();
-                                            debug!("Worker: sent response body ({} bytes)", body.len());
-                                            let _ = result_tx.send(HttpClientResult::Response(body));
+                Ok(command) => match command {
+                    HttpClientCommand::MakeRequest(url) => {
+                        debug!("Worker: making HTTP request to {}", url);
+                        match client.get(&url).send() {
+                            Ok(resp) => {
+                                debug!("Worker: got response, reading body...");
+                                let status = resp.status();
+                                match resp.bytes() {
+                                    Ok(body_bytes) => {
+                                        let body = body_bytes.to_vec();
+                                        if status.is_success() {
+                                            debug!(
+                                                "Worker: sent response body ({} bytes)",
+                                                body.len()
+                                            );
+                                            let _ =
+                                                result_tx.send(HttpClientResult::Response(body));
+                                        } else {
+                                            let message = format!(
+                                                "HTTP {}: {}",
+                                                status,
+                                                String::from_utf8_lossy(&body)
+                                            );
+                                            let _ =
+                                                result_tx.send(HttpClientResult::Error(message));
                                         }
-                                        Err(e) => {
-                                            let error_msg = format!("Failed to read response body: {}", e);
-                                            let _ = result_tx.send(HttpClientResult::Error(error_msg));
-                                            debug!("Worker: failed to read response body: {}", e);
+                                        if let Some(ref waker) = scheduler_waker {
+                                            waker();
                                         }
                                     }
+                                    Err(e) => {
+                                        let error_msg = format!(
+                                            "HTTP {}: Failed to read response body: {}",
+                                            status, e
+                                        );
+                                        let _ = result_tx.send(HttpClientResult::Error(error_msg));
+                                        if let Some(ref waker) = scheduler_waker {
+                                            waker();
+                                        }
+                                        debug!("Worker: failed to read response body: {}", e);
+                                    }
                                 }
-                                Err(e) => {
-                                    let error_msg = format!("HTTP request failed: {}", e);
-                                    let _ = result_tx.send(HttpClientResult::Error(error_msg));
-                                    debug!("Worker: HTTP request failed: {}", e);
+                            }
+                            Err(e) => {
+                                let error_msg = format!("HTTP request failed: {}", e);
+                                let _ = result_tx.send(HttpClientResult::Error(error_msg));
+                                if let Some(ref waker) = scheduler_waker {
+                                    waker();
                                 }
+                                debug!("Worker: HTTP request failed: {}", e);
                             }
                         }
                     }
-                }
+                    HttpClientCommand::Shutdown => {
+                        debug!("Worker: received shutdown command, exiting");
+                        break;
+                    }
+                },
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     // No command, sleep briefly to avoid busy looping
                     thread::sleep(Duration::from_millis(10));
@@ -456,8 +525,8 @@ impl HTTPClientComponent {
 
 impl Drop for HTTPClientComponent {
     fn drop(&mut self) {
-        // Send a dummy command to wake up the worker thread so it can exit
-        let _ = self.command_tx.send(HttpClientCommand::MakeRequest("http://dummy".to_string()));
+        // Tell worker to exit and wait for a clean shutdown.
+        let _ = self.command_tx.send(HttpClientCommand::Shutdown);
         if let Some(handle) = self.worker_handle.take() {
             let _ = handle.join();
         }
@@ -471,6 +540,7 @@ impl Component for HTTPClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -487,7 +557,7 @@ impl Component for HTTPClientComponent {
 
         // Spawn worker thread
         let worker_handle = Some(thread::spawn(move || {
-            Self::worker_thread(command_rx, result_tx, client);
+            Self::worker_thread(command_rx, result_tx, client, scheduler_waker);
         }));
 
         HTTPClientComponent {
@@ -620,7 +690,10 @@ impl Component for HTTPClientComponent {
                 debug!("got a request: {}", &url);
 
                 // Send request to worker thread
-                if let Err(e) = self.command_tx.send(HttpClientCommand::MakeRequest(url.to_string())) {
+                if let Err(e) = self
+                    .command_tx
+                    .send(HttpClientCommand::MakeRequest(url.to_string()))
+                {
                     warn!("failed to send HTTP request to worker: {}", e);
                     self.state = HttpClientState::Error(());
                 } else {
@@ -635,7 +708,10 @@ impl Component for HTTPClientComponent {
         }
 
         // are we done?
-        if self.req.is_abandoned() && self.pending_responses.is_empty() && self.pending_errors.is_empty() {
+        if self.req.is_abandoned()
+            && self.pending_responses.is_empty()
+            && self.pending_errors.is_empty()
+        {
             info!("EOF on inport REQ and all requests processed, finishing");
             return ProcessResult::Finished;
         }
@@ -711,8 +787,8 @@ pub struct HTTPServerComponent {
     next_client_id: u32,
     pending_requests: std::collections::VecDeque<(u64, u32, HttpRequest)>, // (request_id, client_id, request) waiting to be sent
     pending_responses: HashMap<u64, HttpResponse>, // responses waiting to be sent to clients, keyed by request_id
-    response_wait_queue: VecDeque<u64>, // request IDs waiting for RESP in FIFO order
-    next_request_id: u64, // for correlating requests and responses
+    response_wait_queue: VecDeque<u64>,            // request IDs waiting for RESP in FIFO order
+    next_request_id: u64,                          // for correlating requests and responses
     keep_alive_timeout: Duration,
 }
 
@@ -723,6 +799,7 @@ impl Component for HTTPServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -784,8 +861,7 @@ impl Component for HTTPServerComponent {
         }
 
         if let Ok(routes_bytes) = self.routes.pop() {
-            let routes_str = std::str::from_utf8(&routes_bytes)
-                .expect("invalid utf-8 routes");
+            let routes_str = std::str::from_utf8(&routes_bytes).expect("invalid utf-8 routes");
             let routes_config: Vec<RouteConfig> = routes_str
                 .split(",")
                 .filter_map(|route_spec| {
@@ -814,7 +890,8 @@ impl Component for HTTPServerComponent {
             if let (Some(listen_addr), Some(_routes)) = (&self.listen_addr, &self.routes_config) {
                 let listener = std::net::TcpListener::bind(listen_addr)
                     .expect("failed to bind HTTP listener socket");
-                listener.set_nonblocking(true)
+                listener
+                    .set_nonblocking(true)
                     .expect("failed to set non-blocking on HTTP listener");
                 self.listener = Some(listener);
                 debug!("HTTP server configured and listening on {}", listen_addr);
@@ -922,7 +999,9 @@ impl Component for HTTPServerComponent {
                                     match parse_state {
                                         HttpParseState::RequestLine => {
                                             if let Some(line_end) = find_crlf(conn_buffer) {
-                                                let line_str = match std::str::from_utf8(&conn_buffer[0..line_end]) {
+                                                let line_str = match std::str::from_utf8(
+                                                    &conn_buffer[0..line_end],
+                                                ) {
                                                     Ok(s) => s,
                                                     Err(_) => {
                                                         // Invalid UTF-8 in request line
@@ -930,38 +1009,47 @@ impl Component for HTTPServerComponent {
                                                             status_code: 400,
                                                             status_text: "Bad Request".to_string(),
                                                             headers: HashMap::new(),
-                                                            body: b"Invalid UTF-8 in request line".to_vec(),
+                                                            body: b"Invalid UTF-8 in request line"
+                                                                .to_vec(),
                                                         };
                                                         let request_id = self.next_request_id;
                                                         self.next_request_id += 1;
-                                                        self.pending_responses.insert(request_id, response);
-                                                        let new_state = ConnectionState::WritingResponse {
-                                                            request_id,
-                                                            response_state: HttpResponseState::Pending,
-                                                            client_id: *client_id,
-                                                        };
+                                                        self.pending_responses
+                                                            .insert(request_id, response);
+                                                        let new_state =
+                                                            ConnectionState::WritingResponse {
+                                                                request_id,
+                                                                response_state:
+                                                                    HttpResponseState::Pending,
+                                                                client_id: *client_id,
+                                                            };
                                                         state_changes.push((*client_id, new_state));
                                                         parsing_complete = true;
                                                         break;
                                                     }
                                                 };
 
-                                                let parts: Vec<&str> = line_str.split_whitespace().collect();
+                                                let parts: Vec<&str> =
+                                                    line_str.split_whitespace().collect();
                                                 if parts.len() != 3 {
                                                     let response = HttpResponse {
                                                         status_code: 400,
                                                         status_text: "Bad Request".to_string(),
                                                         headers: HashMap::new(),
-                                                        body: b"Invalid request line format".to_vec(),
+                                                        body: b"Invalid request line format"
+                                                            .to_vec(),
                                                     };
                                                     let request_id = self.next_request_id;
                                                     self.next_request_id += 1;
-                                                    self.pending_responses.insert(request_id, response);
-                                                    let new_state = ConnectionState::WritingResponse {
-                                                        request_id,
-                                                        response_state: HttpResponseState::Pending,
-                                                        client_id: *client_id,
-                                                    };
+                                                    self.pending_responses
+                                                        .insert(request_id, response);
+                                                    let new_state =
+                                                        ConnectionState::WritingResponse {
+                                                            request_id,
+                                                            response_state:
+                                                                HttpResponseState::Pending,
+                                                            client_id: *client_id,
+                                                        };
                                                     state_changes.push((*client_id, new_state));
                                                     parsing_complete = true;
                                                     break;
@@ -974,17 +1062,22 @@ impl Component for HTTPServerComponent {
                                                 // Parse query parameters from path
                                                 let mut query_params = HashMap::new();
                                                 if let Some(query_start) = path.find('?') {
-                                                    let query_string = path[query_start + 1..].to_string(); // Extract before truncating
+                                                    let query_string =
+                                                        path[query_start + 1..].to_string(); // Extract before truncating
                                                     path.truncate(query_start); // Remove query from path
 
                                                     for pair in query_string.split('&') {
                                                         if let Some(eq_pos) = pair.find('=') {
                                                             let key = pair[..eq_pos].to_string();
-                                                            let value = pair[eq_pos + 1..].to_string();
+                                                            let value =
+                                                                pair[eq_pos + 1..].to_string();
                                                             query_params.insert(key, value);
                                                         } else if !pair.is_empty() {
                                                             // Key without value
-                                                            query_params.insert(pair.to_string(), String::new());
+                                                            query_params.insert(
+                                                                pair.to_string(),
+                                                                String::new(),
+                                                            );
                                                         }
                                                     }
                                                 }
@@ -999,12 +1092,15 @@ impl Component for HTTPServerComponent {
                                                     };
                                                     let request_id = self.next_request_id;
                                                     self.next_request_id += 1;
-                                                    self.pending_responses.insert(request_id, response);
-                                                    let new_state = ConnectionState::WritingResponse {
-                                                        request_id,
-                                                        response_state: HttpResponseState::Pending,
-                                                        client_id: *client_id,
-                                                    };
+                                                    self.pending_responses
+                                                        .insert(request_id, response);
+                                                    let new_state =
+                                                        ConnectionState::WritingResponse {
+                                                            request_id,
+                                                            response_state:
+                                                                HttpResponseState::Pending,
+                                                            client_id: *client_id,
+                                                        };
                                                     state_changes.push((*client_id, new_state));
                                                     parsing_complete = true;
                                                     break;
@@ -1041,23 +1137,32 @@ impl Component for HTTPServerComponent {
                                                         req.headers = headers.clone();
 
                                                         // Check for Transfer-Encoding or Content-Length
-                                                        let transfer_encoding = headers.get("transfer-encoding");
-                                                        let content_length = headers.get("content-length");
+                                                        let transfer_encoding =
+                                                            headers.get("transfer-encoding");
+                                                        let content_length =
+                                                            headers.get("content-length");
 
-                                                        if transfer_encoding.map(|v| v.to_lowercase()) == Some("chunked".to_string()) {
-                                                            *parse_state = HttpParseState::ChunkedBody {
-                                                                chunks: Vec::new(),
-                                                                chunk_size: None,
-                                                                buffer: Vec::new(),
-                                                            };
-                                                        } else if let Some(cl_str) = content_length {
-                                                            if let Ok(cl) = cl_str.parse::<usize>() {
+                                                        if transfer_encoding
+                                                            .map(|v| v.to_lowercase())
+                                                            == Some("chunked".to_string())
+                                                        {
+                                                            *parse_state =
+                                                                HttpParseState::ChunkedBody {
+                                                                    chunks: Vec::new(),
+                                                                    chunk_size: None,
+                                                                    buffer: Vec::new(),
+                                                                };
+                                                        } else if let Some(cl_str) = content_length
+                                                        {
+                                                            if let Ok(cl) = cl_str.parse::<usize>()
+                                                            {
                                                                 if cl > 0 {
-                                                                    *parse_state = HttpParseState::Body {
-                                                                        content_length: cl,
-                                                                        received: 0,
-                                                                        buffer: Vec::new(),
-                                                                    };
+                                                                    *parse_state =
+                                                                        HttpParseState::Body {
+                                                                            content_length: cl,
+                                                                            received: 0,
+                                                                            buffer: Vec::new(),
+                                                                        };
                                                                 } else {
                                                                     // No body
                                                                     parsing_complete = true;
@@ -1070,15 +1175,18 @@ impl Component for HTTPServerComponent {
                                                                     headers: HashMap::new(),
                                                                     body: b"Invalid Content-Length header".to_vec(),
                                                                 };
-                                                                let request_id = self.next_request_id;
+                                                                let request_id =
+                                                                    self.next_request_id;
                                                                 self.next_request_id += 1;
-                                                                self.pending_responses.insert(request_id, response);
+                                                                self.pending_responses
+                                                                    .insert(request_id, response);
                                                                 let new_state = ConnectionState::WritingResponse {
                                                                     request_id,
                                                                     response_state: HttpResponseState::Pending,
                                                                     client_id: *client_id,
                                                                 };
-                                                                state_changes.push((*client_id, new_state));
+                                                                state_changes
+                                                                    .push((*client_id, new_state));
                                                                 parsing_complete = true;
                                                                 break;
                                                             }
@@ -1090,30 +1198,41 @@ impl Component for HTTPServerComponent {
                                                     break;
                                                 } else {
                                                     // Parse header line
-                                                    let line_str = match std::str::from_utf8(&conn_buffer[0..line_end]) {
+                                                    let line_str = match std::str::from_utf8(
+                                                        &conn_buffer[0..line_end],
+                                                    ) {
                                                         Ok(s) => s,
                                                         Err(_) => {
                                                             let response = HttpResponse {
                                                                 status_code: 400,
-                                                                status_text: "Bad Request".to_string(),
+                                                                status_text: "Bad Request"
+                                                                    .to_string(),
                                                                 headers: HashMap::new(),
-                                                                body: b"Invalid UTF-8 in header line".to_vec(),
+                                                                body:
+                                                                    b"Invalid UTF-8 in header line"
+                                                                        .to_vec(),
                                                             };
                                                             let request_id = self.next_request_id;
                                                             self.next_request_id += 1;
-                                                            self.pending_responses.insert(request_id, response);
-                                                            let new_state = ConnectionState::WritingResponse {
-                                                                request_id,
-                                                                response_state: HttpResponseState::Pending,
-                                                                client_id: *client_id,
-                                                            };
-                                                            state_changes.push((*client_id, new_state));
+                                                            self.pending_responses
+                                                                .insert(request_id, response);
+                                                            let new_state =
+                                                                ConnectionState::WritingResponse {
+                                                                    request_id,
+                                                                    response_state:
+                                                                        HttpResponseState::Pending,
+                                                                    client_id: *client_id,
+                                                                };
+                                                            state_changes
+                                                                .push((*client_id, new_state));
                                                             parsing_complete = true;
                                                             break;
                                                         }
                                                     };
 
-                                                    if let Some((key, value)) = parse_header_line(line_str) {
+                                                    if let Some((key, value)) =
+                                                        parse_header_line(line_str)
+                                                    {
                                                         headers.insert(key, value);
                                                     } else {
                                                         // Invalid header line
@@ -1121,16 +1240,20 @@ impl Component for HTTPServerComponent {
                                                             status_code: 400,
                                                             status_text: "Bad Request".to_string(),
                                                             headers: HashMap::new(),
-                                                            body: b"Invalid header line format".to_vec(),
+                                                            body: b"Invalid header line format"
+                                                                .to_vec(),
                                                         };
                                                         let request_id = self.next_request_id;
                                                         self.next_request_id += 1;
-                                                        self.pending_responses.insert(request_id, response);
-                                                        let new_state = ConnectionState::WritingResponse {
-                                                            request_id,
-                                                            response_state: HttpResponseState::Pending,
-                                                            client_id: *client_id,
-                                                        };
+                                                        self.pending_responses
+                                                            .insert(request_id, response);
+                                                        let new_state =
+                                                            ConnectionState::WritingResponse {
+                                                                request_id,
+                                                                response_state:
+                                                                    HttpResponseState::Pending,
+                                                                client_id: *client_id,
+                                                            };
                                                         state_changes.push((*client_id, new_state));
                                                         parsing_complete = true;
                                                         break;
@@ -1145,7 +1268,11 @@ impl Component for HTTPServerComponent {
                                             }
                                         }
 
-                                        HttpParseState::Body { content_length, received, buffer: ref mut body_buffer } => {
+                                        HttpParseState::Body {
+                                            content_length,
+                                            received,
+                                            buffer: ref mut body_buffer,
+                                        } => {
                                             let remaining = *content_length - *received;
                                             let to_read = remaining.min(conn_buffer.len());
 
@@ -1166,7 +1293,11 @@ impl Component for HTTPServerComponent {
                                             break; // Need more data or body complete
                                         }
 
-                                        HttpParseState::ChunkedBody { ref mut chunks, chunk_size, buffer: ref mut chunk_buffer } => {
+                                        HttpParseState::ChunkedBody {
+                                            ref mut chunks,
+                                            chunk_size,
+                                            buffer: ref mut chunk_buffer,
+                                        } => {
                                             loop {
                                                 if let Some(size) = *chunk_size {
                                                     if size == 0 {
@@ -1181,8 +1312,10 @@ impl Component for HTTPServerComponent {
 
                                                     let to_read = size.min(conn_buffer.len());
                                                     if to_read > 0 {
-                                                        let data_to_copy = conn_buffer[0..to_read].to_vec();
-                                                        chunk_buffer.extend_from_slice(&data_to_copy);
+                                                        let data_to_copy =
+                                                            conn_buffer[0..to_read].to_vec();
+                                                        chunk_buffer
+                                                            .extend_from_slice(&data_to_copy);
                                                         conn_buffer.drain(0..to_read);
 
                                                         if chunk_buffer.len() >= size {
@@ -1192,7 +1325,9 @@ impl Component for HTTPServerComponent {
                                                             *chunk_size = None;
 
                                                             // Skip CRLF after chunk
-                                                            if conn_buffer.len() >= 2 && &conn_buffer[0..2] == b"\r\n" {
+                                                            if conn_buffer.len() >= 2
+                                                                && &conn_buffer[0..2] == b"\r\n"
+                                                            {
                                                                 conn_buffer.drain(0..2);
                                                             }
                                                         }
@@ -1201,7 +1336,9 @@ impl Component for HTTPServerComponent {
                                                 } else {
                                                     // Read chunk size
                                                     if let Some(line_end) = find_crlf(conn_buffer) {
-                                                        let size_line = match std::str::from_utf8(&conn_buffer[0..line_end]) {
+                                                        let size_line = match std::str::from_utf8(
+                                                            &conn_buffer[0..line_end],
+                                                        ) {
                                                             Ok(s) => s,
                                                             Err(_) => {
                                                                 let response = HttpResponse {
@@ -1210,39 +1347,50 @@ impl Component for HTTPServerComponent {
                                                                     headers: HashMap::new(),
                                                                     body: b"Invalid UTF-8 in chunk size".to_vec(),
                                                                 };
-                                                                let request_id = self.next_request_id;
+                                                                let request_id =
+                                                                    self.next_request_id;
                                                                 self.next_request_id += 1;
-                                                                self.pending_responses.insert(request_id, response);
+                                                                self.pending_responses
+                                                                    .insert(request_id, response);
                                                                 let new_state = ConnectionState::WritingResponse {
                                                                     request_id,
                                                                     response_state: HttpResponseState::Pending,
                                                                     client_id: *client_id,
                                                                 };
-                                                                state_changes.push((*client_id, new_state));
+                                                                state_changes
+                                                                    .push((*client_id, new_state));
                                                                 parsing_complete = true;
                                                                 break;
                                                             }
                                                         };
 
-                                                        if let Some(size) = parse_chunk_size(size_line) {
+                                                        if let Some(size) =
+                                                            parse_chunk_size(size_line)
+                                                        {
                                                             *chunk_size = Some(size);
                                                             conn_buffer.drain(0..line_end + 2);
                                                         } else {
                                                             let response = HttpResponse {
                                                                 status_code: 400,
-                                                                status_text: "Bad Request".to_string(),
+                                                                status_text: "Bad Request"
+                                                                    .to_string(),
                                                                 headers: HashMap::new(),
-                                                                body: b"Invalid chunk size".to_vec(),
+                                                                body: b"Invalid chunk size"
+                                                                    .to_vec(),
                                                             };
                                                             let request_id = self.next_request_id;
                                                             self.next_request_id += 1;
-                                                            self.pending_responses.insert(request_id, response);
-                                                            let new_state = ConnectionState::WritingResponse {
-                                                                request_id,
-                                                                response_state: HttpResponseState::Pending,
-                                                                client_id: *client_id,
-                                                            };
-                                                            state_changes.push((*client_id, new_state));
+                                                            self.pending_responses
+                                                                .insert(request_id, response);
+                                                            let new_state =
+                                                                ConnectionState::WritingResponse {
+                                                                    request_id,
+                                                                    response_state:
+                                                                        HttpResponseState::Pending,
+                                                                    client_id: *client_id,
+                                                                };
+                                                            state_changes
+                                                                .push((*client_id, new_state));
                                                             parsing_complete = true;
                                                             break;
                                                         }
@@ -1273,36 +1421,44 @@ impl Component for HTTPServerComponent {
                                     }
                                 }
 
-                                    if parsing_complete {
-                                        let parse_error_queued = state_changes.iter().any(|(id, state)| {
+                                if parsing_complete {
+                                    let parse_error_queued =
+                                        state_changes.iter().any(|(id, state)| {
                                             *id == *client_id
-                                                && matches!(state, ConnectionState::WritingResponse { .. })
+                                                && matches!(
+                                                    state,
+                                                    ConnectionState::WritingResponse { .. }
+                                                )
                                         });
 
-                                        if !parse_error_queued {
-                                            if let Some(req) = current_request.take() {
-                                                let new_state = ConnectionState::ProcessingRequest {
-                                                    request: req.clone(),
-                                                    client_id: *client_id,
-                                                };
-                                                state_changes.push((*client_id, new_state));
+                                    if !parse_error_queued {
+                                        if let Some(req) = current_request.take() {
+                                            let new_state = ConnectionState::ProcessingRequest {
+                                                request: req.clone(),
+                                                client_id: *client_id,
+                                            };
+                                            state_changes.push((*client_id, new_state));
 
-                                                // Add to pending requests with request ID
-                                                let request_id = self.next_request_id;
-                                                self.next_request_id += 1;
-                                                self.pending_requests.push_back((request_id, *client_id, req));
-                                                work_units += 1;
-                                                context.remaining_budget -= 1;
-                                                debug!("parsed complete HTTP request from client {}", client_id);
-                                            }
-                                        } else {
-                                            *current_request = None;
+                                            // Add to pending requests with request ID
+                                            let request_id = self.next_request_id;
+                                            self.next_request_id += 1;
+                                            self.pending_requests
+                                                .push_back((request_id, *client_id, req));
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
                                             debug!(
-                                                "HTTP parse error for client {}, request will not be forwarded",
+                                                "parsed complete HTTP request from client {}",
                                                 client_id
                                             );
                                         }
+                                    } else {
+                                        *current_request = None;
+                                        debug!(
+                                                "HTTP parse error for client {}, request will not be forwarded",
+                                                client_id
+                                            );
                                     }
+                                }
                             } else {
                                 // Connection closed by client
                                 debug!("HTTP connection closed by client {}", client_id);
@@ -1326,15 +1482,16 @@ impl Component for HTTPServerComponent {
                     // This state exists to track that we're waiting
                 }
 
-                ConnectionState::WritingResponse { request_id, response_state, client_id } => {
+                ConnectionState::WritingResponse {
+                    request_id,
+                    response_state,
+                    client_id,
+                } => {
                     match response_state {
                         HttpResponseState::Pending => {
                             // Only start writing once the response for this specific request is available.
                             if let Some(response) = self.pending_responses.remove(request_id) {
-                                *response_state = HttpResponseState::Writing {
-                                    response,
-                                    sent: 0,
-                                };
+                                *response_state = HttpResponseState::Writing { response, sent: 0 };
                                 work_units += 1;
                                 context.remaining_budget -= 1;
                                 debug!(
@@ -1369,7 +1526,10 @@ impl Component for HTTPServerComponent {
                                     if e.kind() == std::io::ErrorKind::WouldBlock {
                                         // Would block, try again later
                                     } else {
-                                        warn!("failed to write HTTP response to client {}: {}", client_id, e);
+                                        warn!(
+                                            "failed to write HTTP response to client {}: {}",
+                                            client_id, e
+                                        );
                                         connections_to_remove.push(*client_id);
                                     }
                                 }
@@ -1422,7 +1582,8 @@ impl Component for HTTPServerComponent {
         for client_id in connections_to_remove {
             if let Some(connection) = self.connections.remove(&client_id) {
                 if let ConnectionState::WritingResponse { request_id, .. } = connection.state {
-                    self.response_wait_queue.retain(|queued_id| *queued_id != request_id);
+                    self.response_wait_queue
+                        .retain(|queued_id| *queued_id != request_id);
                     self.pending_responses.remove(&request_id);
                 }
             }
@@ -1473,7 +1634,10 @@ impl Component for HTTPServerComponent {
                                 self.pending_requests.pop_front();
                                 work_units += 1;
                                 context.remaining_budget -= 1;
-                                debug!("sent HTTP request {} to FBP network for route {}", request_id, index);
+                                debug!(
+                                    "sent HTTP request {} to FBP network for route {}",
+                                    request_id, index
+                                );
                                 self.response_wait_queue.push_back(request_id);
 
                                 // Mark connection as waiting for response
@@ -1543,7 +1707,10 @@ impl Component for HTTPServerComponent {
                     self.pending_responses.insert(request_id, response);
                     work_units += 1;
                     context.remaining_budget -= 1;
-                    debug!("received response from FBP network for request {}", request_id);
+                    debug!(
+                        "received response from FBP network for request {}",
+                        request_id
+                    );
                 } else {
                     warn!("received response from FBP network but no request is waiting for a response");
                     break;

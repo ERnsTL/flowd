@@ -2,16 +2,16 @@
 //! These tests validate isolated component logic without using the runtime
 
 use flowd_component_api::*;
-use flowd_repeat::RepeatComponent;
 use flowd_http::{HTTPClientComponent, HTTPServerComponent};
+use flowd_repeat::RepeatComponent;
+use multimap::MultiMap;
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
 use std::thread;
-use std::net::{TcpListener, TcpStream, Shutdown};
-use std::io::{Read, Write};
-use multimap::MultiMap;
+use std::time::{Duration, Instant};
 
 /// Specialized test harness for Repeat component
 pub struct RepeatTestHarness {
@@ -26,8 +26,10 @@ impl RepeatTestHarness {
     /// Create a new test harness for the Repeat component
     pub fn new() -> Self {
         // Create ring buffers for component IN and OUT ports
-        let (input_producer, input_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
-        let (output_producer, output_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (input_producer, input_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (output_producer, output_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
 
         // Create signal channels
         let (signal_sender, signal_receiver) = mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
@@ -37,12 +39,15 @@ impl RepeatTestHarness {
         inports.insert("IN".to_string(), input_consumer);
 
         let mut outports = MultiMap::new();
-        outports.insert("OUT".to_string(), ProcessEdgeSink {
-            sink: output_producer,
-            wakeup: None,
-            proc_name: None,
-            signal_ready: None,
-        });
+        outports.insert(
+            "OUT".to_string(),
+            ProcessEdgeSink {
+                sink: output_producer,
+                wakeup: None,
+                proc_name: None,
+                signal_ready: None,
+            },
+        );
 
         // Create dummy graph_inout handle (not used in tests)
         let graph_inout: GraphInportOutportHandle = (
@@ -57,6 +62,7 @@ impl RepeatTestHarness {
             signal_receiver,
             signal_sender.clone(),
             graph_inout,
+            None, // scheduler_waker
         );
 
         let context = NodeContext {
@@ -87,8 +93,6 @@ impl RepeatTestHarness {
     pub fn process(&mut self) -> ProcessResult {
         self.component.process(&mut self.context)
     }
-
-
 
     /// Collect all available outputs from the OUT port
     pub fn collect_outputs(&mut self) -> Vec<MessageBuf> {
@@ -157,7 +161,8 @@ impl HTTPClientTestHarness {
 
         // Create ring buffers for component ports
         let (req_producer, req_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
-        let (resp_producer, resp_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (resp_producer, resp_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
         let (err_producer, err_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
 
         // Create signal channels
@@ -168,24 +173,27 @@ impl HTTPClientTestHarness {
         inports.insert("REQ".to_string(), req_consumer);
 
         let mut outports = MultiMap::new();
-        outports.insert("RESP".to_string(), ProcessEdgeSink {
-            sink: resp_producer,
-            wakeup: None,
-            proc_name: None,
-            signal_ready: None,
-        });
-        outports.insert("ERR".to_string(), ProcessEdgeSink {
-            sink: err_producer,
-            wakeup: None,
-            proc_name: None,
-            signal_ready: None,
-        });
+        outports.insert(
+            "RESP".to_string(),
+            ProcessEdgeSink {
+                sink: resp_producer,
+                wakeup: None,
+                proc_name: None,
+                signal_ready: None,
+            },
+        );
+        outports.insert(
+            "ERR".to_string(),
+            ProcessEdgeSink {
+                sink: err_producer,
+                wakeup: None,
+                proc_name: None,
+                signal_ready: None,
+            },
+        );
 
         // Create dummy graph_inout handle
-        let graph_inout: GraphInportOutportHandle = (
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
-        );
+        let graph_inout: GraphInportOutportHandle = (Arc::new(|_| {}), Arc::new(|_| {}));
 
         // Instantiate the component
         let component = HTTPClientComponent::new(
@@ -194,6 +202,7 @@ impl HTTPClientTestHarness {
             signal_receiver,
             signal_sender.clone(),
             graph_inout,
+            None, // scheduler_waker
         );
 
         let context = NodeContext {
@@ -231,14 +240,20 @@ impl HTTPClientTestHarness {
 
                             // Simple HTTP response based on request
                             let response = if request.contains("GET /test HTTP/1.1") {
-                                "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!".to_string()
+                                "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nHello World!"
+                                    .to_string()
                             } else if request.contains("GET /error HTTP/1.1") {
-                                "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\nNot Found".to_string()
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\nNot Found"
+                                    .to_string()
                             } else if request.contains("POST /echo HTTP/1.1") {
                                 // Echo back the body
                                 if let Some(body_start) = request.find("\r\n\r\n") {
                                     let body = &request[body_start + 4..];
-                                    format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body)
+                                    format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                                        body.len(),
+                                        body
+                                    )
                                 } else {
                                     "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request".to_string()
                                 }
@@ -338,9 +353,12 @@ impl HTTPServerTestHarness {
         drop(listener); // Free the port for the component to use
 
         // Create ring buffers for component ports
-        let (conf_producer, conf_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
-        let (routes_producer, routes_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
-        let (resp_producer, resp_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (conf_producer, conf_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (routes_producer, routes_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
+        let (resp_producer, resp_consumer) =
+            rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
         let (req_producer, req_consumer) = rtrb::RingBuffer::<MessageBuf>::new(PROCESSEDGE_BUFSIZE);
 
         // Create signal channels
@@ -353,18 +371,18 @@ impl HTTPServerTestHarness {
         inports.insert("RESP".to_string(), resp_consumer);
 
         let mut outports = MultiMap::new();
-        outports.insert("REQ".to_string(), ProcessEdgeSink {
-            sink: req_producer,
-            wakeup: None,
-            proc_name: None,
-            signal_ready: None,
-        });
+        outports.insert(
+            "REQ".to_string(),
+            ProcessEdgeSink {
+                sink: req_producer,
+                wakeup: None,
+                proc_name: None,
+                signal_ready: None,
+            },
+        );
 
         // Create dummy graph_inout handle
-        let graph_inout: GraphInportOutportHandle = (
-            Arc::new(|_| {}),
-            Arc::new(|_| {}),
-        );
+        let graph_inout: GraphInportOutportHandle = (Arc::new(|_| {}), Arc::new(|_| {}));
 
         // Instantiate the component
         let component = HTTPServerComponent::new(
@@ -373,6 +391,7 @@ impl HTTPServerTestHarness {
             signal_receiver,
             signal_sender.clone(),
             graph_inout,
+            None, // scheduler_waker
         );
 
         let context = NodeContext {
@@ -487,7 +506,12 @@ impl HTTPServerTestHarness {
     }
 
     /// Make an HTTP request to the server
-    pub fn make_http_request(&self, method: &str, path: &str, body: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn make_http_request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         Self::make_http_request_to_port(self.server_port, method, path, body)
     }
 
@@ -503,8 +527,13 @@ impl HTTPServerTestHarness {
         stream.set_write_timeout(Some(Duration::from_secs(1)))?;
 
         let request = if let Some(body_content) = body {
-            format!("{} {} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-                   method, path, body_content.len(), body_content)
+            format!(
+                "{} {} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+                method,
+                path,
+                body_content.len(),
+                body_content
+            )
         } else {
             format!("{} {} HTTP/1.1\r\nHost: localhost\r\n\r\n", method, path)
         };
@@ -570,16 +599,20 @@ mod http_tests {
         routes: &str,
     ) -> bool {
         if let Err(err) = harness.configure(listen_addr, routes) {
-            eprintln!("Skipping HTTP server test: could not push server config into inports ({err:?}).");
+            eprintln!(
+                "Skipping HTTP server test: could not push server config into inports ({err:?})."
+            );
             return false;
         }
 
         // Need to process multiple times to set up the server
         for _ in 0..10 {
             match catch_unwind(AssertUnwindSafe(|| harness.process())) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(_) => {
-                    eprintln!("Skipping HTTP server test: listener setup panicked in this environment.");
+                    eprintln!(
+                        "Skipping HTTP server test: listener setup panicked in this environment."
+                    );
                     return false;
                 }
             }
@@ -642,15 +675,19 @@ mod http_tests {
 
     #[test]
     fn test_http_client_basic_get_request() {
-        let Some(mut harness) = maybe_http_client_harness() else { return; };
+        let Some(mut harness) = maybe_http_client_harness() else {
+            return;
+        };
 
         // Send a GET request to the mock server
         let url = format!("http://127.0.0.1:{}/test", harness.server_port());
         harness.send_request(&url).unwrap();
 
         // Process the component (may need multiple calls for network operations)
+        let start = Instant::now();
+        let timeout = Duration::from_secs(1);
         let mut total_work = 0u32;
-        for _ in 0..10 {  // Allow up to 10 processing cycles
+        while start.elapsed() < timeout {
             let result = harness.process();
             match result {
                 ProcessResult::DidWork(work) => total_work += work,
@@ -674,15 +711,19 @@ mod http_tests {
 
     #[test]
     fn test_http_client_error_response() {
-        let Some(mut harness) = maybe_http_client_harness() else { return; };
+        let Some(mut harness) = maybe_http_client_harness() else {
+            return;
+        };
 
         // Send a request that will result in a 404
         let url = format!("http://127.0.0.1:{}/error", harness.server_port());
         harness.send_request(&url).unwrap();
 
         // Process the component
+        let start = Instant::now();
+        let timeout = Duration::from_secs(10);
         let mut total_work = 0u32;
-        for _ in 0..10 {
+        while start.elapsed() < timeout {
             let result = harness.process();
             match result {
                 ProcessResult::DidWork(work) => total_work += work,
@@ -707,15 +748,19 @@ mod http_tests {
 
     #[test]
     fn test_http_client_post_request() {
-        let Some(mut harness) = maybe_http_client_harness() else { return; };
+        let Some(mut harness) = maybe_http_client_harness() else {
+            return;
+        };
 
         // Send a POST request
         let url = format!("http://127.0.0.1:{}/echo", harness.server_port());
         harness.send_request(&url).unwrap();
 
         // Process the component
+        let start = Instant::now();
+        let timeout = Duration::from_secs(10);
         let mut total_work = 0u32;
-        for _ in 0..10 {
+        while start.elapsed() < timeout {
             let result = harness.process();
             match result {
                 ProcessResult::DidWork(work) => total_work += work,
@@ -736,7 +781,9 @@ mod http_tests {
 
     #[test]
     fn test_http_client_signal_stop() {
-        let Some(mut harness) = maybe_http_client_harness() else { return; };
+        let Some(mut harness) = maybe_http_client_harness() else {
+            return;
+        };
 
         // Send a request
         let url = format!("http://127.0.0.1:{}/test", harness.server_port());
@@ -754,7 +801,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_basic_request_handling() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -763,8 +812,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx, response_rx) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/test", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/test", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -775,7 +825,13 @@ mod http_tests {
         assert_eq!(requests.len(), 1);
         assert_payload_has(
             &requests[0],
-            &["METHOD=GET", "PATH=/test", "QUERY=", "PATH_PARAMS=", "BODY="],
+            &[
+                "METHOD=GET",
+                "PATH=/test",
+                "QUERY=",
+                "PATH_PARAMS=",
+                "BODY=",
+            ],
         );
 
         // Send a response back
@@ -795,7 +851,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_multiple_requests() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/req1,/req2") {
             return;
         }
@@ -804,16 +862,18 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx1, response_rx1) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/req1", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/req1", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx1.send(response);
         });
 
         let port = harness.server_port();
         let (response_tx2, response_rx2) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/req2", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/req2", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx2.send(response);
         });
 
@@ -822,13 +882,12 @@ mod http_tests {
 
         // Should have received at least one request (the server may handle them sequentially)
         assert!(requests.len() >= 1);
-        let payloads = requests
-            .iter()
-            .map(|r| payload_text(r))
-            .collect::<Vec<_>>();
+        let payloads = requests.iter().map(|r| payload_text(r)).collect::<Vec<_>>();
         assert!(payloads.iter().all(|p| p.contains("METHOD=GET")));
         // At least one should match one of the expected paths
-        assert!(payloads.iter().any(|p| p.contains("PATH=/req1") || p.contains("PATH=/req2")));
+        assert!(payloads
+            .iter()
+            .any(|p| p.contains("PATH=/req1") || p.contains("PATH=/req2")));
 
         // Send responses for received requests
         for _ in 0..requests.len() {
@@ -850,12 +909,17 @@ mod http_tests {
                 responses_received += 1;
             }
         }
-        assert!(responses_received >= 1, "At least one response should be received");
+        assert!(
+            responses_received >= 1,
+            "At least one response should be received"
+        );
     }
 
     #[test]
     fn test_http_server_idle_client_does_not_block_other_clients() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/fast") {
             return;
         }
@@ -918,12 +982,18 @@ mod http_tests {
             }
         }
         let response_text = String::from_utf8_lossy(&response);
-        assert!(response_text.contains("fast-ok"), "unexpected response: {}", response_text);
+        assert!(
+            response_text.contains("fast-ok"),
+            "unexpected response: {}",
+            response_text
+        );
     }
 
     #[test]
     fn test_http_server_404_handling() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -932,8 +1002,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx, response_rx) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/nonexistent", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/nonexistent", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -953,7 +1024,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_signal_stop() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -970,7 +1043,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_budget_management() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -982,8 +1057,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx, _response_rx) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/test", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/test", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -1006,7 +1082,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_post_request_with_body() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "POST /echo") {
             return;
         }
@@ -1016,8 +1094,9 @@ mod http_tests {
         let (response_tx, response_rx) = mpsc::channel();
         let body = "Hello POST body";
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "POST", "/echo", Some(body))
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "POST", "/echo", Some(body))
+                    .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -1047,7 +1126,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_query_parameters() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/search") {
             return;
         }
@@ -1056,8 +1137,13 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx, response_rx) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/search?q=rust&limit=10", None)
-                .map_err(|e| e.to_string());
+            let response = HTTPServerTestHarness::make_http_request_to_port(
+                port,
+                "GET",
+                "/search?q=rust&limit=10",
+                None,
+            )
+            .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -1087,7 +1173,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_path_parameters() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/users/{id}") {
             return;
         }
@@ -1096,8 +1184,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx, response_rx) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/users/123", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/users/123", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx.send(response);
         });
 
@@ -1125,13 +1214,11 @@ mod http_tests {
         assert!(response.contains("User data"));
     }
 
-
-
-
-
     #[test]
     fn test_http_server_ping_signal() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -1148,7 +1235,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_http_version_10() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -1191,7 +1280,10 @@ mod http_tests {
 
         // Should have received the request
         assert_eq!(requests.len(), 1);
-        assert_payload_has(&requests[0], &["METHOD=GET", "PATH=/test", "VERSION=HTTP/1.0"]);
+        assert_payload_has(
+            &requests[0],
+            &["METHOD=GET", "PATH=/test", "VERSION=HTTP/1.0"],
+        );
 
         // Send response
         harness.send_response(b"HTTP/1.0 response").unwrap();
@@ -1207,11 +1299,11 @@ mod http_tests {
         assert!(response.contains("HTTP/1.0 response"));
     }
 
-
-
     #[test]
     fn test_http_server_large_response_chunked() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/large") {
             return;
         }
@@ -1290,7 +1382,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_keep_alive_connection() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -1311,7 +1405,8 @@ mod http_tests {
                     let mut responses = Vec::new();
 
                     // First request
-                    let request1 = b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n";
+                    let request1 =
+                        b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n";
                     let _ = stream.write_all(request1);
                     let response1 = match read_http_response(&mut stream) {
                         Ok(resp) => resp,
@@ -1323,7 +1418,8 @@ mod http_tests {
                     responses.push(String::from_utf8_lossy(&response1).to_string());
 
                     // Second request on same connection
-                    let request2 = b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+                    let request2 =
+                        b"GET /test HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
                     let _ = stream.write_all(request2);
 
                     let response2 = match read_http_response(&mut stream) {
@@ -1368,7 +1464,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_invalid_utf8_request_line() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "/test") {
             return;
         }
@@ -1422,11 +1520,11 @@ mod http_tests {
         assert!(response.contains("400") || response.contains("Bad Request"));
     }
 
-
-
     #[test]
     fn test_http_server_runtime_config_update() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
 
         // Start with initial config
         if !try_start_http_server(&mut harness, "/old") {
@@ -1444,8 +1542,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx1, response_rx1) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/old", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/old", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx1.send(response);
         });
 
@@ -1460,8 +1559,9 @@ mod http_tests {
         let port = harness.server_port();
         let (response_tx2, response_rx2) = mpsc::channel();
         thread::spawn(move || {
-            let response = HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/new", None)
-                .map_err(|e| e.to_string());
+            let response =
+                HTTPServerTestHarness::make_http_request_to_port(port, "GET", "/new", None)
+                    .map_err(|e| e.to_string());
             let _ = response_tx2.send(response);
         });
 
@@ -1481,7 +1581,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_chunked_request_body() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "POST /chunked") {
             return;
         }
@@ -1537,7 +1639,14 @@ mod http_tests {
 
         // Should have received the request with reassembled chunked body
         assert_eq!(requests.len(), 1);
-        assert_payload_has(&requests[0], &["METHOD=POST", "PATH=/chunked", &format!("BODY={}", expected_body)]);
+        assert_payload_has(
+            &requests[0],
+            &[
+                "METHOD=POST",
+                "PATH=/chunked",
+                &format!("BODY={}", expected_body),
+            ],
+        );
 
         // Send response
         harness.send_response(expected_body.as_bytes()).unwrap();
@@ -1555,7 +1664,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_invalid_content_length() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "POST /test") {
             return;
         }
@@ -1597,17 +1708,15 @@ mod http_tests {
 
         // Process cooperatively until client thread receives a response.
         let mut response_result = None;
-        let _ = harness.process_until(Duration::from_secs(3), || {
-            match response_rx.try_recv() {
-                Ok(v) => {
-                    response_result = Some(v);
-                    true
-                }
-                Err(mpsc::TryRecvError::Empty) => false,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    response_result = Some(Ok(String::new()));
-                    true
-                }
+        let _ = harness.process_until(Duration::from_secs(3), || match response_rx.try_recv() {
+            Ok(v) => {
+                response_result = Some(v);
+                true
+            }
+            Err(mpsc::TryRecvError::Empty) => false,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                response_result = Some(Ok(String::new()));
+                true
             }
         });
 
@@ -1636,7 +1745,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_chunked_request_with_trailers() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         if !try_start_http_server(&mut harness, "POST /trailers") {
             return;
         }
@@ -1688,7 +1799,14 @@ mod http_tests {
 
         // Should have received the request with chunked body (trailers should be ignored)
         assert_eq!(requests.len(), 1);
-        assert_payload_has(&requests[0], &["METHOD=POST", "PATH=/trailers", &format!("BODY={}", chunk_data)]);
+        assert_payload_has(
+            &requests[0],
+            &[
+                "METHOD=POST",
+                "PATH=/trailers",
+                &format!("BODY={}", chunk_data),
+            ],
+        );
 
         // Send response
         harness.send_response(chunk_data.as_bytes()).unwrap();
@@ -1706,7 +1824,9 @@ mod http_tests {
 
     #[test]
     fn test_http_server_connection_timeout() {
-        let Some(mut harness) = maybe_http_server_harness() else { return; };
+        let Some(mut harness) = maybe_http_server_harness() else {
+            return;
+        };
         // Use a shorter keep-alive timeout for test speed.
         let listen_addr = format!(
             "127.0.0.1:{}?keep_alive_timeout_ms=1200",
@@ -1739,7 +1859,9 @@ mod http_tests {
                         if bytes_read == 0 {
                             break;
                         }
-                        if !response_received && buffer[..bytes_read].windows(4).any(|w| w == b"\r\n\r\n") {
+                        if !response_received
+                            && buffer[..bytes_read].windows(4).any(|w| w == b"\r\n\r\n")
+                        {
                             response_received = true;
                             break;
                         }
@@ -1758,14 +1880,17 @@ mod http_tests {
                             let _ = result_tx.send(Ok("Connection closed as expected".to_string()));
                         }
                         Ok(_) => {
-                            let _ = result_tx.send(Err("Connection should have timed out".to_string()));
+                            let _ =
+                                result_tx.send(Err("Connection should have timed out".to_string()));
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                            let _ = result_tx.send(Ok("Connection remained idle (read timed out)".to_string()));
+                            let _ = result_tx
+                                .send(Ok("Connection remained idle (read timed out)".to_string()));
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             // Some platforms surface read timeout as WouldBlock/EAGAIN.
-                            let _ = result_tx.send(Ok("Connection remained idle (would block)".to_string()));
+                            let _ = result_tx
+                                .send(Ok("Connection remained idle (would block)".to_string()));
                         }
                         Err(e)
                             if matches!(
@@ -1799,8 +1924,8 @@ mod http_tests {
 
         // Keep driving the cooperative server while waiting for timeout closure.
         let mut timeout_result = None;
-        let received = harness.process_until(Duration::from_secs(8), || {
-            match result_rx.try_recv() {
+        let received =
+            harness.process_until(Duration::from_secs(8), || match result_rx.try_recv() {
                 Ok(v) => {
                     timeout_result = Some(v);
                     true
@@ -1810,8 +1935,7 @@ mod http_tests {
                     timeout_result = Some(Err("timeout test channel disconnected".to_string()));
                     true
                 }
-            }
-        });
+            });
         assert!(received, "timed out waiting for timeout test result");
         let result = timeout_result
             .expect("missing timeout result")
@@ -1986,7 +2110,10 @@ mod tests {
 
         // Should have processed some messages but not all due to budget exhaustion
         let outputs = harness.collect_outputs();
-        assert!(outputs.len() >= 1 && outputs.len() < 3, "Should process some but not all messages due to budget");
+        assert!(
+            outputs.len() >= 1 && outputs.len() < 3,
+            "Should process some but not all messages due to budget"
+        );
         assert_eq!(outputs[0], b"msg1");
         if outputs.len() > 1 {
             assert_eq!(outputs[1], b"msg2");
@@ -2056,6 +2183,4 @@ mod tests {
         assert_eq!(outputs1[0], b"input1");
         assert_eq!(outputs1[1], b"input2");
     }
-
-
 }

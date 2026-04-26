@@ -445,7 +445,7 @@ pub struct Runtime {
     // runtime state
     status: RuntimeStatus, // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
-    tracing: bool,             //TODO implement
+    tracing: bool,                           //TODO implement
     boundary_threads: BoundaryThreadManager, // non-component boundary handlers (for example graph outport bridge); scheduler executes components
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
@@ -763,7 +763,10 @@ impl Runtime {
         runtime: Arc<RwLock<Runtime>>,
     ) -> std::result::Result<&RuntimeStatus, std::io::Error> {
         info!("starting network for graph {}", graph.properties.name);
-        if self.status.running || !self.boundary_threads.is_empty() || self.watchdog_thread.is_some() {
+        if self.status.running
+            || !self.boundary_threads.is_empty()
+            || self.watchdog_thread.is_some()
+        {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::AlreadyExists,
                 String::from("network already running or previous shutdown incomplete"),
@@ -1224,25 +1227,6 @@ impl Runtime {
                 std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
             let graph_inout_ref = create_graph_inout_handle(graph_inout_arc.clone());
 
-            // instantiate component for scheduler
-            let component_instance: Box<dyn Component> = match instantiate_component(
-                component_name.as_str(),
-                inports,
-                outports,
-                signalsource,
-                watchdog_signalsink_clone,
-                graph_inout_ref,
-            ) {
-                Some(component) => component,
-                None => {
-                    error!("failed to instantiate component in runtime.start: component not found");
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("component '{}' not found", component_name),
-                    ));
-                }
-            };
-
             // determine budget class based on component type
             let budget_class = match component_name.as_str() {
                 // High-throughput components get higher budget
@@ -1263,8 +1247,31 @@ impl Runtime {
                 _ => BudgetClass::Normal,
             };
 
-            // register component with scheduler
+            // Register node before creating scheduler waker so async components always receive
+            // a usable wake handle during construction.
             scheduler_arc.add_node(proc_name.clone(), budget_class);
+
+            // instantiate component for scheduler
+            let scheduler_waker =
+                crate::scheduler::Scheduler::create_waker(&scheduler_arc, proc_name.clone());
+            let component_instance: Box<dyn Component> = match instantiate_component(
+                component_name.as_str(),
+                inports,
+                outports,
+                signalsource,
+                watchdog_signalsink_clone,
+                graph_inout_ref,
+                scheduler_waker,
+            ) {
+                Some(component) => component,
+                None => {
+                    error!("failed to instantiate component in runtime.start: component not found");
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("component '{}' not found", component_name),
+                    ));
+                }
+            };
 
             // add component to scheduler
             scheduler_arc.add_component(component_instance, proc_name.clone());
@@ -6564,6 +6571,7 @@ impl ComponentLibrary {
             signalsource,
             watchdog_signalsink,
             graph_inout,
+            None, // TODO: pass actual scheduler waker
         ) {
             // Component will be managed by scheduler, not run directly
             Ok(())
@@ -6691,7 +6699,10 @@ pub mod bench_api {
                     // Collect output for testing
                     if let Some(payload) = &pkt.payload {
                         let mut outputs = self.collected_outputs.lock().expect("lock poisoned");
-                        outputs.entry(outport.to_string()).or_insert_with(Vec::new).push(payload.clone().into_bytes());
+                        outputs
+                            .entry(outport.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(payload.clone().into_bytes());
                     }
                     count += 1;
                 }
@@ -6709,26 +6720,49 @@ pub mod bench_api {
         /// Assert that outputs match expected values (set-based comparison)
         pub fn assert_outputs_set_equal(&self, outport: &str, expected: &[&[u8]]) {
             let outputs = self.collect_outputs(outport);
-            let actual_set: std::collections::HashSet<&[u8]> = outputs.iter().map(|v| v.as_slice()).collect();
+            let actual_set: std::collections::HashSet<&[u8]> =
+                outputs.iter().map(|v| v.as_slice()).collect();
             let expected_set: std::collections::HashSet<&[u8]> = expected.iter().cloned().collect();
 
-            assert_eq!(actual_set, expected_set, "Output sets do not match for port {}", outport);
+            assert_eq!(
+                actual_set, expected_set,
+                "Output sets do not match for port {}",
+                outport
+            );
         }
 
         /// Assert that outputs match expected values in sequence
         pub fn assert_outputs_sequence_equal(&self, outport: &str, expected: &[&[u8]]) {
             let outputs = self.collect_outputs(outport);
-            assert_eq!(outputs.len(), expected.len(), "Output count mismatch for port {}", outport);
+            assert_eq!(
+                outputs.len(),
+                expected.len(),
+                "Output count mismatch for port {}",
+                outport
+            );
 
             for (i, (actual, &expected)) in outputs.iter().zip(expected.iter()).enumerate() {
-                assert_eq!(actual.as_slice(), expected, "Output {} does not match for port {}", i, outport);
+                assert_eq!(
+                    actual.as_slice(),
+                    expected,
+                    "Output {} does not match for port {}",
+                    i,
+                    outport
+                );
             }
         }
 
         /// Assert no message loss (all inputs should produce outputs)
         pub fn assert_no_message_loss(&self, input_count: usize, outport: &str) {
             let outputs = self.collect_outputs(outport);
-            assert_eq!(outputs.len(), input_count, "Message loss detected: expected {} outputs, got {} for port {}", input_count, outputs.len(), outport);
+            assert_eq!(
+                outputs.len(),
+                input_count,
+                "Message loss detected: expected {} outputs, got {} for port {}",
+                input_count,
+                outputs.len(),
+                outport
+            );
         }
 
         /// Clear collected outputs

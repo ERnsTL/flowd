@@ -7,10 +7,10 @@ use log::{debug, error, info, trace, warn};
 
 //component-specific
 use lexopt::prelude::*;
+use openssh;
 use std::ffi::OsString;
 use std::vec;
 use tokio::sync::mpsc;
-use openssh;
 
 /*
 Ability to remotely execute a command and forward data to its STDIN and receive data from its STDOUT.
@@ -71,8 +71,6 @@ struct ParsedSSHConfig {
     pipe_out: bool,
 }
 
-
-
 #[derive(Debug, Clone)]
 enum Mode {
     One,
@@ -105,6 +103,7 @@ enum SSHState {
 async fn async_main(
     mut cmd_rx: mpsc::UnboundedReceiver<SSHCommand>,
     result_tx: mpsc::UnboundedSender<SSHResult>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut session: Option<openssh::Session> = None;
 
@@ -116,9 +115,15 @@ async fn async_main(
                     Ok(sess) => {
                         session = Some(sess);
                         let _ = result_tx.send(SSHResult::Connected);
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                     Err(e) => {
                         let _ = result_tx.send(SSHResult::Error(format!("Connect failed: {}", e)));
+                        if let Some(ref waker) = scheduler_waker {
+                            waker();
+                        }
                     }
                 }
             }
@@ -128,25 +133,40 @@ async fn async_main(
                     match execute_command(sess, &command, &input).await {
                         Ok(output) => {
                             let _ = result_tx.send(SSHResult::Output(output));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                         }
                         Err(e) => {
-                            let _ = result_tx.send(SSHResult::Error(format!("Execute failed: {}", e)));
+                            let _ =
+                                result_tx.send(SSHResult::Error(format!("Execute failed: {}", e)));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
                         }
                     }
                 } else {
                     let _ = result_tx.send(SSHResult::Error("Not connected".to_string()));
+                    if let Some(ref waker) = scheduler_waker {
+                        waker();
+                    }
                 }
             }
             SSHCommand::Disconnect => {
                 debug!("Disconnecting SSH session");
                 session = None; // Drop the session
                 let _ = result_tx.send(SSHResult::Error("Disconnected".to_string()));
+                if let Some(ref waker) = scheduler_waker {
+                    waker();
+                }
             }
         }
     }
 }
 
-async fn connect_ssh(config: &ParsedSSHConfig) -> Result<openssh::Session, Box<dyn std::error::Error + Send + Sync>> {
+async fn connect_ssh(
+    config: &ParsedSSHConfig,
+) -> Result<openssh::Session, Box<dyn std::error::Error + Send + Sync>> {
     let mut builder = openssh::SessionBuilder::default();
 
     // Set user if provided
@@ -186,6 +206,7 @@ impl Component for SSHClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -195,7 +216,7 @@ impl Component for SSHClientComponent {
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(async_main(cmd_receiver, result_sender));
+            rt.block_on(async_main(cmd_receiver, result_sender, scheduler_waker));
         }));
 
         SSHClientComponent {
@@ -358,7 +379,8 @@ impl Component for SSHClientComponent {
                             // check for address:port
                             if address_port.is_none() {
                                 // check if the format is address:port or user@address:port
-                                let val = val.into_string().expect("could not convert val to string");
+                                let val =
+                                    val.into_string().expect("could not convert val to string");
                                 if val.contains('@') {
                                     // split user@address:port
                                     let parts: Vec<&str> = val.split('@').collect();
