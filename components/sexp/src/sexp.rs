@@ -1,8 +1,9 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, ProcessEdgeSink,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessSignalSink, ProcessSignalSource,
+    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource,
 };
-use log::{debug, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 
 // component-specific imports
 //use assoc::AssocExt;
@@ -99,72 +100,72 @@ impl Component for SexpComponent {
         }
     }
 
-    fn run(self) {
-        debug!("Trim is now run()ning!");
-        let mut inn = self.inn;
-        let mut out = self.out.sink;
-        let out_wakeup = self
-            .out
-            .wakeup
-            .expect("got no wakeup handle for outport OUT");
-        loop {
-            trace!("begin of iteration");
-            // check signals
-            if let Ok(ip) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
+    fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        debug!("Sexp process() called");
+
+        let mut work_units = 0u32;
+
+        // Check signals first (signals are handled regardless of budget)
+        if let Ok(ip) = self.signals_in.try_recv() {
+            trace!(
+                "received signal ip: {}",
+                std::str::from_utf8(&ip).expect("invalid utf-8")
+            );
+            if ip == b"stop" {
+                info!("got stop signal, finishing");
+                return ProcessResult::Finished;
+            } else if ip == b"ping" {
+                trace!("got ping signal, responding");
+                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else {
+                warn!(
+                    "received unknown signal ip: {}",
                     std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
-                // stop signal
-                if ip == b"stop" {
-                    //TODO optimize comparison
-                    info!("got stop signal, exiting");
-                    break;
-                } else if ip == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
-                } else {
-                    warn!(
-                        "received unknown signal ip: {}",
-                        std::str::from_utf8(&ip).expect("invalid utf-8")
-                    )
-                }
+                )
             }
-            // check in port
-            loop {
-                if let Ok(ip) = inn.pop() {
-                    // read packet - expecting UTF-8 string
-                    let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
-                    debug!("got a text to trim: {}", &text);
+        }
 
-                    // trim string
-                    debug!("len before trim: {}", text.len());
-                    text = text.trim();
-                    debug!("len after trim: {}", text.len());
+        // Process input within budget
+        while context.remaining_budget > 0 {
+            if let Ok(ip) = self.inn.pop() {
+                // read packet - expecting UTF-8 string
+                let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
+                debug!("got a text to trim: {}", &text);
 
-                    // send it
-                    debug!("forwarding trimmed string...");
-                    //TODO optimize .to_vec() copies the contents - is Vec::from faster?
-                    out.push(Vec::from(text)).expect("could not push into OUT");
-                    out_wakeup.unpark();
-                    debug!("done");
-                } else {
-                    break;
+                // trim string
+                debug!("len before trim: {}", text.len());
+                text = text.trim();
+                debug!("len after trim: {}", text.len());
+
+                // send it
+                debug!("forwarding trimmed string...");
+                if let Err(_) = self.out.push(Vec::from(text)) {
+                    error!("Failed to send trimmed string to output");
+                    return ProcessResult::Finished;
                 }
-            }
-
-            // are we done?
-            if inn.is_abandoned() {
-                info!("EOF on inport, shutting down");
-                drop(out);
-                out_wakeup.unpark();
+                work_units += 1;
+                context.remaining_budget -= 1;
+            } else {
                 break;
             }
-
-            trace!("-- end of iteration");
-            std::thread::park();
         }
-        info!("exiting");
+
+        // Check if we're done
+        if self.inn.is_abandoned() {
+            info!("EOF on inport, finishing");
+            return ProcessResult::Finished;
+        }
+
+        // Signal readiness if we have pending input work
+        if self.inn.slots() > 0 {
+            context.ready_signal.store(true, std::sync::atomic::Ordering::Release);
+        }
+
+        if work_units > 0 {
+            ProcessResult::DidWork(work_units)
+        } else {
+            ProcessResult::NoWork
+        }
     }
 
     //TODO
