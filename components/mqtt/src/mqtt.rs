@@ -94,7 +94,7 @@ impl Component for MQTTPublisherComponent {
                     // Parse and connect to MQTT server
                     let mut mqttoptions = MqttOptions::parse_url(url).expect("failed to parse MQTT URL");
                     mqttoptions.set_keep_alive(Duration::from_secs(5));
-                    let (mut client, connection) = Client::new(mqttoptions, 10);
+                    let (client, connection) = Client::new(mqttoptions, 10);
 
                     // Get topic from URL
                     let url_parsed = url::Url::parse(&url).expect("failed to parse URL");
@@ -279,8 +279,7 @@ pub struct MQTTSubscriberComponent {
     //graph_inout: GraphInportOutportHandle,
 }
 
-// how often the MQTT subscriber receive loop should check for signals from FBP network
-const RECV_TIMEOUT: Duration = Duration::from_millis(500);
+
 
 impl Component for MQTTSubscriberComponent {
     fn new(
@@ -314,29 +313,28 @@ impl Component for MQTTSubscriberComponent {
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("MQTTSubscriber process() called");
 
-        // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
-                info!("got stop signal, finishing");
-                self.state = MQTTSubscriberState::Finished;
-                return ProcessResult::Finished;
-            } else if ip == b"ping" {
-                trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
-            } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
-            }
-        }
-
         match &mut self.state {
             MQTTSubscriberState::WaitingForConfig => {
+                // Check signals
+                if let Ok(ip) = self.signals_in.try_recv() {
+                    trace!(
+                        "received signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    );
+                    if ip == b"stop" {
+                        info!("got stop signal, finishing");
+                        self.state = MQTTSubscriberState::Finished;
+                        return ProcessResult::Finished;
+                    } else if ip == b"ping" {
+                        trace!("got ping signal, responding");
+                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                    } else {
+                        warn!(
+                            "received unknown signal ip: {}",
+                            std::str::from_utf8(&ip).expect("invalid utf-8")
+                        )
+                    }
+                }
                 // Try to get configuration
                 if let Ok(url_vec) = self.conf.pop() {
                     let url = std::str::from_utf8(&url_vec).expect("invalid utf-8");
@@ -365,6 +363,7 @@ impl Component for MQTTSubscriberComponent {
                         return ProcessResult::Finished;
                     }
 
+                    info!("MQTT subscriber connected and subscribed to topic: {}", topic);
                     self.state = MQTTSubscriberState::Connected {
                         client,
                         connection,
@@ -380,7 +379,34 @@ impl Component for MQTTSubscriberComponent {
                 return ProcessResult::NoWork;
             }
 
-            MQTTSubscriberState::Connected { ref mut client, connection, .. } => {
+            MQTTSubscriberState::Connected { client, connection, topic } => {
+                // Check signals
+                if let Ok(ip) = self.signals_in.try_recv() {
+                    trace!(
+                        "received signal ip: {}",
+                        std::str::from_utf8(&ip).expect("invalid utf-8")
+                    );
+                    if ip == b"stop" {
+                        info!("got stop signal, finishing");
+                        info!("Disconnecting MQTT subscriber from topic: {}", topic);
+                        if let Err(err) = client.disconnect() {
+                            warn!("failed to disconnect MQTT client cleanly: {:?}", err);
+                        }
+                        self.state = MQTTSubscriberState::Finished;
+                        return ProcessResult::Finished;
+                    } else if ip == b"ping" {
+                        trace!("got ping signal, responding");
+                        let _ = self.signals_out.try_send(b"pong".to_vec());
+                    } else {
+                        warn!(
+                            "received unknown signal ip: {}",
+                            std::str::from_utf8(&ip).expect("invalid utf-8")
+                        )
+                    }
+                }
+
+                debug!("MQTT subscriber active - Topic: {}", topic);
+
                 let mut work_units = 0;
 
                 // Process MQTT events cooperatively within remaining budget
