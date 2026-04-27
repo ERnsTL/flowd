@@ -417,6 +417,7 @@ enum HttpClientState {
 }
 
 pub struct HTTPClientComponent {
+    conf: ProcessEdgeSource,
     req: ProcessEdgeSource,
     out_resp: ProcessEdgeSink,
     out_err: ProcessEdgeSink,
@@ -451,6 +452,11 @@ impl Component for HTTPClientComponent {
         Self: Sized,
     {
         HTTPClientComponent {
+            conf: inports
+                .remove("CONF")
+                .expect("found no CONF inport")
+                .pop()
+                .unwrap(),
             req: inports
                 .remove("REQ")
                 .expect("found no REQ inport")
@@ -471,7 +477,7 @@ impl Component for HTTPClientComponent {
             state: HttpClientState::WaitingForRequests,
             pending_responses: std::collections::VecDeque::new(),
             pending_errors: std::collections::VecDeque::new(),
-            // Retry configuration (ADR-017 compliance)
+            // Retry configuration (ADR-017 compliance) - defaults, will be overridden by CONF
             max_retries: 3,
             backoff_base_ms: 100,
             backoff_max_ms: 30000,
@@ -481,6 +487,29 @@ impl Component for HTTPClientComponent {
 
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("HTTPClient is now process()ing!");
+
+        // Check for configuration updates (ADR-017 compliance)
+        if let Ok(conf_bytes) = self.conf.pop() {
+            if let Ok(conf_str) = std::str::from_utf8(&conf_bytes) {
+                // Parse JSON configuration for retry parameters
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(conf_str) {
+                    if let Some(max_retries) = config.get("max_retries").and_then(|v| v.as_u64()) {
+                        self.max_retries = max_retries as u32;
+                        debug!("HTTPClient configured max_retries: {}", self.max_retries);
+                    }
+                    if let Some(backoff_base_ms) = config.get("backoff_base_ms").and_then(|v| v.as_u64()) {
+                        self.backoff_base_ms = backoff_base_ms;
+                        debug!("HTTPClient configured backoff_base_ms: {}", self.backoff_base_ms);
+                    }
+                    if let Some(backoff_max_ms) = config.get("backoff_max_ms").and_then(|v| v.as_u64()) {
+                        self.backoff_max_ms = backoff_max_ms;
+                        debug!("HTTPClient configured backoff_max_ms: {}", self.backoff_max_ms);
+                    }
+                } else {
+                    warn!("HTTPClient received invalid JSON configuration: {}", conf_str);
+                }
+            }
+        }
 
         // Check signals first
         if let Ok(ip) = self.signals_in.try_recv() {
@@ -567,12 +596,13 @@ impl Component for HTTPClientComponent {
                     // Start async HTTP request
                     let (result_tx, result_rx) = mpsc::unbounded_channel();
 
+                    // Clone retry configuration for the async task
+                    let max_retries = self.max_retries;
+                    let backoff_base_ms = self.backoff_base_ms;
+                    let backoff_max_ms = self.backoff_max_ms;
+
                     tokio::spawn(async move {
                         // Make HTTP request with retry logic (ADR-017 compliance)
-                        let max_retries = 3;
-                        let backoff_base_ms = 100;
-                        let backoff_max_ms = 30000;
-
                         let mut attempt = 0;
                         let result = loop {
                             attempt += 1;
@@ -698,16 +728,28 @@ impl Component for HTTPClientComponent {
             description: String::from("HTTP client with retry logic and error classification (ADR-017 compliant)"),
             icon: String::from("web"),
             subgraph: false,
-            in_ports: vec![ComponentPort {
-                name: String::from("REQ"),
-                allowed_type: String::from("any"),
-                schema: None,
-                required: true,
-                is_arrayport: false,
-                description: String::from("URLs to request, one per IP"),
-                values_allowed: vec![],
-                value_default: String::from(""),
-            }],
+            in_ports: vec![
+                ComponentPort {
+                    name: String::from("CONF"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: false,
+                    is_arrayport: false,
+                    description: String::from("JSON configuration for retry parameters: {\"max_retries\": 3, \"backoff_base_ms\": 100, \"backoff_max_ms\": 30000}"),
+                    values_allowed: vec![],
+                    value_default: String::from("{}"),
+                },
+                ComponentPort {
+                    name: String::from("REQ"),
+                    allowed_type: String::from("any"),
+                    schema: None,
+                    required: true,
+                    is_arrayport: false,
+                    description: String::from("URLs to request, one per IP"),
+                    values_allowed: vec![],
+                    value_default: String::from(""),
+                },
+            ],
             out_ports: vec![
                 ComponentPort {
                     name: String::from("RESP"),
