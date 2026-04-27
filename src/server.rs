@@ -11,19 +11,19 @@ use tungstenite::handshake::server::{Request, Response};
 use tungstenite::{accept_hdr, Error, Message, Result};
 
 use crate::{
-    register_component_log_filters, AccessLevel, Capability, ComponentComponentMessage,
+    broadcast_to_clients, register_component_log_filters, AccessLevel, Capability, ComponentComponentMessage,
     ComponentComponentsreadyMessage, ComponentLibrary, ComponentMessage, ComponentSourceMessage,
     FBPMessage, Graph, GraphAddedgeResponse, GraphAddgroupResponse, GraphAddinitialResponse,
     GraphAddinportResponse, GraphAddnodeResponse, GraphAddoutportResponse, GraphChangeedgeResponse,
     GraphChangegroupResponse, GraphChangenodeResponse, GraphChangenodeResponsePayload,
     GraphClearResponse, GraphEdge, GraphErrorResponse, GraphInportOutportHolder, GraphMessage,
-    GraphNodeSpecNetwork, GraphPort, GraphRemoveedgeResponse, GraphRemovegroupResponse,
+    GraphPort, GraphRemoveedgeResponse, GraphRemovegroupResponse,
     GraphRemoveinitialResponse, GraphRemoveinportResponse, GraphRemovenodeResponse,
     GraphRemoveoutportResponse, GraphRenamegroupResponse, GraphRenameinportResponse,
-    GraphRenamenodeResponse, GraphRenameoutportResponse, NetworkDataResponse, NetworkDebugResponse,
+    GraphRenamenodeResponse, GraphRenameoutportResponse, NetworkDebugResponse,
     NetworkEdgesResponse, NetworkErrorResponse, NetworkMessage, NetworkPersistResponse,
     NetworkStartedResponse, NetworkStartedResponsePayload, NetworkStatusMessage,
-    NetworkStatusPayload, NetworkStoppedResponse, NetworkTransmissionPayload, Runtime,
+    NetworkStatusPayload, NetworkStoppedResponse, Runtime,
     RuntimeErrorResponse, RuntimeMessage, RuntimePacketsentMessage, RuntimePacketsentPayload,
     RuntimePortsMessage, RuntimeRuntimeMessage, RuntimeRuntimePayload, TraceClearResponse,
     TraceDumpResponse, TraceErrorResponse, TraceMessage, TraceStartResponse, TraceStopResponse,
@@ -282,6 +282,29 @@ impl FlowdServer {
     ) -> Result<()> {
         log::info!("handle_client called");
 
+        #[derive(Debug, Default, Clone)]
+        struct ClientCapabilityHolder {
+            graph: Option<String>,
+            capabilities: Vec<Capability>,
+        }
+
+        impl ClientCapabilityHolder {
+            fn update_from_runtime_payload(&mut self, payload: &RuntimeRuntimePayload) {
+                self.graph = Some(payload.graph.clone());
+                self.capabilities = payload.capabilities.clone();
+            }
+
+            fn can_receive_network_debug_for_graph(&self, graph: &str) -> bool {
+                if self.graph.as_deref() != Some(graph) {
+                    return false;
+                }
+                // network:debug status is relevant for clients that can either control
+                // networks or receive network status updates.
+                self.capabilities.contains(&Capability::NetworkControl)
+                    || self.capabilities.contains(&Capability::NetworkStatus)
+            }
+        }
+
         fn validate_secret(
             runtime: &Arc<RwLock<Runtime>>,
             secret: Option<&String>,
@@ -405,6 +428,28 @@ impl FlowdServer {
         //TODO wss
         //TODO check secret
 
+        // Send initial runtime:status message to inform client about current runtime state
+        // This is required for noflo-ui to show start/stop buttons
+        let runtime_status = runtime.read().expect("lock poisoned");
+        let status_payload = NetworkStatusPayload {
+            graph: runtime_status.graph.clone(),
+            uptime: None,
+            started: runtime_status.status.started,
+            running: runtime_status.status.running,
+            debug: runtime_status.status.debug,
+            scheduler_metrics: None,
+        };
+        let status_message = NetworkStatusMessage::new(status_payload);
+        drop(runtime_status);
+        if let Err(err) = websocket.send(Message::text(
+            serde_json::to_string(&status_message).expect("failed to serialize initial runtime:status message")
+        )) {
+            log::warn!("failed to send initial runtime:status message to client: {}", err);
+        } else {
+            log::debug!("sent initial runtime:status message to client");
+        }
+
+        let mut client_capabilities = ClientCapabilityHolder::default();
         log::debug!("entering receive loop");
         loop {
             log::debug!("waiting for next message");
@@ -489,17 +534,37 @@ impl FlowdServer {
                             {
                                 runtime_payload.capabilities.push(Capability::GraphReadonly);
                             }
-                            websocket
-                                .send(Message::text(
-                                    //TODO handing over value inside lock would work like this:  serde_json::to_string(&*runtime.read().expect("lock poisoned"))
-                                    serde_json::to_string(&RuntimeRuntimeMessage::new(
-                                        runtime_payload,
-                                    ))
-                                    .expect("failed to serialize runtime:runtime message"),
-                                ))
-                                .expect("failed to write message into websocket");
-                            // spec: "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
-                            log::info!("response: sending runtime:ports message");
+                            client_capabilities.update_from_runtime_payload(&runtime_payload);
+                             websocket
+                                 .send(Message::text(
+                                     //TODO handing over value inside lock would work like this:  serde_json::to_string(&*runtime.read().expect("lock poisoned"))
+                                     serde_json::to_string(&RuntimeRuntimeMessage::new(
+                                         runtime_payload,
+                                     ))
+                                     .expect("failed to serialize runtime:runtime message"),
+                                 ))
+                                 .expect("failed to write message into websocket");
+                             // Send initial runtime:status message so noflo-ui shows start/stop buttons
+                             log::info!("response: sending initial runtime:status message");
+                             let status_payload = {
+                                 let runtime_read = runtime.read().expect("lock poisoned");
+                                 NetworkStatusPayload {
+                                     graph: runtime_read.graph.clone(),
+                                     uptime: None,
+                                     started: runtime_read.status.started,
+                                     running: runtime_read.status.running,
+                                     debug: runtime_read.status.debug,
+                                     scheduler_metrics: None,
+                                 }
+                             };
+                             websocket
+                                 .send(Message::text(
+                                     serde_json::to_string(&NetworkStatusMessage::new(status_payload))
+                                         .expect("failed to serialize runtime:status message"),
+                                 ))
+                                 .expect("failed to write message into websocket");
+                             // spec: "If the runtime is currently running a graph and it is able to speak the full Runtime protocol, it should follow up with a ports message."
+                             log::info!("response: sending runtime:ports message");
                             websocket
                                 .send(Message::text(
                                     serde_json::to_string(&RuntimePortsMessage::new(
@@ -558,6 +623,37 @@ impl FlowdServer {
                                 ))
                                 .expect("failed to write message into websocket");
                             log::info!("sent {} component:component responses", count);
+
+                            // Send network:debug status message only for the currently active graph.
+                            // This ensures noflo-ui gets current debug state without resetting UI state
+                            // for unrelated graphs.
+                            // NOTE: this message is not explicitly specified in the protocol, but emerges
+                            // implicitly from the event-driven nature of the protocol and client
+                            // implementation in noflo-ui.
+                            let runtime_read = runtime.read().expect("lock poisoned");
+                            let active_graph = runtime_read.graph.clone();
+                            if client_capabilities
+                                .can_receive_network_debug_for_graph(&active_graph)
+                            {
+                                let debug_enabled = runtime_read.status.debug.unwrap_or(false);
+                                let debug_response =
+                                    NetworkDebugResponse::new(active_graph.clone(), debug_enabled);
+                                let debug_response_json = serde_json::to_string(&debug_response)
+                                    .expect("failed to serialize network:debug response");
+                                websocket
+                                    .send(Message::text(debug_response_json.clone()))
+                                    .expect("failed to write network:debug message into websocket");
+                                log::info!(
+                                    "sent network:debug status for active graph {}: {}",
+                                    active_graph,
+                                    debug_response_json
+                                );
+                            } else {
+                                log::info!(
+                                    "skipped network:debug status for graph {} due to missing client capability",
+                                    active_graph
+                                );
+                            }
                         }
 
                         FBPMessage::Network(NetworkMessage::Getstatus(_payload)) => {
@@ -2540,115 +2636,24 @@ impl FlowdServer {
                                     let status_payload = NetworkStartedResponsePayload::from(
                                         runtime_status.status_snapshot(),
                                     );
-                                    log::info!("response: sending network:started response");
-                                    websocket
-                                        .send(Message::text(
-                                            serde_json::to_string(&NetworkStartedResponse::new(
-                                                status_payload,
-                                            ))
-                                            .expect("failed to serialize network:started response"),
-                                        ))
-                                        .expect("failed to write message into websocket");
-                                    drop(runtime_status);
+                                     log::info!("response: sending network:started response");
+                                     websocket
+                                         .send(Message::text(
+                                             serde_json::to_string(&NetworkStartedResponse::new(
+                                                 status_payload,
+                                             ))
+                                             .expect("failed to serialize network:started response"),
+                                         ))
+                                         .expect("failed to write message into websocket");
 
-                                    // Compatibility: fbp-protocol tests for v0.7 expect network:data packets
-                                    // immediately after network:started for a tiny test graph.
-                                    let data_packets = {
-                                        let graph_read =
-                                            target_graph.read().expect("lock poisoned");
-                                        let mut packets: Vec<NetworkTransmissionPayload> =
-                                            Vec::new();
-                                        for edge in graph_read.edges.iter() {
-                                            if let Some(iip_data) = &edge.data {
-                                                packets.push(NetworkTransmissionPayload {
-                                                    id: format!(
-                                                        "DATA -> IN {}()",
-                                                        edge.target.process
-                                                    ),
-                                                    src: None,
-                                                    tgt: Some(GraphNodeSpecNetwork {
-                                                        node: edge.target.process.clone(),
-                                                        port: edge.target.port.clone(),
-                                                        index: None,
-                                                    }),
-                                                    graph: graph_read.properties.name.clone(),
-                                                    subgraph: None,
-                                                    data: Some(iip_data.clone()),
-                                                });
-                                                for flow_edge in graph_read.edges.iter() {
-                                                    if flow_edge.data.is_none()
-                                                        && flow_edge.source.process
-                                                            == edge.target.process
-                                                    {
-                                                        packets.push(NetworkTransmissionPayload {
-                                                            id: format!(
-                                                                "{}() OUT -> IN {}()",
-                                                                flow_edge.source.process,
-                                                                flow_edge.target.process
-                                                            ),
-                                                            src: Some(GraphNodeSpecNetwork {
-                                                                node: flow_edge
-                                                                    .source
-                                                                    .process
-                                                                    .clone(),
-                                                                port: flow_edge.source.port.clone(),
-                                                                index: flow_edge
-                                                                    .source
-                                                                    .index
-                                                                    .clone(),
-                                                            }),
-                                                            tgt: Some(GraphNodeSpecNetwork {
-                                                                node: flow_edge
-                                                                    .target
-                                                                    .process
-                                                                    .clone(),
-                                                                port: flow_edge.target.port.clone(),
-                                                                index: flow_edge
-                                                                    .target
-                                                                    .index
-                                                                    .clone(),
-                                                            }),
-                                                            graph: graph_read
-                                                                .properties
-                                                                .name
-                                                                .clone(),
-                                                            subgraph: None,
-                                                            data: Some(iip_data.clone()),
-                                                        });
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        packets
-                                    };
-                                    for packet in data_packets {
-                                        websocket
-                                            .send(Message::text(
-                                                serde_json::to_string(&NetworkDataResponse::new(
-                                                    packet,
-                                                ))
-                                                .expect(
-                                                    "failed to serialize network:data response",
-                                                ),
-                                            ))
-                                            .expect("failed to write message into websocket");
-                                    }
-                                    /*TODO implement network debugging, see https://github.com/ERnsTL/flowd/issues/193
-                                    websocket
-                                        .send(Message::text(serde_json::to_string(&NetworkDataResponse::new(
-                                            NetworkTransmissionPayload {
-                                                id: String::from("Repeater.OUT -> Display.IN"),
-                                                src: GraphNodeSpecNetwork { node: "Repeater".to_owned(), port: "OUT".to_owned(), index: None },
-                                                tgt: GraphNodeSpecNetwork { node: "Display".to_owned(), port: "IN".to_owned(), index: None },
-                                                graph: String::from("main_graph"),
-                                                subgraph: None,
-                                                data: Some(String::from("testdata"))
-                                            }
-                                        ))
-                                        .expect("failed to serialize network:data response"),
-                                        ))
-                                        .expect("failed to write message into websocket");
-                                    */
+                                     // Broadcast network:status update to all clients
+                                     let status_message = NetworkStatusMessage::new(NetworkStatusPayload::new(&runtime_status.status_snapshot()));
+                                     broadcast_to_clients(&graph_inout, &status_message, "network:status");
+
+                                     drop(runtime_status);
+
+                                    // network:data packets are emitted from runtime edge traffic
+                                    // when debug mode and selected debug edges are active.
                                 }
                                 Err(err) => {
                                     log::error!("runtime.start() failed: {}", err);
@@ -2736,6 +2741,11 @@ impl FlowdServer {
                                         .expect("failed to serialize network:stopped response"),
                                     ))
                                     .expect("failed to write message into websocket");
+
+                                // Broadcast network:status update to all clients
+                                let status_message = NetworkStatusMessage::new(NetworkStatusPayload::new(&status_snapshot));
+                                broadcast_to_clients(&graph_inout, &status_message, "network:status");
+
                                 continue;
                             }
                             let status_snapshot = {
@@ -2754,6 +2764,10 @@ impl FlowdServer {
                                     .expect("failed to serialize network:stopped response"),
                                 ))
                                 .expect("failed to write message into websocket");
+
+                            // Broadcast network:status update to all clients
+                            let status_message = NetworkStatusMessage::new(NetworkStatusPayload::new(&status_snapshot));
+                            broadcast_to_clients(&graph_inout, &status_message, "network:status");
 
                             // Complete runtime teardown asynchronously so protocol ACK stays fast.
                             let runtime_clone = runtime.clone();
@@ -2816,6 +2830,7 @@ impl FlowdServer {
                                         .send(Message::text(
                                             serde_json::to_string(&NetworkDebugResponse::new(
                                                 payload.graph,
+                                                payload.enable,
                                             ))
                                             .expect("failed to serialize network:debug response"),
                                         ))

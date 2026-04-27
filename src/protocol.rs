@@ -577,7 +577,7 @@ struct NetworkEdgesRequestPayload {
 }
 
 //NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphEdgeSpec {
     src: GraphNodeSpecNetwork,
     tgt: GraphNodeSpecNetwork,
@@ -1164,6 +1164,54 @@ struct NetworkGetstatusPayload {
 
 // ----------
 
+// runtime:status message for noflo-ui
+#[derive(Serialize, Debug)]
+struct RuntimeStatusMessage {
+    protocol: String,
+    command: String,
+    payload: RuntimeStatusPayload,
+}
+
+#[derive(Serialize, Debug)]
+struct RuntimeStatusPayload {
+    runtime: String, // runtime ID
+    status: NetworkStatusPayload, // status object
+}
+
+impl Default for RuntimeStatusMessage {
+    fn default() -> Self {
+        RuntimeStatusMessage {
+            protocol: String::from("runtime"),
+            command: String::from("status"),
+            payload: RuntimeStatusPayload::default(),
+        }
+    }
+}
+
+impl Default for RuntimeStatusPayload {
+    fn default() -> Self {
+        RuntimeStatusPayload {
+            runtime: String::from("main"),
+            status: NetworkStatusPayload::default(),
+        }
+    }
+}
+
+impl RuntimeStatusMessage {
+    fn new(runtime_id: String, status: NetworkStatusPayload) -> Self {
+        RuntimeStatusMessage {
+            protocol: String::from("runtime"),
+            command: String::from("status"),
+            payload: RuntimeStatusPayload {
+                runtime: runtime_id,
+                status: status,
+            },
+        }
+    }
+}
+
+// ----------
+
 #[derive(Serialize, Debug)]
 struct NetworkStatusMessage {
     protocol: String,
@@ -1259,6 +1307,7 @@ struct NetworkDebugResponse {
 #[derive(Serialize, Debug)]
 struct NetworkDebugResponsePayload {
     graph: String,
+    enable: bool,
 }
 
 impl Default for NetworkDebugResponse {
@@ -1275,6 +1324,7 @@ impl Default for NetworkDebugResponsePayload {
     fn default() -> Self {
         NetworkDebugResponsePayload {
             graph: String::from("default_graph"),
+            enable: false,
         }
     }
 }
@@ -1282,11 +1332,11 @@ impl Default for NetworkDebugResponsePayload {
 impl NetworkDebugResponse {
     //TODO optimize here we could probably use &str with lifetimes
     //TODO clarify spec if enable status should be returned, does not seem required
-    fn new(graph: String) -> Self {
+    fn new(graph: String, enable: bool) -> Self {
         NetworkDebugResponse {
             protocol: String::from("network"),
             command: String::from("debug"),
-            payload: NetworkDebugResponsePayload { graph: graph },
+            payload: NetworkDebugResponsePayload { graph: graph, enable: enable },
         }
     }
 }

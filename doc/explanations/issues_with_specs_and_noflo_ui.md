@@ -96,6 +96,12 @@ If you want, I can draft a compact “missing normative spec” checklist you co
   - Spec text says required, but fbp-protocol tests send this as undefined.
   - secret is required per FBP protocol spec, but optional according to fbp-tests
 - Many request payloads marked with required `secret` in the HTML must be accepted without `secret` in practice.
+- The protocol in general is an event-streaming (but also a request-response) protocol. An event-streaming protocol is where the server should proactively push state updates to keep the client informed, not an RPC where the client pulls state. For example for the GUI state, the issue is that noflo-ui doesn't know the current debug state of graphs until it opens the inspector and requests it. Instead, flowd should send `network:debug` status messages during the initial connection handshake, after all the component information. This way:
+  - ✅ Client always knows current debug state without requesting it
+  - ✅ No unwanted network requests when opening graph inspector
+  - ✅ Clean event-streaming protocol design
+  - ✅ UI state remains stable
+  But this is not consistently so. Once a change happens in the client GUI, it is streamed to the server and acknowledged by the FBP runtime, which is more request-response in style.
 - `graph:clear` request must accept missing `library`, `icon`, and `description`.
 - `graph:clear` response must not echo missing optional fields as empty strings; they should be omitted.
 - `graph:addnode` must accept missing `graph` field and return `graph:error` with message exactly `No graph specified`.
@@ -171,6 +177,8 @@ And yes, `fbp-spec` is a separate thing, but it’s for component/graph data-dri
 
 ### Further FBP network protocol clarifications needed
 
+* TODO problem in fbp-protocol schemas:  The issue is that `network:debug` is defined as an input message (client sends to runtime), but flowd is sending `network:debug` messages back to the client. The FBP protocol spec doesn't define `network:debug` as an output message, so the capability definitions don't allow receiving it in the fbp-protocol-client which reports "Not permitted to receive network:debug message".
+* TODO flowd does not send an initial `runtime:status` message when a client connects, which causes noflo-ui not to show the start/stop buttons because `runtime.status.online` is not set. The FBP protocol spec should clarify whether runtimes should send an initial status message on connection.
 * TODO noflo-ui complains on connect/disconnect button push that the payload of component:componentsready is non-integer, but spec defines no payload thus interpreted to be an empty object. On first connect to the runtime, it does not complain. TODO integer is number of component:component messages before the component:componentsready message?
 * for graph:changenode messages (and similarly applicable to the other response messages) the same fields as the request should be present. TODO to be useful, it should send back the same values as confirmation that these values are now set -- but if sending back a different x coordinate for example, noflo-ui does not snap back the node but acts if it was set correctly. -> TODO would probably need graph:error message.
 * TODO why does noflo-ui send tens of messages, and if the drag is a long one, a hundred messages or more? (for every mouse-drag+move event -- but all with the same end coordinates

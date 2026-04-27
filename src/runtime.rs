@@ -400,6 +400,7 @@ pub struct Runtime {
     schedulers: HashMap<String, Arc<crate::scheduler::Scheduler>>,   // per-graph schedulers
     secrets: HashMap<String, (String, AccessLevel)>, // graph name -> (secret token, access level) for token-based security
     graphs: multi_graph::MultiGraphManager,          // multi-graph support
+    debug_edges: HashMap<String, Vec<GraphEdgeSpec>>, // per-graph selected edges for network:data debugging
 }
 
 #[derive(Debug)]
@@ -510,6 +511,7 @@ impl Default for Runtime {
             schedulers: HashMap::new(),
             secrets: HashMap::new(),
             graphs: multi_graph::MultiGraphManager::new(),
+            debug_edges: HashMap::new(),
         }
     }
 }
@@ -731,34 +733,96 @@ impl Runtime {
             );
         }
 
-        // Initialize trace channel and thread if tracing is enabled
-        if self.tracing {
-            let (trace_tx, trace_rx) = std::sync::mpsc::channel::<FbpMessage>();
-            self.trace_sender = Some(trace_tx);
+        // Initialize trace channel and dispatch thread.
+        // We always keep this pipeline active because network:data debug streaming
+        // is sourced from per-edge trace data events.
+        let (trace_tx, trace_rx) = std::sync::mpsc::channel::<FbpMessage>();
+        self.trace_sender = Some(trace_tx);
+        let graph_inout_clone = graph_inout_arc.clone();
+        let runtime_for_trace_dispatch = runtime.clone();
+        std::thread::spawn(move || {
+            debug!("trace/network-data dispatch thread started");
+            while let Ok(trace_message) = trace_rx.recv() {
+                match trace_message {
+                    FbpMessage::TraceData(payload) => {
+                        // Stream network:data when debug mode is enabled and this edge was selected via network:edges
+                        let should_emit_network_data = {
+                            let runtime_read =
+                                runtime_for_trace_dispatch.read().expect("lock poisoned");
+                            let debug_enabled = runtime_read.status.debug.unwrap_or(false)
+                                && runtime_read.status.graph == payload.graph;
+                            if !debug_enabled {
+                                false
+                            } else {
+                                let selected_edges =
+                                    runtime_read.debug_edges_for_graph(&payload.graph);
+                                selected_edges.iter().any(|selected| {
+                                    selected.src.node == payload.src.node
+                                        && selected.tgt.node == payload.tgt.node
+                                        && selected
+                                            .src
+                                            .port
+                                            .eq_ignore_ascii_case(&payload.src.port)
+                                        && selected
+                                            .tgt
+                                            .port
+                                            .eq_ignore_ascii_case(&payload.tgt.port)
+                                })
+                            }
+                        };
+                        if should_emit_network_data {
+                            send_network_data(
+                                &graph_inout_clone,
+                                &NetworkDataResponse::new(NetworkTransmissionPayload {
+                                    id: payload.id.clone(),
+                                    src: Some(GraphNodeSpecNetwork {
+                                        node: payload.src.node.clone(),
+                                        port: payload.src.port.clone(),
+                                        index: payload.src.index.clone(),
+                                    }),
+                                    tgt: Some(GraphNodeSpecNetwork {
+                                        node: payload.tgt.node.clone(),
+                                        port: payload.tgt.port.clone(),
+                                        index: payload.tgt.index.clone(),
+                                    }),
+                                    graph: payload.graph.clone(),
+                                    subgraph: None,
+                                    data: Some(payload.data.clone()),
+                                }),
+                            );
+                        }
 
-            // Clone graph_inout for trace thread
-            let graph_inout_clone = graph_inout_arc.clone();
-
-            // Start trace broadcasting thread
-            std::thread::spawn(move || {
-                debug!("trace broadcasting thread started");
-                while let Ok(trace_message) = trace_rx.recv() {
-                    match trace_message {
-                        FbpMessage::TraceData(payload) => {
+                        let tracing_enabled = runtime_for_trace_dispatch
+                            .read()
+                            .expect("lock poisoned")
+                            .tracing;
+                        if tracing_enabled {
                             send_trace_data(&graph_inout_clone, payload);
                         }
-                        FbpMessage::TraceConnect(payload) => {
+                    }
+                    FbpMessage::TraceConnect(payload) => {
+                        let tracing_enabled = runtime_for_trace_dispatch
+                            .read()
+                            .expect("lock poisoned")
+                            .tracing;
+                        if tracing_enabled {
                             send_trace_connect(&graph_inout_clone, payload);
                         }
-                        FbpMessage::TraceDisconnect(payload) => {
+                    }
+                    FbpMessage::TraceDisconnect(payload) => {
+                        let tracing_enabled = runtime_for_trace_dispatch
+                            .read()
+                            .expect("lock poisoned")
+                            .tracing;
+                        if tracing_enabled {
                             send_trace_disconnect(&graph_inout_clone, payload);
                         }
-                        _ => warn!("received non-trace message in trace channel"),
                     }
+                    _ => warn!("received non-trace message in trace channel"),
                 }
-                debug!("trace broadcasting thread exiting");
-            });
-        }
+            }
+            debug!("trace/network-data dispatch thread exiting");
+        });
 
         // Get scheduler reference for component registration
         let scheduler_arc = self.schedulers.get(&graph_name).unwrap().clone();
@@ -1020,20 +1084,21 @@ impl Runtime {
                     })),
                 );
 
-                // Enable tracing if tracing is enabled
-                if self.tracing {
-                    let edge_id = format!("{}.{}-{}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
-                    if let Some(trace_sender) = &self.trace_sender {
-                        edge_sink.enable_tracing(
-                            edge_id,
-                            edge.source.process.clone(),
-                            edge.source.port.clone(),
-                            edge.target.process.clone(),
-                            edge.target.port.clone(),
-                            graph.properties.name.clone(),
-                            trace_sender.clone(),
-                        );
-                    }
+                // Enable per-edge trace events that feed trace protocol and network:data debug stream.
+                let edge_id = format!(
+                    "{}.{}-{}.{}",
+                    edge.source.process, edge.source.port, edge.target.process, edge.target.port
+                );
+                if let Some(trace_sender) = &self.trace_sender {
+                    edge_sink.enable_tracing(
+                        edge_id,
+                        edge.source.process.clone(),
+                        edge.source.port.clone(),
+                        edge.target.process.clone(),
+                        edge.target.port.clone(),
+                        graph.properties.name.clone(),
+                        trace_sender.clone(),
+                    );
                 }
 
                 sourceproc.outports.insert(
@@ -1978,6 +2043,10 @@ impl Runtime {
         // by the time network:getstatus is queried right after network:start.
         self.status.started = watchdog_all_exited;
         self.status.running = false; // was started, but not running any more
+
+        // Broadcast network:status update to all clients when graph stops (self-shutdown)
+        let status_message = NetworkStatusMessage::new(NetworkStatusPayload::new(&self.status.snapshot()));
+        broadcast_to_clients(&graph_inout, &status_message, "network:status");
         Ok(&self.status)
     }
 
@@ -2009,14 +2078,17 @@ impl Runtime {
         self.graph = graph.to_string();
         self.status.graph = graph.to_string();
 
-        // TODO: clarify spec: what to do with this message's information behavior-wise? Dependent on first setting network into debug mode or independent?
-        // TODO: implement actual debug edge handling
-        info!("got following debug edges:");
-        for edge in edges {
-            info!("  edge: src={:?} tgt={:?}", edge.src, edge.tgt);
-        }
-        info!("--- end");
+        self.debug_edges.insert(graph.to_string(), edges.clone());
+        info!(
+            "stored {} selected debug edge(s) for graph {}",
+            edges.len(),
+            graph
+        );
         Ok(())
+    }
+
+    fn debug_edges_for_graph(&self, graph: &str) -> Vec<GraphEdgeSpec> {
+        self.debug_edges.get(graph).cloned().unwrap_or_default()
     }
 
     fn start_trace(
@@ -2262,7 +2334,7 @@ impl GraphInportOutportHolder {
     }
 }
 
-fn broadcast_to_clients<T: Serialize>(
+pub fn broadcast_to_clients<T: Serialize>(
     graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
     packet: &T,
     packet_name: &str,
@@ -2277,7 +2349,6 @@ fn broadcast_to_clients<T: Serialize>(
             .map(|(addr, client)| (*addr, Arc::clone(client)))
             .collect::<Vec<_>>()
     };
-
     let mut failed_clients = Vec::new();
     for (addr, client) in clients {
         let mut client = match client.lock() {
@@ -2300,7 +2371,7 @@ fn broadcast_to_clients<T: Serialize>(
                 addr, packet_name, err
             );
         }
-        match client.write(Message::text(msg.clone())) {
+        match client.send(Message::text(msg.clone())) {
             Ok(_) => {}
             Err(err) => {
                 warn!(
