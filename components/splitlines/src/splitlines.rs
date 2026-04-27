@@ -92,13 +92,27 @@ impl Component for SplitLinesComponent {
             // If we don't have an active iterator, try to get new input
             if self.line_iter.is_none() {
                 if let Ok(ip) = self.inn.pop() {
-                    // read packet - expecting UTF-8 string
-                    debug!("got a text to split");
+                    // read packet - handle both Text and Bytes messages
+                    debug!("got input to split");
 
-                    // split into lines
-                    let ip_bytes = ip.as_bytes().unwrap_or(&[]);
-                    let lines: Vec<FbpMessage> =
-                        ip_bytes.split(|&x| x == b'\n').map(|x| FbpMessage::from_bytes(x.to_vec())).collect();
+                     // split into lines based on message type
+                     let lines: Vec<FbpMessage> = if let Some(text) = ip.as_text() {
+                         // Handle Text messages
+                         text.split('\n').map(|s| FbpMessage::from_str(s)).collect()
+                     } else if let Some(bytes) = ip.as_bytes() {
+                         // Handle Bytes messages (fallback for binary data)
+                         bytes.split(|&x| x == b'\n').map(|x| {
+                             match std::str::from_utf8(x) {
+                                 Ok(s) => FbpMessage::from_str(s),
+                                 Err(_) => FbpMessage::from_bytes(x.to_vec()),
+                             }
+                         }).collect()
+                     } else {
+                         // Skip unsupported message types
+                         debug!("skipping unsupported message type");
+                         vec![]
+                     };
+
                     self.line_iter = Some(lines.into_iter());
                     debug!(
                         "created iterator with {} lines",
