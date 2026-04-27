@@ -314,6 +314,10 @@ impl Component for CmdComponent {
                         }
                     }
                     self.state = SubprocessState::Completed;
+                    // Wake scheduler on child exit
+                    if let Some(waker) = &self.scheduler_waker {
+                        waker();
+                    }
                 }
 
                 if work_done > 0 {
@@ -323,6 +327,10 @@ impl Component for CmdComponent {
             SubprocessState::Completed => {
                 // Reset to idle for next input
                 self.state = SubprocessState::Idle;
+                // Wake scheduler on state transition
+                if let Some(waker) = &self.scheduler_waker {
+                    waker();
+                }
             }
         }
 

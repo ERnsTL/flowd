@@ -41,18 +41,18 @@ const READ_BUFFER: usize = 65536; // is allocated once and re-used for each read
 #[allow(dead_code)]
 enum ConnectionState {
     Handshaking {
-        conn: rustls::ServerConnection,
-        sock: TcpStream,
+        conn: Option<rustls::ServerConnection>,
+        sock: Option<TcpStream>,
     },
     Active {
-        conn: rustls::ServerConnection,
-        sock: TcpStream,
+        conn: Option<rustls::ServerConnection>,
+        sock: Option<TcpStream>,
         client_id: u32,
     },
     #[allow(dead_code)]
     Writing {
-        conn: rustls::ServerConnection,
-        sock: TcpStream,
+        conn: Option<rustls::ServerConnection>,
+        sock: Option<TcpStream>,
         client_id: u32,
         data: Vec<u8>,
     },
@@ -660,7 +660,7 @@ impl Component for TLSServerComponent {
                         self.next_client_id += 1;
 
                         let connection = Connection {
-                            state: ConnectionState::Handshaking { conn, sock },
+                            state: ConnectionState::Handshaking { conn: Some(conn), sock: Some(sock) },
                             last_active: Instant::now(),
                         };
 
@@ -690,22 +690,15 @@ impl Component for TLSServerComponent {
             match &mut connection.state {
                 ConnectionState::Handshaking { conn, sock } => {
                     // Try to complete TLS handshake
-                    match conn.complete_io(sock) {
+                    match conn.as_mut().unwrap().complete_io(sock.as_mut().unwrap()) {
                         Ok(_) => {
                             // Handshake complete
-                            let conn = std::mem::replace(
-                                conn,
-                                rustls::ServerConnection::new(Arc::new(
-                                    self.server_config.as_ref().unwrap().clone(),
-                                ))
-                                .unwrap(),
-                            );
-                            let sock =
-                                std::mem::replace(sock, TcpStream::connect("127.0.0.1:0").unwrap());
+                            let conn = conn.take().unwrap();
+                            let sock = sock.take().unwrap();
 
                             connection.state = ConnectionState::Active {
-                                conn,
-                                sock,
+                                conn: Some(conn),
+                                sock: Some(sock),
                                 client_id: *client_id,
                             };
                             connection.last_active = Instant::now();
@@ -734,7 +727,7 @@ impl Component for TLSServerComponent {
                     client_id,
                 } => {
                     // Try to read data from client
-                    match conn.read_tls(sock) {
+                    match conn.as_mut().unwrap().read_tls(sock.as_mut().unwrap()) {
                         Ok(0) => {
                             // Connection closed by client
                             debug!("TLS connection closed by client {}", client_id);
@@ -743,7 +736,7 @@ impl Component for TLSServerComponent {
                         }
                         Ok(_) => {
                             // Process any new packets
-                            if let Err(e) = conn.process_new_packets() {
+                            if let Err(e) = conn.as_mut().unwrap().process_new_packets() {
                                 warn!(
                                     "failed to process TLS packets for client {}: {}",
                                     client_id, e
@@ -766,7 +759,7 @@ impl Component for TLSServerComponent {
 
                     // Read decrypted data
                     let mut buf = [0; READ_BUFFER];
-                    match conn.reader().read(&mut buf) {
+                    match conn.as_mut().unwrap().reader().read(&mut buf) {
                         Ok(bytes_in) => {
                             if bytes_in > 0 {
                                 debug!("got {} bytes from TLS client {}", bytes_in, client_id);
@@ -842,37 +835,39 @@ impl Component for TLSServerComponent {
                         client_id,
                     } = &mut connection.state
                     {
-                        match conn.writer().write(&response_data) {
-                            Ok(_) => {
-                                match conn.complete_io(sock) {
-                                    Ok(_) => {
-                                        connection.last_active = Instant::now();
-                                        work_units += 1;
-                                        context.remaining_budget -= 1;
-                                        self.pending_responses.pop_front();
-                                        debug!("sent response to TLS client {}", client_id);
-                                        sent = true;
-                                        break; // Sent to first connection
-                                    }
-                                    Err(e) => {
-                                        if e.kind() != std::io::ErrorKind::WouldBlock {
-                                            warn!(
-                                                "failed to send response to TLS client {}: {}",
-                                                client_id, e
-                                            );
-                                            // Could mark connection for removal
+                        if let (Some(conn), Some(sock)) = (conn, sock) {
+                            match conn.writer().write(&response_data) {
+                                Ok(_) => {
+                                    match conn.complete_io(sock) {
+                                        Ok(_) => {
+                                            connection.last_active = Instant::now();
+                                            work_units += 1;
+                                            context.remaining_budget -= 1;
+                                            self.pending_responses.pop_front();
+                                            debug!("sent response to TLS client {}", client_id);
+                                            sent = true;
+                                            break; // Sent to first connection
+                                        }
+                                        Err(e) => {
+                                            if e.kind() != std::io::ErrorKind::WouldBlock {
+                                                warn!(
+                                                    "failed to send response to TLS client {}: {}",
+                                                    client_id, e
+                                                );
+                                                // Could mark connection for removal
+                                            }
                                         }
                                     }
                                 }
+                                Err(e) => {
+                                    warn!(
+                                        "failed to write response to TLS client {}: {}",
+                                        client_id, e
+                                    );
+                                }
                             }
-                            Err(e) => {
-                                warn!(
-                                    "failed to write response to TLS client {}: {}",
-                                    client_id, e
-                                );
-                            }
+                            break; // Only try first connection for now
                         }
-                        break; // Only try first connection for now
                     }
                 }
                 if !sent && self.connections.is_empty() {
