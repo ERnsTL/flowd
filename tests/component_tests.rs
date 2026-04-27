@@ -78,7 +78,7 @@ impl RepeatTestHarness {
 
     /// Send data to the component's IN port
     pub fn send_input(&mut self, data: &[u8]) -> Result<(), rtrb::PushError<MessageBuf>> {
-        self.input_producer.push(data.to_vec())
+        self.input_producer.push(FbpMessage::from_bytes(data.to_vec()))
     }
 
     /// Run the component for one processing cycle
@@ -97,7 +97,7 @@ impl RepeatTestHarness {
 
     /// Send a signal to the component
     pub fn send_signal(&self, signal: &[u8]) -> Result<(), mpsc::TrySendError<MessageBuf>> {
-        self.signal_sender.try_send(signal.to_vec())
+        self.signal_sender.try_send(FbpMessage::from_bytes(signal.to_vec()))
     }
 
     /// Check if output port has data
@@ -256,7 +256,7 @@ impl HTTPClientTestHarness {
 
     /// Send a URL request to the component
     pub fn send_request(&mut self, url: &str) -> Result<(), rtrb::PushError<MessageBuf>> {
-        self.req_producer.push(url.as_bytes().to_vec())
+        self.req_producer.push(FbpMessage::from_text(url.to_string()))
     }
 
     /// Run the component for one processing cycle
@@ -284,7 +284,7 @@ impl HTTPClientTestHarness {
 
     /// Send a signal to the component
     pub fn send_signal(&self, signal: &[u8]) -> Result<(), mpsc::TrySendError<MessageBuf>> {
-        self.signal_sender.try_send(signal.to_vec())
+        self.signal_sender.try_send(FbpMessage::from_bytes(signal.to_vec()))
     }
 
     /// Get the mock server port
@@ -393,14 +393,14 @@ impl HTTPServerTestHarness {
         listen_addr: &str,
         routes: &str,
     ) -> Result<(), rtrb::PushError<MessageBuf>> {
-        self.conf_producer.push(listen_addr.as_bytes().to_vec())?;
-        self.routes_producer.push(routes.as_bytes().to_vec())?;
+        self.conf_producer.push(FbpMessage::from_text(listen_addr.to_string()))?;
+        self.routes_producer.push(FbpMessage::from_text(routes.to_string()))?;
         Ok(())
     }
 
     /// Send a response to the server component
     pub fn send_response(&mut self, response: &[u8]) -> Result<(), rtrb::PushError<MessageBuf>> {
-        self.resp_producer.push(response.to_vec())
+        self.resp_producer.push(FbpMessage::from_bytes(response.to_vec()))
     }
 
     /// Run the component for one processing cycle
@@ -468,7 +468,7 @@ impl HTTPServerTestHarness {
 
     /// Send a signal to the component
     pub fn send_signal(&self, signal: &[u8]) -> Result<(), mpsc::TrySendError<MessageBuf>> {
-        self.signal_sender.try_send(signal.to_vec())
+        self.signal_sender.try_send(FbpMessage::from_bytes(signal.to_vec()))
     }
 
     /// Get the server port
@@ -591,11 +591,15 @@ mod http_tests {
         true
     }
 
-    fn payload_text(payload: &[u8]) -> String {
-        String::from_utf8_lossy(payload).into_owned()
+    fn payload_text(payload: &FbpMessage) -> String {
+        match payload {
+            FbpMessage::Text(text) => text.to_string(),
+            FbpMessage::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+            _ => format!("{:?}", payload),
+        }
     }
 
-    fn assert_payload_has(payload: &[u8], expected_lines: &[&str]) {
+    fn assert_payload_has(payload: &FbpMessage, expected_lines: &[&str]) {
         let text = payload_text(payload);
         for line in expected_lines {
             assert!(
@@ -673,7 +677,7 @@ mod http_tests {
         // Check responses
         let responses = harness.collect_responses();
         assert_eq!(responses.len(), 1);
-        assert_eq!(String::from_utf8_lossy(&responses[0]), "Hello World!");
+        assert_eq!(responses[0].as_text().unwrap_or(""), "Hello World!");
 
         // No errors should be generated
         let errors = harness.collect_errors();
@@ -1942,7 +1946,7 @@ mod tests {
         // Check output
         let outputs = harness.collect_outputs();
         assert_eq!(outputs.len(), 1);
-        assert_eq!(outputs[0], b"hello world");
+        assert_eq!(outputs[0].as_bytes().unwrap(), b"hello world");
     }
 
     #[test]
@@ -1971,9 +1975,9 @@ mod tests {
         // Check outputs
         let outputs = harness.collect_outputs();
         assert_eq!(outputs.len(), 3);
-        assert_eq!(outputs[0], b"msg1");
-        assert_eq!(outputs[1], b"msg2");
-        assert_eq!(outputs[2], b"msg3");
+        assert_eq!(outputs[0].as_bytes().unwrap(), b"msg1");
+        assert_eq!(outputs[1].as_bytes().unwrap(), b"msg2");
+        assert_eq!(outputs[2].as_bytes().unwrap(), b"msg3");
     }
 
     #[test]

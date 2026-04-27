@@ -19,7 +19,7 @@ pub struct CountComponent {
     sum: u64,
     start: Option<chrono::DateTime<chrono::Utc>>,
     start_1st: Option<chrono::DateTime<chrono::Utc>>,
-    pending_reports: std::collections::VecDeque<Vec<u8>>,
+    pending_reports: std::collections::VecDeque<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,10 +38,14 @@ impl CountComponent {
             Mode::Sum => format!("{}", self.sum),
         };
 
+        let message = flowd_component_api::FbpMessage::from_text(final_count.clone());
         if let Err(flowd_component_api::PushError::Full(returned)) =
-            self.out.push(final_count.clone().into_bytes())
+            self.out.push(message)
         {
-            self.pending_reports.push_back(returned);
+            // Convert back to string for storage in pending_reports
+            if let Some(text) = returned.as_text() {
+                self.pending_reports.push_back(text.to_string());
+            }
         }
 
         // Send network output with the final count
@@ -101,8 +105,10 @@ impl Component for CountComponent {
         // Try to read configuration if not yet configured
         if self.mode.is_none() {
             trace!("reading config IP");
-            if let Ok(url_vec) = self.conf.pop() {
-                let raw_conf = std::str::from_utf8(&url_vec).expect("invalid utf-8");
+            if let Ok(config_msg) = self.conf.pop() {
+                let raw_conf = config_msg.as_text()
+                    .or_else(|| config_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
                 let query = raw_conf.strip_prefix('?').unwrap_or(raw_conf);
                 let url_str = "https://makeurlhappy/?".to_owned() + query;
                 let url =
@@ -135,7 +141,8 @@ impl Component for CountComponent {
 
         while context.remaining_budget > 0 && !self.pending_reports.is_empty() {
             if let Some(report) = self.pending_reports.front().cloned() {
-                match self.out.push(report) {
+                let message = flowd_component_api::FbpMessage::from_text(report);
+                match self.out.push(message) {
                     Ok(()) => {
                         self.pending_reports.pop_front();
                         work_units += 1;
@@ -147,26 +154,25 @@ impl Component for CountComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 if let Some(mode) = self.mode {
                     let _ = self.emit_final_count(mode);
                 }
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -178,19 +184,20 @@ impl Component for CountComponent {
         while context.remaining_budget > 0 && !self.inn.is_empty() {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let sig_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal during processing: {}", sig_text);
+                if sig_text == "stop" {
                     if let Some(mode) = self.mode {
                         let _ = self.emit_final_count(mode);
                     }
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else if sig_text == "ping" {
+                    trace!("got ping signal during processing, responding");
+                    let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 
@@ -207,21 +214,28 @@ impl Component for CountComponent {
                             chunk.commit_all();
                         }
                         Mode::Size => {
-                            for ip in chunk.into_iter() {
-                                self.packetsize += ip.len();
+                            for msg in chunk.into_iter() {
+                                // For size mode, count bytes in the message
+                                let msg_size = match &msg {
+                                    flowd_component_api::FbpMessage::Bytes(data) => data.len(),
+                                    flowd_component_api::FbpMessage::Text(text) => text.len(),
+                                    flowd_component_api::FbpMessage::Value(_) => 0, // Values don't have inherent size
+                                    flowd_component_api::FbpMessage::Control(_) => 0, // Controls don't have inherent size
+                                };
+                                self.packetsize += msg_size;
                             }
                             // NOTE: no need for commit_all(), because into_iter() does that automatically
                         }
                         Mode::Sum => {
-                            for ip in chunk {
-                                //TODO optimize - is into_iter() optimal?
-                                // convert ip value to numeric type and add it
-                                //TODO optimize - there are multiple ways to do it, some much more performant - https://users.rust-lang.org/t/parse_number-from-u8/104487/8
-                                //TODO optimize - atoi_simd crate
-                                if let Some(value) = atoi::atoi::<u64>(&ip) {
+                            for msg in chunk {
+                                // For sum mode, try to parse numeric values from messages
+                                let value_str = msg.as_text()
+                                    .or_else(|| msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                                    .unwrap_or("");
+                                if let Some(value) = atoi::atoi::<u64>(value_str.as_bytes()) {
                                     self.sum += value;
                                 } else {
-                                    error!("value if IP cannot be summed up: {:?} - skipping", ip);
+                                    error!("value '{}' cannot be summed up - skipping", value_str);
                                 }
                             }
                             // NOTE: no need for commit_all(), because into_iter() does that automatically

@@ -82,18 +82,150 @@ pub type WakeupNotify = Thread;
 pub type ProcessSignalSource = std::sync::mpsc::Receiver<MessageBuf>; // only one allowed (single consumer)
 pub type ProcessSignalSink = std::sync::mpsc::SyncSender<MessageBuf>; // Sender can be cloned (multiple producers) but SyncSender is even more convenient as it implements Sync and no deep clone() on the Sender is neccessary
 
+// ADR-003: Typed message model
+// Structured value types for complex data
+#[derive(Debug, Clone, PartialEq)]
+pub enum FbpValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(Arc<str>),
+    Bytes(Arc<[u8]>),
+    List(Arc<Vec<FbpValue>>),
+    Map(Arc<std::collections::HashMap<String, FbpValue>>),
+}
+
+// Control events for stream boundaries and lifecycle
+#[derive(Debug, Clone, PartialEq)]
+pub enum ControlEvent {
+    // Stream boundaries
+    BeginGroup(String),      // start of named group
+    EndGroup(String),        // end of named group
+    BeginBracket(String),    // start of bracketed stream
+    EndBracket(String),      // end of bracketed stream
+
+    // Lifecycle and flow control
+    Disconnect,              // port disconnection
+    Drain,                   // drain remaining data
+    Discontinuity,           // stream discontinuity/reset
+
+    // Custom control messages
+    Custom(String, Option<FbpValue>),
+}
+
+// ADR-003: Typed message format
+#[derive(Debug, Clone, PartialEq)]
+pub enum FbpMessage {
+    Bytes(Arc<[u8]>),        // Raw binary data with sharing
+    Text(Arc<str>),          // UTF-8 text with sharing
+    Value(FbpValue),         // Structured data
+    Control(ControlEvent),   // Control messages
+}
+
+impl FbpMessage {
+    /// Create a message from raw bytes
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        Self::Bytes(bytes.into())
+    }
+
+    /// Create a message from a string
+    pub fn from_text(text: String) -> Self {
+        Self::Text(text.into())
+    }
+
+    /// Create a message from a string slice
+    pub fn from_str(text: &str) -> Self {
+        Self::Text(text.into())
+    }
+
+    /// Create a message from a JSON value (via serde)
+    /// Note: Requires serde_json dependency to be added to Cargo.toml
+    // pub fn from_json<T: serde::Serialize>(value: T) -> Result<Self, serde_json::Error> {
+    //     let json_str = serde_json::to_string(&value)?;
+    //     Ok(Self::from_text(json_str))
+    // }
+
+    /// Try to extract bytes from the message
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Bytes(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Try to extract text from the message
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            Self::Text(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Try to extract value from the message
+    pub fn as_value(&self) -> Option<&FbpValue> {
+        match self {
+            Self::Value(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Try to extract control event from the message
+    pub fn as_control(&self) -> Option<&ControlEvent> {
+        match self {
+            Self::Control(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Check if this is a control message
+    pub fn is_control(&self) -> bool {
+        matches!(self, Self::Control(_))
+    }
+
+    /// Check if this is a data message (bytes, text, or value)
+    pub fn is_data(&self) -> bool {
+        !self.is_control()
+    }
+}
+
+// Convenience conversions
+impl From<Vec<u8>> for FbpMessage {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self::from_bytes(bytes)
+    }
+}
+
+impl From<String> for FbpMessage {
+    fn from(text: String) -> Self {
+        Self::from_text(text)
+    }
+}
+
+impl From<&str> for FbpMessage {
+    fn from(text: &str) -> Self {
+        Self::from_str(text)
+    }
+}
+
+impl From<FbpValue> for FbpMessage {
+    fn from(value: FbpValue) -> Self {
+        Self::Value(value)
+    }
+}
+
+impl From<ControlEvent> for FbpMessage {
+    fn from(event: ControlEvent) -> Self {
+        Self::Control(event)
+    }
+}
+
 // information packets (IPs) = messages
 /*
-NOTE: Vec<u8> is growable; Box<[u8]> is decidedly not growable, which just brings limitations for forwarding IPs.
-Vec is just 1 machine word larger than Box. There is more convenience API and From implementations for Vec.
-In the wild, there also seems less use of Box<[u8]>.
-
-NOTE: Changing to [u8] here and then having &[u8] in ProcessEdges creates an avalanche of lifetime problems where something does not live long enough,
-maybe there are some possibilities to state "this lifetime is equal to that one" but problem is that we are actually handing over
-data from thread A to thread B, so we are not allowing thread B to have a temporary look at the data, but it is actual message passing.
-And there is no "master" who owns the data - then we could give threads A and B pointers and borrows into that data, but that is not the case.
+NOTE: ADR-003 implements typed messages with Arc-based sharing for zero-copy fan-out.
+This replaces the old Vec<u8> approach with semantic message types.
 */
-pub type MessageBuf = Vec<u8>;
+pub type MessageBuf = FbpMessage;
 
 // Process result for scheduler-based execution
 #[derive(Debug, Clone, PartialEq)]
