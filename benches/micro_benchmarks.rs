@@ -35,7 +35,7 @@ fn benchmark_ringbuffer_throughput(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("ops", RINGBUFFER_OPS), |b| {
         b.iter(|| {
             let (mut producer, mut consumer) = rtrb::RingBuffer::<MessageBuf>::new(1024);
-            let payload = vec![0_u8; 8];
+            let payload = MessageBuf::from(vec![0_u8; 8]);
 
             for _ in 0..RINGBUFFER_OPS {
                 push_blocking(&mut producer, payload.clone());
@@ -59,7 +59,7 @@ fn benchmark_edge_transfer_cost(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("payload_bytes", payload_size), |b| {
             b.iter(|| {
                 let (mut producer, mut consumer) = rtrb::RingBuffer::<MessageBuf>::new(1024);
-                let payload = vec![7_u8; payload_size];
+                let payload = MessageBuf::from(vec![7_u8; payload_size]);
 
                 for _ in 0..EDGE_TRANSFER_MSGS {
                     push_blocking(&mut producer, payload.clone());
@@ -96,7 +96,7 @@ fn benchmark_cross_thread_handover(c: &mut Criterion) {
             }
         });
 
-        let payload = vec![1_u8; 64];
+        let payload = MessageBuf::from(vec![1_u8; 64]);
 
         b.iter(|| {
             for _ in 0..CROSS_THREAD_MSGS {
@@ -108,7 +108,7 @@ fn benchmark_cross_thread_handover(c: &mut Criterion) {
         });
 
         running.store(false, Ordering::Relaxed);
-        let _ = producer.push(Vec::new());
+        let _ = producer.push(MessageBuf::from(Vec::new()));
         consumer_thread
             .join()
             .expect("consumer thread panicked in cross-thread handover benchmark");
@@ -123,7 +123,7 @@ fn benchmark_micro_latency(c: &mut Criterion) {
 
     group.bench_function("ringbuffer_one_message", |b| {
         let (mut producer, mut consumer) = rtrb::RingBuffer::<MessageBuf>::new(8);
-        let payload = vec![3_u8; 64];
+        let payload = MessageBuf::from(vec![3_u8; 64]);
         b.iter(|| {
             push_blocking(&mut producer, payload.clone());
             let msg = consumer
@@ -149,7 +149,7 @@ fn benchmark_micro_latency(c: &mut Criterion) {
             }
         });
 
-        let payload = vec![4_u8; 64];
+        let payload = MessageBuf::from(vec![4_u8; 64]);
         b.iter(|| {
             push_blocking(&mut producer, payload.clone());
             ack_rx
@@ -158,7 +158,7 @@ fn benchmark_micro_latency(c: &mut Criterion) {
         });
 
         running.store(false, Ordering::Relaxed);
-        let _ = producer.push(Vec::new());
+        let _ = producer.push(MessageBuf::from(Vec::new()));
         consumer_thread
             .join()
             .expect("consumer thread panicked in cross-thread one-message latency benchmark");

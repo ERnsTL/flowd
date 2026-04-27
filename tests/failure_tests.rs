@@ -2,6 +2,7 @@
 //! Tests for error conditions, component failures, and system resilience
 
 use flowd_rs::test_harness::TestHarness;
+use flowd_rs::MessageBuf;
 use std::time::Duration;
 
 const MEDIUM_TIMEOUT: Duration = Duration::from_secs(2);
@@ -13,6 +14,10 @@ fn new_repeat_harness(graph_name: &str) -> TestHarness {
         .add_graph_inport("IN", "repeat", "IN")
         .add_graph_outport("OUT", "repeat", "OUT");
     harness
+}
+
+fn message_data_bytes(msg: &MessageBuf) -> Option<&[u8]> {
+    msg.as_bytes().or_else(|| msg.as_text().map(str::as_bytes))
 }
 
 #[cfg(test)]
@@ -63,7 +68,12 @@ mod tests {
 
                 // Verify no corruption in processed messages
                 for output in outputs {
-                    assert!(output.starts_with(b"msg"), "Output should be valid message");
+                    assert!(
+                        message_data_bytes(&output)
+                            .map(|bytes| bytes.starts_with(b"msg"))
+                            .unwrap_or(false),
+                        "Output should be valid message"
+                    );
                 }
 
                 Ok(())
@@ -154,20 +164,19 @@ mod tests {
                 for (i, output) in outputs.iter().enumerate() {
                     if i < test_messages.len() {
                         let expected = test_messages[i].as_bytes();
+                        let output_bytes = message_data_bytes(output).unwrap_or(&[]);
                         assert_eq!(
-                            output.as_slice(),
-                            expected,
+                            output_bytes, expected,
                             "Message {} corrupted: expected {:?}, got {:?}",
-                            i,
-                            expected,
-                            output.as_slice()
+                            i, expected, output_bytes
                         );
                     } else {
                         // Check the long message
+                        let output_bytes = message_data_bytes(output).unwrap_or(&[]);
                         assert!(
-                            output.starts_with(b"very_long_message_"),
+                            output_bytes.starts_with(b"very_long_message_"),
                             "Long message corrupted: got {:?}",
-                            output.as_slice()
+                            output_bytes
                         );
                     }
                 }

@@ -2,6 +2,7 @@
 //! Uses proptest to generate random inputs and verify system properties
 
 use flowd_rs::test_harness::TestHarness;
+use flowd_rs::MessageBuf;
 use proptest::prelude::*;
 use std::time::Duration;
 
@@ -14,6 +15,10 @@ fn new_repeat_harness(graph_name: &str) -> TestHarness {
         .add_graph_inport("IN", "repeat", "IN")
         .add_graph_outport("OUT", "repeat", "OUT");
     harness
+}
+
+fn message_data_bytes(msg: &MessageBuf) -> Option<&[u8]> {
+    msg.as_bytes().or_else(|| msg.as_text().map(str::as_bytes))
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -53,7 +58,7 @@ proptest! {
             assert_eq!(outputs.len(), 1, "Should have exactly one output");
 
             let output = &outputs[0];
-            assert_eq!(output.as_slice(), message.as_bytes(),
+            assert_eq!(message_data_bytes(output).unwrap_or(&[]), message.as_bytes(),
                 "Output should match input exactly");
 
             Ok(())
@@ -81,7 +86,7 @@ proptest! {
             assert_eq!(outputs.len(), 1, "Should have exactly one output");
 
             let output = &outputs[0];
-            assert_eq!(output.as_slice(), message.as_bytes(),
+            assert_eq!(message_data_bytes(output).unwrap_or(&[]), message.as_bytes(),
                 "Large message should be preserved exactly");
 
             Ok(())
@@ -114,7 +119,7 @@ proptest! {
 
             // Verify each message is preserved
             for (i, expected) in messages.iter().enumerate() {
-                assert_eq!(outputs[i].as_slice(), expected.as_bytes(),
+                assert_eq!(message_data_bytes(&outputs[i]).unwrap_or(&[]), expected.as_bytes(),
                     "Message {} should be preserved", i);
             }
 
@@ -143,8 +148,9 @@ proptest! {
             assert_eq!(outputs.len(), 1, "Should have exactly one output");
 
             let output = &outputs[0];
-            assert_eq!(output.as_slice(), encoded.as_bytes(), "Encoded payload should round-trip exactly");
-            let decoded = hex_decode(std::str::from_utf8(output).expect("output should be valid utf-8 hex"))
+            let output_bytes = message_data_bytes(output).unwrap_or(&[]);
+            assert_eq!(output_bytes, encoded.as_bytes(), "Encoded payload should round-trip exactly");
+            let decoded = hex_decode(std::str::from_utf8(output_bytes).expect("output should be valid utf-8 hex"))
                 .expect("output should be valid hex");
             assert_eq!(decoded, data, "Decoded payload should match original bytes");
 
@@ -177,7 +183,7 @@ proptest! {
 
             // All outputs should be empty
             for output in outputs {
-                assert_eq!(output.as_slice(), b"",
+                assert_eq!(message_data_bytes(&output).unwrap_or(&[]), b"",
                     "Empty message should remain empty");
             }
 
@@ -205,7 +211,7 @@ proptest! {
             assert_eq!(outputs.len(), 1, "Should have exactly one output");
 
             let output = &outputs[0];
-            assert_eq!(output.as_slice(), long_message.as_bytes(),
+            assert_eq!(message_data_bytes(output).unwrap_or(&[]), long_message.as_bytes(),
                 "Very long message should be preserved exactly");
 
             Ok(())
@@ -241,7 +247,7 @@ proptest! {
 
             // Verify each message size is preserved
             for (i, expected) in expected_messages.iter().enumerate() {
-                assert_eq!(outputs[i].as_slice(), expected.as_bytes(),
+                assert_eq!(message_data_bytes(&outputs[i]).unwrap_or(&[]), expected.as_bytes(),
                     "Message {} size should be preserved", i);
             }
 

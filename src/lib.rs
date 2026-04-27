@@ -3,7 +3,6 @@
 #![feature(map_try_insert)]
 
 // basics and threading
-use std::str;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::{self, Thread};
@@ -41,11 +40,11 @@ use std::time::{Duration, Instant};
 
 // flowd component API crate
 pub use flowd_component_api::{
-    BudgetClass, Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle,
-    MessageBuf, NodeContext, ProcessEdge, ProcessEdgeSink, ProcessEdgeSinkConnection,
-    ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, ProcessSignalSink,
-    ProcessSignalSource, PushError, WakeupNotify, PROCESSEDGE_BUFSIZE, PROCESSEDGE_IIP_BUFSIZE,
-    PROCESSEDGE_SIGNAL_BUFSIZE,
+    BudgetClass, Component, ComponentComponentPayload, ComponentPort, FbpMessage,
+    GraphInportOutportHandle, MessageBuf, NodeContext, ProcessEdge, ProcessEdgeSink,
+    ProcessEdgeSinkConnection, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    ProcessSignalSink, ProcessSignalSource, PushError, WakeupNotify, PROCESSEDGE_BUFSIZE,
+    PROCESSEDGE_IIP_BUFSIZE, PROCESSEDGE_SIGNAL_BUFSIZE,
 };
 
 // configuration
@@ -56,6 +55,11 @@ const CLIENT_BROADCAST_WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_mil
 const NODE_WIDTH_DEFAULT: u32 = 72;
 const NODE_HEIGHT_DEFAULT: u32 = 72;
 const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
+
+fn message_as_utf8(msg: &MessageBuf) -> Option<&str> {
+    msg.as_text()
+        .or_else(|| msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PersistedGraphSet {
@@ -994,7 +998,7 @@ impl Runtime {
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
-                sink.push(FbpMessage::from_str(&iip.clone()))
+                sink.push(FbpMessage::from_text(iip.clone()))
                     .expect("failed to send IIP into process channel"); //TODO optimize as_bytes() / clone or String in Edge struct
                                                                         // insert into inports of target process
                 let targetproc = ports_all
@@ -1219,7 +1223,7 @@ impl Runtime {
 
             // prepare process signal channel
             let (_signalsink, signalsource) =
-                std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+                std::sync::mpsc::sync_channel::<MessageBuf>(PROCESSEDGE_SIGNAL_BUFSIZE);
 
             // prepare component for scheduler execution
             let component_name = node.component.clone();
@@ -1345,9 +1349,7 @@ impl Runtime {
                             // check signals
                             //TODO optimize, there is also try_recv() and recv_timeout()
                             if let Ok(signal) = signals.try_recv() {
-                                let signal_text = signal.as_text()
-                                    .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                                    .unwrap_or("");
+                                let signal_text = message_as_utf8(&signal).unwrap_or("");
                                 trace!("received signal: {}", signal_text);
                                 if signal_text == "stop" {
                                     info!("got stop signal, exiting");
@@ -1361,7 +1363,9 @@ impl Runtime {
                                     if let Ok(ip) = inport.pop() {
                                         // output the packet data with newline
                                         debug!("got a packet for graph outport {}", port_name);
-                                        trace!("{}", str::from_utf8(&ip).expect("non utf-8 data")); //TODO optimize avoid conversion here or use from_raw_parts?
+                                        let payload_text = message_as_utf8(&ip)
+                                            .expect("graph outport payload must be UTF-8 text");
+                                        trace!("{}", payload_text);
 
                                         // send out to FBP network protocol client
                                         debug!("sending out to client...");
@@ -1375,12 +1379,8 @@ impl Runtime {
                                                     typ: None, //TODO implement properly, OTOH it is an optional field
                                                     schema: None,
                                                     graph: graph_name.clone(),
-                                                    payload: Some(
-                                                        str::from_utf8(&ip)
-                                                            .expect("non utf-8 data")
-                                                            .to_owned(),
-                                                    ), //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
-                                                       // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
+                                                    payload: Some(payload_text.to_owned()), //TODO optimize useless conversions here - we could make RuntimePacketResponse separate from RuntimePacketRequest and make payload on the Response &str
+                                                                                            // TODO optimize conversion; just handing over Some(String::from_utf8(ip) = move causes "this reinitialization might get skipped" -> https://github.com/rust-lang/rust/issues/92858
                                                 },
                                             ),
                                         );
@@ -1468,15 +1468,13 @@ impl Runtime {
         //TODO use the Component.support_health bool there!
         // sink2 and source2 are separate for signaling between runtime and watchdog thread only so that there can be no mixup between runtime<->watchdog and watchdog<->processes communication
         let (watchdog_signalsink2, watchdog_signalsource2) =
-            std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
+            std::sync::mpsc::sync_channel::<MessageBuf>(PROCESSEDGE_SIGNAL_BUFSIZE);
         let watchdog_thread = thread::Builder::new().name("watchdog".to_owned()).spawn( move || {
             debug!("watchdog is running");
             let mut missed_pongs: HashMap<String, u8> = HashMap::new();
             'watchdog_loop: loop {
                 while let Ok(signal) = watchdog_signalsource2.try_recv() {
-                    let signal_text = signal.as_text()
-                        .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                        .unwrap_or("");
+                    let signal_text = message_as_utf8(&signal).unwrap_or("");
                     if signal_text == "stop" {
                         debug!("got stop signal, exiting");
                         break 'watchdog_loop;
@@ -1490,7 +1488,7 @@ impl Runtime {
                 let mut disconnected_components: Vec<String> = Vec::new();
                 for (name, proc) in watchdog_threadandsignal.iter() {
                     if let Ok(ip) = watchdog_signalsource2.try_recv() {
-                        if ip == b"stop" {
+                        if message_as_utf8(&ip) == Some("stop") {
                             debug!("got stop signal, exiting");
                             break 'watchdog_loop;
                         }
@@ -1537,9 +1535,7 @@ impl Runtime {
                     while wait_started.elapsed() < core::time::Duration::from_millis(1000) {
                         match proc.3.recv_timeout(WATCHDOG_POLL_DUR) {
                             Ok(signal) => {
-                                let signal_text = signal.as_text()
-                                    .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                                    .unwrap_or("");
+                                let signal_text = message_as_utf8(&signal).unwrap_or("");
                                 if signal_text == "pong" {    //TODO harden - may be a response from some other process -> send a nonce?
                                     trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
                                     debug!("process {} OK", name);
@@ -1553,7 +1549,7 @@ impl Runtime {
                             },
                             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                                 if let Ok(ip) = watchdog_signalsource2.try_recv() {
-                                    if ip == b"stop" {
+                                    if message_as_utf8(&ip) == Some("stop") {
                                         debug!("got stop signal, exiting");
                                         break 'watchdog_loop;
                                     }
@@ -1631,7 +1627,7 @@ impl Runtime {
                 let sleep_started = Instant::now();
                 while sleep_started.elapsed() < PROCESS_HEALTHCHECK_DUR {
                     if let Ok(ip) = watchdog_signalsource2.try_recv() {
-                        if ip == b"stop" {
+                        if message_as_utf8(&ip) == Some("stop") {
                             debug!("got stop signal, exiting");
                             break 'watchdog_loop;
                         }
@@ -1728,7 +1724,7 @@ impl Runtime {
             // stop watchdog first so it cannot continue filling process signal channels with pings
             info!("stop: signaling watchdog");
             if let Some(watchdog_channel) = self.watchdog_channel.take() {
-                if let Err(err) = watchdog_channel.send(b"stop".to_vec()) {
+                if let Err(err) = watchdog_channel.send(FbpMessage::from_str("stop")) {
                     warn!(
                         "stop: watchdog already disconnected while sending stop signal: {}",
                         err
@@ -2306,8 +2302,6 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-
-
 
     #[test]
     fn bench_harness_stop_does_not_deadlock_under_repetition() {
@@ -6579,6 +6573,14 @@ pub mod bench_api {
     }
 
     impl BenchRuntimeHarness {
+        fn message_data_bytes(payload: &MessageBuf) -> Option<&[u8]> {
+            match payload {
+                FbpMessage::Bytes(bytes) => Some(bytes),
+                FbpMessage::Text(text) => Some(text.as_bytes()),
+                _ => None,
+            }
+        }
+
         fn drain_runtime_packets(&self) {
             while let Ok(pkt) = self.packet_rx.try_recv() {
                 if matches!(pkt.event, RuntimePacketEvent::Data) {
@@ -6587,7 +6589,7 @@ pub mod bench_api {
                         outputs
                             .entry(pkt.port.clone())
                             .or_insert_with(Vec::new)
-                            .push(payload.clone().into_bytes());
+                            .push(FbpMessage::from_text(payload.clone()));
                     }
                 }
             }
@@ -6639,13 +6641,19 @@ pub mod bench_api {
             payload: &[u8],
         ) -> std::result::Result<(), std::io::Error> {
             let graph_name = self.runtime.read().expect("lock poisoned").graph.clone();
+            let payload_text = std::str::from_utf8(payload).map_err(|err| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("runtime packet payload must be valid UTF-8: {err}"),
+                )
+            })?;
             let packet = RuntimePacketRequestPayload {
                 port: inport.to_string(),
                 event: RuntimePacketEvent::Data,
                 typ: None,
                 schema: None,
                 graph: graph_name,
-                payload: Some(String::from_utf8_lossy(payload).to_string()),
+                payload: Some(payload_text.to_string()),
                 secret: None,
             };
             Runtime::packet(&packet, self.graph_inout.clone(), self.runtime.clone())?;
@@ -6682,7 +6690,7 @@ pub mod bench_api {
                         outputs
                             .entry(outport.to_string())
                             .or_insert_with(Vec::new)
-                            .push(payload.clone().into_bytes());
+                            .push(FbpMessage::from_text(payload.clone()));
                     }
                     count += 1;
                 }
@@ -6700,9 +6708,16 @@ pub mod bench_api {
         /// Assert that outputs match expected values (set-based comparison)
         pub fn assert_outputs_set_equal(&self, outport: &str, expected: &[&[u8]]) {
             let outputs = self.collect_outputs(outport);
-            let actual_set: std::collections::HashSet<&[u8]> =
-                outputs.iter().map(|v| v.as_slice()).collect();
-            let expected_set: std::collections::HashSet<&[u8]> = expected.iter().cloned().collect();
+            let actual_set: std::collections::HashSet<Vec<u8>> = outputs
+                .iter()
+                .map(|payload| {
+                    Self::message_data_bytes(payload)
+                        .expect("expected byte/text payload while comparing output set")
+                        .to_vec()
+                })
+                .collect();
+            let expected_set: std::collections::HashSet<Vec<u8>> =
+                expected.iter().map(|payload| payload.to_vec()).collect();
 
             assert_eq!(
                 actual_set, expected_set,
@@ -6722,12 +6737,12 @@ pub mod bench_api {
             );
 
             for (i, (actual, &expected)) in outputs.iter().zip(expected.iter()).enumerate() {
+                let actual_bytes = Self::message_data_bytes(actual)
+                    .expect("expected byte/text payload while comparing output sequence");
                 assert_eq!(
-                    actual.as_slice(),
-                    expected,
+                    actual_bytes, expected,
                     "Output {} does not match for port {}",
-                    i,
-                    outport
+                    i, outport
                 );
             }
         }

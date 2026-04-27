@@ -2,6 +2,7 @@
 //! Tests for high-load scenarios, parallel execution, and scheduler fairness
 
 use flowd_rs::test_harness::TestHarness;
+use flowd_rs::MessageBuf;
 use std::thread;
 use std::time::Duration;
 
@@ -14,6 +15,10 @@ fn new_repeat_harness(graph_name: &str) -> TestHarness {
         .add_graph_inport("IN", "repeat", "IN")
         .add_graph_outport("OUT", "repeat", "OUT");
     harness
+}
+
+fn message_data_bytes(msg: &MessageBuf) -> Option<&[u8]> {
+    msg.as_bytes().or_else(|| msg.as_text().map(str::as_bytes))
 }
 
 #[cfg(test)]
@@ -199,7 +204,11 @@ mod tests {
                 // Verify we got the expected output
                 let outputs = h.collect_outputs("OUT");
                 assert_eq!(outputs.len(), 1, "Should receive exactly one output");
-                assert_eq!(outputs[0], b"test_message", "Output should match input");
+                assert_eq!(
+                    message_data_bytes(&outputs[0]).unwrap_or(&[]),
+                    b"test_message",
+                    "Output should match input"
+                );
 
                 Ok(())
             })
@@ -258,7 +267,11 @@ mod tests {
                 for pattern in &patterns {
                     let pattern_count = outputs
                         .iter()
-                        .filter(|output| output.starts_with(pattern.as_bytes()))
+                        .filter(|output| {
+                            message_data_bytes(output)
+                                .map(|bytes| bytes.starts_with(pattern.as_bytes()))
+                                .unwrap_or(false)
+                        })
                         .count();
                     assert_eq!(
                         pattern_count, 50,
