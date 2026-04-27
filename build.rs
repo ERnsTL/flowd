@@ -23,6 +23,7 @@ struct ComponentEntry {
     #[serde(rename = "struct")]
     struct_name: String,
     log_ignore: Option<Vec<String>>,
+    budget_class: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +153,22 @@ fn main() {
             escape_rust_string(filter)
         ));
     }
+    generated.push_str("}\n\n");
+
+    // component budget class function
+    generated.push_str("pub fn get_component_budget_class(component_name: &str) -> flowd_component_api::BudgetClass {\n");
+    generated.push_str("    match component_name {\n");
+    for entry in &config.components.entry {
+        if let Some(budget_class) = &entry.budget_class {
+            generated.push_str(&format!(
+                "        \"{}\" => flowd_component_api::BudgetClass::{},\n",
+                escape_rust_string(&entry.name),
+                budget_class
+            ));
+        }
+    }
+    generated.push_str("        _ => flowd_component_api::BudgetClass::Normal,\n");
+    generated.push_str("    }\n");
     generated.push_str("}\n\n");
 
     // write generated code to file

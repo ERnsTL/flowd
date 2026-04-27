@@ -5,16 +5,19 @@
 # - crate:  for crate-based components just the crate name (files should be placed in components/... or redirected in Cargo.toml), for module-based components "components::modulename" (files placed in src/components/modulename.rs)
 # - struct:  name of the struct implementing the component (should be in the specified crate or module)
 # - log_ignore (optional, list of crate names to ignore logs from when this component is instantiated)
+# - budget_class (optional, default "Normal"): execution budget class - "Normal", "Heavy", or "Realtime"
 
 [[components.entry]]
 name = "Repeat"
 crate = "flowd-repeat"
 struct = "RepeatComponent"
+budget_class = "Normal"
 
 [[components.entry]]
 name = "Drop"
 crate = "flowd-drop"
 struct = "DropComponent"
+budget_class = "Normal"
 
 [[components.entry]]
 name = "Output"
@@ -40,11 +43,13 @@ struct = "UnixSocketClientComponent"
 name = "FileReader"
 crate = "flowd-file"
 struct = "FileReaderComponent"
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "FileWriter"
 crate = "flowd-file"
 struct = "FileWriterComponent"
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "FileTailer"
@@ -65,11 +70,13 @@ struct = "SplitLinesComponent"
 name = "Count"
 crate = "flowd-count"
 struct = "CountComponent"
+budget_class = "Normal"
 
 [[components.entry]]
 name = "Cron"
 crate = "flowd-cron"
 struct = "CronComponent"
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "Cmd"
@@ -91,6 +98,7 @@ name = "HTTPClient"
 crate = "flowd-http"
 struct = "HTTPClientComponent"
 log_ignore = ["hyper"]
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "HTTPServer"
@@ -155,6 +163,7 @@ struct = "RegexpExtractComponent"
 name = "TextReplace"
 crate = "flowd-text"
 struct = "TextReplaceComponent"
+budget_class = "Normal"
 
 [[components.entry]]
 name = "ZeroconfResponder"
@@ -212,6 +221,7 @@ struct = "WSServerComponent"
 name = "TCPClient"
 crate = "flowd-tcp"
 struct = "TCPClientComponent"
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "TCPServer"
@@ -265,6 +275,7 @@ struct = "Demux3Component"
 name = "Delay"
 crate = "flowd-delay"
 struct = "DelayComponent"
+budget_class = "Heavy"
 
 [[components.entry]]
 name = "Visualization"

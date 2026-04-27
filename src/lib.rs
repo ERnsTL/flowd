@@ -1227,25 +1227,8 @@ impl Runtime {
                 std::sync::mpsc::sync_channel(PROCESSEDGE_SIGNAL_BUFSIZE);
             let graph_inout_ref = create_graph_inout_handle(graph_inout_arc.clone());
 
-            // determine budget class based on component type
-            let budget_class = match component_name.as_str() {
-                // High-throughput components get higher budget
-                "Count" | "Text" | "Repeat" | "Drop" => BudgetClass::Normal,
-                // I/O bound components get lower budget to allow more concurrency
-                "FileReader" | "FileWriter" | "HttpClient" | "TcpClient" => BudgetClass::Heavy,
-                // Real-time budgets are reserved for components that have migrated to scheduler-native
-                // non-blocking `process()` execution. Cron/Delay still use legacy `run()` and therefore
-                // are intentionally not classified as realtime yet.
-                "Cron" | "Delay" => {
-                    warn!(
-                        "component '{}' is not yet scheduler-native; assigning non-realtime budget",
-                        component_name
-                    );
-                    BudgetClass::Heavy
-                }
-                // Default to normal for unknown components
-                _ => BudgetClass::Normal,
-            };
+            // determine budget class based on component type (generated from flowd.build.toml)
+            let budget_class = get_component_budget_class(&component_name);
 
             // Register node before creating scheduler waker so async components always receive
             // a usable wake handle during construction.
@@ -2320,6 +2303,8 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
+
+
 
     #[test]
     fn bench_harness_stop_does_not_deadlock_under_repetition() {
