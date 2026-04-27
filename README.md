@@ -85,6 +85,8 @@ You can now:
 
 For how to use the online editor, see the [manual of noflo-ui](https://github.com/noflo/noflo-ui).
 
+You may install [the GUI version with fixes](https://github.com/ERnsTL/flowd-noflo-ui) and [the accomanying JS client with fixes](https://github.com/ERnsTL/flowd-fbp-protocol-client).
+
 ### First Application
 
 1. Add components in the UI
