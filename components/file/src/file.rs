@@ -295,11 +295,18 @@ impl Component for FileTailerComponent {
                     }
                     Err(e) => {
                         warn!("failed to open file {}: {}", file_name, e);
+                        context.wake_at(
+                            std::time::Instant::now()
+                                + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                        );
                         return ProcessResult::NoWork; // Can't proceed without file
                     }
                 }
             } else {
                 trace!("no config filename available yet");
+                context.wake_at(
+                    std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                );
                 return ProcessResult::NoWork;
             }
         }
