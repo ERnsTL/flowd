@@ -19,6 +19,34 @@ use tokio::sync::mpsc;
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+// Error classification for ADR-017 compliance
+#[derive(Debug, Clone)]
+enum HttpErrorType {
+    Transient,  // Retryable: network timeouts, 5xx errors, connection failures
+    Permanent,  // Non-retryable: 4xx errors, invalid URLs, auth failures
+}
+
+fn classify_http_error(error: &reqwest::Error) -> HttpErrorType {
+    // Check for specific error types that are retryable
+    if error.is_timeout() || error.is_connect() {
+        return HttpErrorType::Transient;
+    }
+
+    // Check status codes if available
+    if let Some(status) = error.status() {
+        if status.is_server_error() {
+            // 5xx errors are generally retryable
+            return HttpErrorType::Transient;
+        } else if status.is_client_error() {
+            // 4xx errors are generally permanent
+            return HttpErrorType::Permanent;
+        }
+    }
+
+    // Default to transient for unknown errors (network issues, etc.)
+    HttpErrorType::Transient
+}
+
 // HTTP parsing and response structures for cooperative server
 #[derive(Debug, Clone)]
 pub struct HttpRequest {
@@ -397,6 +425,10 @@ pub struct HTTPClientComponent {
     state: HttpClientState,
     pending_responses: std::collections::VecDeque<Vec<u8>>, // responses to send, buffered for backpressure
     pending_errors: std::collections::VecDeque<Vec<u8>>, // errors to send, buffered for backpressure
+    // Retry configuration (ADR-017 compliance)
+    max_retries: u32,
+    backoff_base_ms: u64,
+    backoff_max_ms: u64,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -439,6 +471,10 @@ impl Component for HTTPClientComponent {
             state: HttpClientState::WaitingForRequests,
             pending_responses: std::collections::VecDeque::new(),
             pending_errors: std::collections::VecDeque::new(),
+            // Retry configuration (ADR-017 compliance)
+            max_retries: 3,
+            backoff_base_ms: 100,
+            backoff_max_ms: 30000,
             //graph_inout: graph_inout,
         }
     }
@@ -532,15 +568,32 @@ impl Component for HTTPClientComponent {
                     let (result_tx, result_rx) = mpsc::unbounded_channel();
 
                     tokio::spawn(async move {
-                        // Make HTTP request in async task to avoid blocking
-                        match std::panic::catch_unwind(|| async move {
-                            let client = reqwest::Client::builder()
-                                .connect_timeout(HTTP_CONNECT_TIMEOUT)
-                                .timeout(HTTP_REQUEST_TIMEOUT)
-                                .build()
-                                .expect("failed to build HTTP client");
+                        // Make HTTP request with retry logic (ADR-017 compliance)
+                        let max_retries = 3;
+                        let backoff_base_ms = 100;
+                        let backoff_max_ms = 30000;
 
-                            match client.get(&url).send().await {
+                        let mut attempt = 0;
+                        let result = loop {
+                            attempt += 1;
+                            debug!("HTTP request attempt {}/{}", attempt, max_retries);
+
+                            let client_result = std::panic::catch_unwind(|| async {
+                                let client = reqwest::Client::builder()
+                                    .connect_timeout(HTTP_CONNECT_TIMEOUT)
+                                    .timeout(HTTP_REQUEST_TIMEOUT)
+                                    .build()
+                                    .expect("failed to build HTTP client");
+
+                                client.get(&url).send().await
+                            });
+
+                            let response_result = match client_result {
+                                Ok(fut) => fut.await,
+                                Err(_) => break Err("HTTP request panicked".to_string()),
+                            };
+
+                            match response_result {
                                 Ok(resp) => {
                                     let status = resp.status();
                                     match resp.bytes().await {
@@ -548,17 +601,28 @@ impl Component for HTTPClientComponent {
                                             let body = body_bytes.to_vec();
                                             if status.is_success() {
                                                 debug!(
-                                                    "HTTP request successful, got {} bytes",
-                                                    body.len()
+                                                    "HTTP request successful on attempt {}, got {} bytes",
+                                                    attempt, body.len()
                                                 );
-                                                Ok(body)
+                                                break Ok(body);
                                             } else {
                                                 let message = format!(
                                                     "HTTP {}: {}",
                                                     status,
                                                     String::from_utf8_lossy(&body)
                                                 );
-                                                Err(message)
+
+                                                // Check if error is retryable
+                                                if status.is_server_error() && attempt < max_retries {
+                                                    // Server error (5xx) - retry with backoff
+                                                    let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                                                    debug!("HTTP server error, retrying in {}ms", backoff_ms);
+                                                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                                    continue;
+                                                } else {
+                                                    // Client error (4xx) or max retries reached
+                                                    break Err(message);
+                                                }
                                             }
                                         }
                                         Err(e) => {
@@ -566,24 +630,42 @@ impl Component for HTTPClientComponent {
                                                 "HTTP {}: Failed to read response body: {}",
                                                 status, e
                                             );
-                                            Err(error_msg)
+
+                                            // Body read errors are generally retryable
+                                            if attempt < max_retries {
+                                                let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                                                debug!("HTTP body read error, retrying in {}ms", backoff_ms);
+                                                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                                continue;
+                                            } else {
+                                                break Err(error_msg);
+                                            }
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     let error_msg = format!("HTTP request failed: {}", e);
-                                    Err(error_msg)
+
+                                    // Classify error for retry decision
+                                    let error_type = classify_http_error(&e);
+                                    match error_type {
+                                        HttpErrorType::Transient if attempt < max_retries => {
+                                            // Transient error - retry with backoff
+                                            let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                                            debug!("HTTP transient error, retrying in {}ms", backoff_ms);
+                                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                            continue;
+                                        }
+                                        HttpErrorType::Permanent | HttpErrorType::Transient => {
+                                            // Permanent error or max retries reached
+                                            break Err(error_msg);
+                                        }
+                                    }
                                 }
                             }
-                        }) {
-                            Ok(fut) => {
-                                let result = fut.await;
-                                let _ = result_tx.send(result);
-                            }
-                            Err(_) => {
-                                let _ = result_tx.send(Err("HTTP request panicked".to_string()));
-                            }
-                        }
+                        };
+
+                        let _ = result_tx.send(result);
                     });
 
                     self.state = HttpClientState::Processing { result_rx };
@@ -613,7 +695,7 @@ impl Component for HTTPClientComponent {
     {
         ComponentComponentPayload {
             name: String::from("HTTPClient"),
-            description: String::from("Reads URLs and sends the response body out via RESP or ERR"), //TODO change according to new features
+            description: String::from("HTTP client with retry logic and error classification (ADR-017 compliant)"),
             icon: String::from("web"),
             subgraph: false,
             in_ports: vec![ComponentPort {
@@ -622,7 +704,7 @@ impl Component for HTTPClientComponent {
                 schema: None,
                 required: true,
                 is_arrayport: false,
-                description: String::from("URLs, one per IP"),
+                description: String::from("URLs to request, one per IP"),
                 values_allowed: vec![],
                 value_default: String::from(""),
             }],
@@ -633,7 +715,7 @@ impl Component for HTTPClientComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("response body if response is non-error"),
+                    description: String::from("successful response body"),
                     values_allowed: vec![],
                     value_default: String::from(""),
                 },
@@ -643,7 +725,7 @@ impl Component for HTTPClientComponent {
                     schema: None,
                     required: true,
                     is_arrayport: false,
-                    description: String::from("error responses in human-readable error format"), //TODO some machine-readable format better?
+                    description: String::from("error messages (transient errors are retried, permanent errors fail immediately)"),
                     values_allowed: vec![],
                     value_default: String::from(""),
                 },
