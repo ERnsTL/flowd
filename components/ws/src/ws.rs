@@ -1,7 +1,8 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
-    ProcessSignalSink, ProcessSignalSource, SchedulerWaker,
+    ProcessSignalSink, ProcessSignalSource, SchedulerWaker, create_io_channels,
+    wake_scheduler,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -16,7 +17,6 @@ enum WSClientState {
     WaitingForConfig,
     Connecting {
         url: String,
-        result_rx: tokio_mpsc::UnboundedReceiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>,
     },
     Connected {
         client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
@@ -34,11 +34,46 @@ pub struct WSClientComponent {
     state: WSClientState,
     scheduler_waker: Option<SchedulerWaker>,
     pending_received: std::collections::VecDeque<Vec<u8>>,
-    //graph_inout: GraphInportOutportHandle,
+    // ADR-017: Bounded IO channels
+    cmd_tx: std::sync::mpsc::SyncSender<String>,
+    result_rx: std::sync::mpsc::Receiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>,
+    // Background async worker
+    _async_worker: Option<std::thread::JoinHandle<()>>,
 }
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+
+// ADR-017: Async WebSocket worker that runs in background thread with Tokio runtime
+async fn async_ws_worker(
+    cmd_rx: std::sync::mpsc::Receiver<String>,
+    result_tx: std::sync::mpsc::SyncSender<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>,
+    waker: Option<SchedulerWaker>,
+) {
+    debug!("WebSocket async worker started");
+
+    while let Ok(url) = cmd_rx.recv() {
+        debug!("WebSocket worker connecting to: {}", &url);
+
+        // Perform WebSocket connection (this is synchronous but we're in an async context)
+        let result = std::panic::catch_unwind(|| {
+            tungstenite::client::connect(&url).map(|(ws, _)| ws)
+        });
+
+        let connection_result = match result {
+            Ok(stream_result) => stream_result,
+            Err(_) => Err(tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "Connection panicked"))),
+        };
+
+        // Send result back (ignore send errors - component may have been destroyed)
+        let _ = result_tx.try_send(connection_result);
+
+        // ADR-002: Signal scheduler that work is ready
+        wake_scheduler(&waker);
+    }
+
+    debug!("WebSocket async worker exiting");
+}
 
 impl Component for WSClientComponent {
     fn new(
@@ -52,6 +87,19 @@ impl Component for WSClientComponent {
     where
         Self: Sized,
     {
+        // ADR-017: Create bounded IO channels
+        let (cmd_tx, cmd_rx, result_tx, result_rx) = create_io_channels::<String, Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>();
+
+        // Start background async worker thread
+        let waker = scheduler_waker.clone();
+        let async_worker = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async_ws_worker(cmd_rx, result_tx, waker));
+        }));
+
         WSClientComponent {
             conf: inports
                 .remove("CONF")
@@ -73,7 +121,11 @@ impl Component for WSClientComponent {
             state: WSClientState::WaitingForConfig,
             scheduler_waker,
             pending_received: std::collections::VecDeque::new(),
-            //graph_inout: graph_inout,
+            // ADR-017: Bounded IO channels
+            cmd_tx,
+            result_rx,
+            // Background async worker
+            _async_worker: async_worker,
         }
     }
 
@@ -102,10 +154,9 @@ impl Component for WSClientComponent {
         }
 
         // Handle state transitions that require borrowing
-        let current_state = std::mem::replace(&mut self.state, WSClientState::Finished);
-        if let WSClientState::Connecting { url, mut result_rx } = current_state {
+        if let WSClientState::Connecting { url } = &self.state {
             // Check if connection completed
-            match result_rx.try_recv() {
+            match self.result_rx.try_recv() {
                 Ok(Ok(mut client)) => {
                     // Connection successful - transition to connected state
                     if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
@@ -124,17 +175,13 @@ impl Component for WSClientComponent {
                     return ProcessResult::Finished;
                 }
                 Err(_) => {
-                    // Connection still in progress, put state back and wait
-                    self.state = WSClientState::Connecting { url, result_rx };
+                    // Connection still in progress, wait
                     context.wake_at(
                         Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
                     );
                     return ProcessResult::NoWork;
                 }
             }
-        } else {
-            // Put the state back since we didn't handle it
-            self.state = current_state;
         }
 
         let current_state = std::mem::replace(&mut self.state, WSClientState::Finished);
@@ -145,30 +192,67 @@ impl Component for WSClientComponent {
                     let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
                     debug!("got config URL: {}", url_str);
 
-                    // Start async connection
-                    let (result_tx, result_rx) = tokio_mpsc::unbounded_channel();
-                    let url_clone = url_str.clone();
+                    // ADR-017: Send to background async worker via bounded channel
+                    match self.cmd_tx.try_send(url_str.clone()) {
+                        Ok(()) => {
+                            debug!("WebSocket connection request enqueued to async worker");
+                            self.state = WSClientState::Connecting {
+                                url: url_str,
+                            };
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // ADR-017: Channel full, apply backpressure
+                            debug!("WebSocket command channel full, applying backpressure");
+                            warn!("WebSocket connection request dropped due to full command channel");
+                            self.state = WSClientState::WaitingForConfig;
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died, component should finish
+                            warn!("WebSocket async worker disconnected");
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                }
 
-                    tokio::spawn(async move {
-                        // Connect in async task to avoid blocking
-                        match std::panic::catch_unwind(|| {
-                            tungstenite::client::connect(&url_clone).map(|(ws, _)| ws)
-                        }) {
-                            Ok(result) => {
-                                let _ = result_tx.send(result);
+                // Check for completed connection results from async worker
+                match self.result_rx.try_recv() {
+                    Ok(result) => {
+                        // Process the connection result
+                        match result {
+                            Ok(mut client) => {
+                                // Connection successful - transition to connected state
+                                if let Err(err) = set_client_stream_timeouts(client.get_mut()) {
+                                    warn!("failed to set client socket timeouts: {}", err);
+                                }
+                                self.state = WSClientState::Connected {
+                                    client,
+                                    pending_messages: Vec::new(),
+                                };
+                                debug!("WebSocket connection established");
+                                return ProcessResult::DidWork(1);
                             }
-                            Err(_) => {
-                                let _ = result_tx.send(Err(tungstenite::Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "Connection failed"))));
+                            Err(e) => {
+                                // Connection failed
+                                error!("WebSocket connection failed: {}", e);
+                                self.state = WSClientState::Finished;
+                                return ProcessResult::Finished;
                             }
                         }
-                    });
-
-                    self.state = WSClientState::Connecting {
-                        url: url_str,
-                        result_rx,
-                    };
-                    return ProcessResult::DidWork(1);
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // No results ready, continue waiting
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // Worker thread died
+                        warn!("WebSocket async worker result channel disconnected");
+                        self.state = WSClientState::Finished;
+                        return ProcessResult::Finished;
+                    }
                 }
+
                 // No config yet, but check if we should yield budget
                 if context.remaining_budget == 0 {
                     return ProcessResult::NoWork;

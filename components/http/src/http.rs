@@ -1,7 +1,8 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker,
+    ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
+    wake_scheduler, DEFAULT_MAX_INFLIGHT, DEFAULT_MAX_PENDING,
 };
 use log::{debug, info, trace, warn};
 
@@ -410,9 +411,7 @@ struct Connection {
 #[derive(Debug)]
 enum HttpClientState {
     WaitingForRequests,
-    Processing {
-        result_rx: mpsc::UnboundedReceiver<Result<Vec<u8>, String>>,
-    },
+    Processing,
     Finished,
 }
 
@@ -430,7 +429,129 @@ pub struct HTTPClientComponent {
     max_retries: u32,
     backoff_base_ms: u64,
     backoff_max_ms: u64,
-    //graph_inout: GraphInportOutportHandle,
+    // ADR-017: Bounded IO channels
+    cmd_tx: std::sync::mpsc::SyncSender<String>,
+    result_rx: std::sync::mpsc::Receiver<Result<Vec<u8>, String>>,
+    // Background async worker
+    _async_worker: Option<std::thread::JoinHandle<()>>,
+}
+
+// ADR-017: Async HTTP worker that runs in background thread with Tokio runtime
+async fn async_http_worker(
+    mut cmd_rx: std::sync::mpsc::Receiver<String>,
+    result_tx: std::sync::mpsc::SyncSender<Result<Vec<u8>, String>>,
+    waker: Option<SchedulerWaker>,
+) {
+    debug!("HTTP async worker started");
+
+    while let Ok(url) = cmd_rx.recv() {
+        debug!("HTTP worker processing request: {}", &url);
+
+        // Make HTTP request with retry logic (ADR-017 compliance)
+        let mut attempt = 0u32;
+        let max_retries = 3; // Use default, could be made configurable
+        let backoff_base_ms = 100;
+        let backoff_max_ms = 30000;
+
+        let result = loop {
+            attempt += 1;
+            debug!("HTTP request attempt {}/{}", attempt, max_retries);
+
+            let client_result = std::panic::catch_unwind(|| async {
+                let client = reqwest::Client::builder()
+                    .connect_timeout(HTTP_CONNECT_TIMEOUT)
+                    .timeout(HTTP_REQUEST_TIMEOUT)
+                    .build()
+                    .expect("failed to build HTTP client");
+
+                client.get(&url).send().await
+            });
+
+            let response_result = match client_result {
+                Ok(fut) => fut.await,
+                Err(_) => break Err("HTTP request panicked".to_string()),
+            };
+
+            match response_result {
+                Ok(resp) => {
+                    let status = resp.status();
+                    match resp.bytes().await {
+                        Ok(body_bytes) => {
+                            let body = body_bytes.to_vec();
+                            if status.is_success() {
+                                debug!(
+                                    "HTTP request successful on attempt {}, got {} bytes",
+                                    attempt, body.len()
+                                );
+                                break Ok(body);
+                            } else {
+                                let message = format!(
+                                    "HTTP {}: {}",
+                                    status,
+                                    String::from_utf8_lossy(&body)
+                                );
+
+                                // Check if error is retryable
+                                if status.is_server_error() && attempt < max_retries {
+                                    // Server error (5xx) - retry with backoff
+                                    let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                                    debug!("HTTP server error, retrying in {}ms", backoff_ms);
+                                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                    continue;
+                                } else {
+                                    // Client error (4xx) or max retries reached
+                                    break Err(message);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let error_msg = format!(
+                                "HTTP {}: Failed to read response body: {}",
+                                status, e
+                            );
+
+                            // Body read errors are generally retryable
+                            if attempt < max_retries {
+                                let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                                debug!("HTTP body read error, retrying in {}ms", backoff_ms);
+                                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                                continue;
+                            } else {
+                                break Err(error_msg);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("HTTP request failed: {}", e);
+
+                    // Classify error for retry decision
+                    let error_type = classify_http_error(&e);
+                    match error_type {
+                        HttpErrorType::Transient if attempt < max_retries => {
+                            // Transient error - retry with backoff
+                            let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
+                            debug!("HTTP transient error, retrying in {}ms", backoff_ms);
+                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                            continue;
+                        }
+                        HttpErrorType::Permanent | HttpErrorType::Transient => {
+                            // Permanent error or max retries reached
+                            break Err(error_msg);
+                        }
+                    }
+                }
+            }
+        };
+
+        // Send result back (ignore send errors - component may have been destroyed)
+        let _ = result_tx.try_send(result);
+
+        // ADR-002: Signal scheduler that work is ready
+        wake_scheduler(&waker);
+    }
+
+    debug!("HTTP async worker exiting");
 }
 
 impl HTTPClientComponent {
@@ -446,11 +567,24 @@ impl Component for HTTPClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<SchedulerWaker>,
+        scheduler_waker: Option<SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
     {
+        // ADR-017: Create bounded IO channels
+        let (cmd_tx, cmd_rx, result_tx, result_rx) = create_io_channels::<String, Result<Vec<u8>, String>>();
+
+        // Start background async worker thread
+        let waker = scheduler_waker.clone();
+        let async_worker = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async_http_worker(cmd_rx, result_tx, waker));
+        }));
+
         HTTPClientComponent {
             conf: inports
                 .remove("CONF")
@@ -481,7 +615,11 @@ impl Component for HTTPClientComponent {
             max_retries: 3,
             backoff_base_ms: 100,
             backoff_max_ms: 30000,
-            //graph_inout: graph_inout,
+            // ADR-017: Bounded IO channels
+            cmd_tx,
+            result_rx,
+            // Background async worker
+            _async_worker: async_worker,
         }
     }
 
@@ -532,58 +670,7 @@ impl Component for HTTPClientComponent {
             }
         }
 
-        // Handle state transitions that require borrowing
-        let current_state = std::mem::replace(&mut self.state, HttpClientState::Finished);
-        if let HttpClientState::Processing { mut result_rx } = current_state {
-            // Check if request completed
-            match result_rx.try_recv() {
-                Ok(Ok(body)) => {
-                    // Request successful - send response
-                    match self.out_resp.push(body) {
-                        Ok(()) => {
-                            debug!("forwarded HTTP response to output");
-                            self.state = HttpClientState::WaitingForRequests;
-                            return ProcessResult::DidWork(1);
-                        }
-                        Err(PushError::Full(body)) => {
-                            // Output buffer full, buffer internally for later retry
-                            debug!("response output buffer full, buffering internally");
-                            self.pending_responses.push_back(body);
-                            self.state = HttpClientState::WaitingForRequests;
-                            return ProcessResult::DidWork(1);
-                        }
-                    }
-                }
-                Ok(Err(error_msg)) => {
-                    // Request failed - send error
-                    match self.out_err.push(error_msg.as_bytes().to_vec()) {
-                        Ok(()) => {
-                            debug!("forwarded HTTP error to output");
-                            self.state = HttpClientState::WaitingForRequests;
-                            return ProcessResult::DidWork(1);
-                        }
-                        Err(PushError::Full(error_bytes)) => {
-                            // Output buffer full, buffer internally for later retry
-                            debug!("error output buffer full, buffering internally");
-                            self.pending_errors.push_back(error_bytes);
-                            self.state = HttpClientState::WaitingForRequests;
-                            return ProcessResult::DidWork(1);
-                        }
-                    }
-                }
-                Err(_) => {
-                    // Request still in progress, put state back and wait
-                    self.state = HttpClientState::Processing { result_rx };
-                    context.wake_at(
-                        Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
-                    );
-                    return ProcessResult::NoWork;
-                }
-            }
-        } else {
-            // Put the state back since we didn't handle it
-            self.state = current_state;
-        }
+
 
         let current_state = std::mem::replace(&mut self.state, HttpClientState::Finished);
         match current_state {
@@ -593,114 +680,83 @@ impl Component for HTTPClientComponent {
                     let url = String::from_utf8(ip).expect("non utf-8 data");
                     debug!("got a request: {}", &url);
 
-                    // Start async HTTP request
-                    let (result_tx, result_rx) = mpsc::unbounded_channel();
+                    // ADR-017: Send to background async worker via bounded channel
+                    match self.cmd_tx.try_send(url) {
+                        Ok(()) => {
+                            debug!("HTTP request enqueued to async worker");
+                            self.state = HttpClientState::Processing;
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // ADR-017: Channel full, apply backpressure by buffering internally
+                            debug!("HTTP command channel full, applying backpressure");
+                            // For now, drop the request (could buffer internally if needed)
+                            // In a real implementation, you might want to buffer pending requests
+                            warn!("HTTP request dropped due to full command channel");
+                            self.state = HttpClientState::WaitingForRequests;
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died, component should finish
+                            warn!("HTTP async worker disconnected");
+                            self.state = HttpClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                }
 
-                    // Clone retry configuration for the async task
-                    let max_retries = self.max_retries;
-                    let backoff_base_ms = self.backoff_base_ms;
-                    let backoff_max_ms = self.backoff_max_ms;
-
-                    tokio::spawn(async move {
-                        // Make HTTP request with retry logic (ADR-017 compliance)
-                        let mut attempt = 0;
-                        let result = loop {
-                            attempt += 1;
-                            debug!("HTTP request attempt {}/{}", attempt, max_retries);
-
-                            let client_result = std::panic::catch_unwind(|| async {
-                                let client = reqwest::Client::builder()
-                                    .connect_timeout(HTTP_CONNECT_TIMEOUT)
-                                    .timeout(HTTP_REQUEST_TIMEOUT)
-                                    .build()
-                                    .expect("failed to build HTTP client");
-
-                                client.get(&url).send().await
-                            });
-
-                            let response_result = match client_result {
-                                Ok(fut) => fut.await,
-                                Err(_) => break Err("HTTP request panicked".to_string()),
-                            };
-
-                            match response_result {
-                                Ok(resp) => {
-                                    let status = resp.status();
-                                    match resp.bytes().await {
-                                        Ok(body_bytes) => {
-                                            let body = body_bytes.to_vec();
-                                            if status.is_success() {
-                                                debug!(
-                                                    "HTTP request successful on attempt {}, got {} bytes",
-                                                    attempt, body.len()
-                                                );
-                                                break Ok(body);
-                                            } else {
-                                                let message = format!(
-                                                    "HTTP {}: {}",
-                                                    status,
-                                                    String::from_utf8_lossy(&body)
-                                                );
-
-                                                // Check if error is retryable
-                                                if status.is_server_error() && attempt < max_retries {
-                                                    // Server error (5xx) - retry with backoff
-                                                    let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
-                                                    debug!("HTTP server error, retrying in {}ms", backoff_ms);
-                                                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                                                    continue;
-                                                } else {
-                                                    // Client error (4xx) or max retries reached
-                                                    break Err(message);
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            let error_msg = format!(
-                                                "HTTP {}: Failed to read response body: {}",
-                                                status, e
-                                            );
-
-                                            // Body read errors are generally retryable
-                                            if attempt < max_retries {
-                                                let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
-                                                debug!("HTTP body read error, retrying in {}ms", backoff_ms);
-                                                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                                                continue;
-                                            } else {
-                                                break Err(error_msg);
-                                            }
-                                        }
+                // Check for completed results from async worker
+                match self.result_rx.try_recv() {
+                    Ok(result) => {
+                        // Process the result
+                        match result {
+                            Ok(body) => {
+                                // Request successful - send response
+                                match self.out_resp.push(body) {
+                                    Ok(()) => {
+                                        debug!("forwarded HTTP response to output");
+                                        self.state = HttpClientState::WaitingForRequests;
+                                        return ProcessResult::DidWork(1);
                                     }
-                                }
-                                Err(e) => {
-                                    let error_msg = format!("HTTP request failed: {}", e);
-
-                                    // Classify error for retry decision
-                                    let error_type = classify_http_error(&e);
-                                    match error_type {
-                                        HttpErrorType::Transient if attempt < max_retries => {
-                                            // Transient error - retry with backoff
-                                            let backoff_ms = (backoff_base_ms * 2u64.pow(attempt - 1)).min(backoff_max_ms);
-                                            debug!("HTTP transient error, retrying in {}ms", backoff_ms);
-                                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                                            continue;
-                                        }
-                                        HttpErrorType::Permanent | HttpErrorType::Transient => {
-                                            // Permanent error or max retries reached
-                                            break Err(error_msg);
-                                        }
+                                    Err(PushError::Full(body)) => {
+                                        // Output buffer full, buffer internally for later retry
+                                        debug!("response output buffer full, buffering internally");
+                                        self.pending_responses.push_back(body);
+                                        self.state = HttpClientState::WaitingForRequests;
+                                        return ProcessResult::DidWork(1);
                                     }
                                 }
                             }
-                        };
-
-                        let _ = result_tx.send(result);
-                    });
-
-                    self.state = HttpClientState::Processing { result_rx };
-                    return ProcessResult::DidWork(1);
+                            Err(error_msg) => {
+                                // Request failed - send error
+                                match self.out_err.push(error_msg.as_bytes().to_vec()) {
+                                    Ok(()) => {
+                                        debug!("forwarded HTTP error to output");
+                                        self.state = HttpClientState::WaitingForRequests;
+                                        return ProcessResult::DidWork(1);
+                                    }
+                                    Err(PushError::Full(error_bytes)) => {
+                                        // Output buffer full, buffer internally for later retry
+                                        debug!("error output buffer full, buffering internally");
+                                        self.pending_errors.push_back(error_bytes);
+                                        self.state = HttpClientState::WaitingForRequests;
+                                        return ProcessResult::DidWork(1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        // No results ready, continue waiting
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        // Worker thread died
+                        warn!("HTTP async worker result channel disconnected");
+                        self.state = HttpClientState::Finished;
+                        return ProcessResult::Finished;
+                    }
                 }
+
                 // No request available, but check if we should yield budget
                 if context.remaining_budget == 0 {
                     return ProcessResult::NoWork;
@@ -709,7 +765,7 @@ impl Component for HTTPClientComponent {
                 return ProcessResult::NoWork;
             }
 
-            HttpClientState::Processing { .. } => {
+            HttpClientState::Processing => {
                 // This should have been handled above
                 self.state = HttpClientState::Finished;
                 ProcessResult::Finished

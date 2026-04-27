@@ -1,7 +1,7 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -32,8 +32,9 @@ pub struct ZeroconfResponderComponent {
     // Async operation state
     state: ZeroconfResponderState,
     config: Option<ZeroconfResponderConfig>,
-    cmd_sender: mpsc::UnboundedSender<ZeroconfResponderCommand>,
-    result_receiver: mpsc::UnboundedReceiver<ZeroconfResponderResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<ZeroconfResponderCommand>,
+    result_receiver: std::sync::mpsc::Receiver<ZeroconfResponderResult>,
     #[allow(dead_code)]
     async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
@@ -61,13 +62,13 @@ enum ZeroconfResponderResult {
 }
 
 async fn async_responder_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfResponderCommand>,
-    result_tx: mpsc::UnboundedSender<ZeroconfResponderResult>,
+    cmd_rx: std::sync::mpsc::Receiver<ZeroconfResponderCommand>,
+    result_tx: std::sync::mpsc::SyncSender<ZeroconfResponderResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut responder: Option<ServiceDaemon> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             ZeroconfResponderCommand::Register(config) => {
                 debug!(
@@ -123,14 +124,14 @@ async fn register_service(
 }
 
 async fn async_browser_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<ZeroconfBrowserCommand>,
-    result_tx: mpsc::UnboundedSender<ZeroconfBrowserResult>,
+    cmd_rx: std::sync::mpsc::Receiver<ZeroconfBrowserCommand>,
+    result_tx: std::sync::mpsc::SyncSender<ZeroconfBrowserResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut browser: Option<ServiceDaemon> = None;
     let mut receiver: Option<mdns_sd::Receiver<ServiceEvent>> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             ZeroconfBrowserCommand::Browse(config) => {
                 debug!("Starting mDNS browse for service: {}", config.service_name);
@@ -224,8 +225,8 @@ impl Component for ZeroconfResponderComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<ZeroconfResponderCommand, ZeroconfResponderResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
@@ -437,8 +438,9 @@ pub struct ZeroconfBrowserComponent {
     // Async operation state
     state: ZeroconfBrowserState,
     config: Option<ZeroconfBrowserConfig>,
-    cmd_sender: mpsc::UnboundedSender<ZeroconfBrowserCommand>,
-    result_receiver: mpsc::UnboundedReceiver<ZeroconfBrowserResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<ZeroconfBrowserCommand>,
+    result_receiver: std::sync::mpsc::Receiver<ZeroconfBrowserResult>,
     #[allow(dead_code)]
     async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
@@ -477,8 +479,8 @@ impl Component for ZeroconfBrowserComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<ZeroconfBrowserCommand, ZeroconfBrowserResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

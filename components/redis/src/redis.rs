@@ -1,7 +1,8 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource, SchedulerWaker,
+    ProcessSignalSink, ProcessSignalSource, SchedulerWaker, create_io_channels,
+    wake_scheduler,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -19,7 +20,6 @@ enum RedisPublisherState {
     Connecting {
         url: String,
         channel: String,
-        result_rx: tokio_mpsc::UnboundedReceiver<Result<Framed<RespConnectionInner, RespCodec>, String>>,
     },
     Connected {
         url: String,
@@ -36,7 +36,40 @@ pub struct RedisPublisherComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: RedisPublisherState,
-    //graph_inout: GraphInportOutportHandle,
+    // ADR-017: Bounded IO channels
+    cmd_tx: std::sync::mpsc::SyncSender<(String, String)>,
+    result_rx: std::sync::mpsc::Receiver<Result<Framed<RespConnectionInner, RespCodec>, String>>,
+    // Background async worker
+    _async_worker: Option<std::thread::JoinHandle<()>>,
+}
+
+// ADR-017: Async Redis worker that runs in background thread with Tokio runtime
+async fn async_redis_worker(
+    mut cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
+    result_tx: std::sync::mpsc::SyncSender<Result<Framed<RespConnectionInner, RespCodec>, String>>,
+    waker: Option<SchedulerWaker>,
+) {
+    debug!("Redis async worker started");
+
+    while let Ok((url, channel)) = cmd_rx.recv() {
+        debug!("Redis worker connecting to: {} channel: {}", &url, &channel);
+
+        // Perform Redis connection (this is asynchronous)
+        let result = redis_async::client::connect(&url, 6379, None, None).await;
+
+        let connection_result = match result {
+            Ok(connection) => Ok(connection),
+            Err(e) => Err(format!("Failed to connect: {}", e)),
+        };
+
+        // Send result back (ignore send errors - component may have been destroyed)
+        let _ = result_tx.try_send(connection_result);
+
+        // ADR-002: Signal scheduler that work is ready
+        wake_scheduler(&waker);
+    }
+
+    debug!("Redis async worker exiting");
 }
 
 impl Component for RedisPublisherComponent {
@@ -46,11 +79,24 @@ impl Component for RedisPublisherComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<SchedulerWaker>,
+        scheduler_waker: Option<SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
     {
+        // ADR-017: Create bounded IO channels
+        let (cmd_tx, cmd_rx, result_tx, result_rx) = create_io_channels::<(String, String), Result<Framed<RespConnectionInner, RespCodec>, String>>();
+
+        // Start background async worker thread
+        let waker = scheduler_waker.clone();
+        let async_worker = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async_redis_worker(cmd_rx, result_tx, waker));
+        }));
+
         RedisPublisherComponent {
             conf: inports
                 .remove("CONF")
@@ -65,7 +111,11 @@ impl Component for RedisPublisherComponent {
             signals_in,
             signals_out,
             state: RedisPublisherState::WaitingForConfig,
-            //graph_inout: graph_inout,
+            // ADR-017: Bounded IO channels
+            cmd_tx,
+            result_rx,
+            // Background async worker
+            _async_worker: async_worker,
         }
     }
 
@@ -95,18 +145,17 @@ impl Component for RedisPublisherComponent {
 
         // Handle state transitions that require borrowing
         let current_state = std::mem::replace(&mut self.state, RedisPublisherState::Finished);
-        if let RedisPublisherState::Connecting { url, channel, mut result_rx } = current_state {
+        if let RedisPublisherState::Connecting { url, channel } = current_state {
             // Check if connection completed
-            match result_rx.try_recv() {
+            match self.result_rx.try_recv() {
                 Ok(Ok(connection)) => {
                     // Connection successful - transition to connected state
-                    let new_state = RedisPublisherState::Connected {
+                    self.state = RedisPublisherState::Connected {
                         url,
                         connection,
                         channel: channel.clone(),
                         pending_messages: Vec::new(),
                     };
-                    self.state = new_state;
                     debug!("Redis publisher connected to channel: {}", channel);
                     return ProcessResult::DidWork(1);
                 }
@@ -117,7 +166,7 @@ impl Component for RedisPublisherComponent {
                 }
                 Err(_) => {
                     // Connection still in progress, put state back and wait
-                    self.state = RedisPublisherState::Connecting { url, channel, result_rx };
+                    self.state = RedisPublisherState::Connecting { url, channel };
                     context.wake_at(
                         Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
                     );
@@ -148,27 +197,30 @@ impl Component for RedisPublisherComponent {
                         .expect("failed to convert channel name to str");
                     debug!("channel: {}", channel);
 
-                    // Start async connection
-                    let (result_tx, result_rx) = tokio_mpsc::unbounded_channel();
-                    let url_clone = url_str.clone();
-
-                    tokio::spawn(async move {
-                        match redis_async::client::connect(&url_clone, 6379, None, None).await {
-                            Ok(connection) => {
-                                let _ = result_tx.send(Ok(connection));
-                            }
-                            Err(e) => {
-                                let _ = result_tx.send(Err(format!("Failed to connect: {}", e)));
-                            }
+                    // ADR-017: Send to background async worker via bounded channel
+                    match self.cmd_tx.try_send((url_str.clone(), channel.to_string())) {
+                        Ok(()) => {
+                            debug!("Redis connection request enqueued to async worker");
+                            self.state = RedisPublisherState::Connecting {
+                                url: url_str,
+                                channel: channel.to_string(),
+                            };
+                            return ProcessResult::DidWork(1);
                         }
-                    });
-
-                    self.state = RedisPublisherState::Connecting {
-                        url: url_str,
-                        channel: channel.to_string(),
-                        result_rx,
-                    };
-                    return ProcessResult::DidWork(1);
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // ADR-017: Channel full, apply backpressure
+                            debug!("Redis command channel full, applying backpressure");
+                            warn!("Redis connection request dropped due to full command channel");
+                            self.state = RedisPublisherState::WaitingForConfig;
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died, component should finish
+                            warn!("Redis async worker disconnected");
+                            self.state = RedisPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 // No config yet, but check if we should yield budget
                 if context.remaining_budget == 0 {
@@ -178,34 +230,10 @@ impl Component for RedisPublisherComponent {
                 return ProcessResult::NoWork;
             }
 
-            RedisPublisherState::Connecting { url, channel, mut result_rx } => {
-                // Check if connection completed
-                match result_rx.try_recv() {
-                    Ok(Ok(connection)) => {
-                        // Connection successful - transition to connected state
-                        let new_state = RedisPublisherState::Connected {
-                            url: url.clone(),
-                            connection,
-                            channel: channel.clone(),
-                            pending_messages: Vec::new(),
-                        };
-                        self.state = new_state;
-                        debug!("Redis publisher connected to channel: {}", channel);
-                        return ProcessResult::DidWork(1);
-                    }
-                    Ok(Err(e)) => {
-                        error!("Redis connection failed: {}", e);
-                        self.state = RedisPublisherState::Finished;
-                        return ProcessResult::Finished;
-                    }
-                    Err(_) => {
-                        // Connection still in progress, wait
-                        context.wake_at(
-                            Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
-                        );
-                        return ProcessResult::NoWork;
-                    }
-                }
+            RedisPublisherState::Connecting { .. } => {
+                // This should have been handled above
+                self.state = RedisPublisherState::Finished;
+                ProcessResult::Finished
             }
 
             RedisPublisherState::Connected {

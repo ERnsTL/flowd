@@ -1,7 +1,8 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
+    SchedulerWaker, wake_scheduler,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -15,7 +16,6 @@ enum MQTTPublisherState {
     Connecting {
         url: String,
         topic: String,
-        result_rx: tokio_mpsc::UnboundedReceiver<Result<(rumqttc::Client, rumqttc::Connection), String>>,
     },
     Connected {
         client: rumqttc::Client,
@@ -32,10 +32,47 @@ pub struct MQTTPublisherComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: MQTTPublisherState,
-    //graph_inout: GraphInportOutportHandle,
+    // ADR-017: Bounded IO channels
+    cmd_tx: std::sync::mpsc::SyncSender<(String, String)>,
+    result_rx: std::sync::mpsc::Receiver<Result<(rumqttc::Client, rumqttc::Connection), String>>,
+    // Background async worker
+    _async_worker: Option<std::thread::JoinHandle<()>>,
 }
 
+const MQTT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+// ADR-017: Async MQTT worker that runs in background thread with Tokio runtime
+async fn async_mqtt_worker(
+    mut cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
+    result_tx: std::sync::mpsc::SyncSender<Result<(rumqttc::Client, rumqttc::Connection), String>>,
+    waker: Option<SchedulerWaker>,
+) {
+    debug!("MQTT async worker started");
+
+    while let Ok((url, topic)) = cmd_rx.recv() {
+        debug!("MQTT worker connecting to: {} topic: {}", &url, &topic);
+
+        // Perform MQTT connection (this is synchronous but we're in an async context)
+        let result = std::panic::catch_unwind(|| {
+            let mut mqttoptions = MqttOptions::parse_url(&url).expect("failed to parse MQTT URL");
+            mqttoptions.set_keep_alive(Duration::from_secs(5));
+            Client::new(mqttoptions, 10)
+        });
+
+        let connection_result = match result {
+            Ok((client, connection)) => Ok((client, connection)),
+            Err(_) => Err("Failed to create MQTT client".to_string()),
+        };
+
+        // Send result back (ignore send errors - component may have been destroyed)
+        let _ = result_tx.try_send(connection_result);
+
+        // ADR-002: Signal scheduler that work is ready
+        wake_scheduler(&waker);
+    }
+
+    debug!("MQTT async worker exiting");
+}
 
 impl Component for MQTTPublisherComponent {
     fn new(
@@ -44,11 +81,24 @@ impl Component for MQTTPublisherComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
     {
+        // ADR-017: Create bounded IO channels
+        let (cmd_tx, cmd_rx, result_tx, result_rx) = create_io_channels::<(String, String), Result<(rumqttc::Client, rumqttc::Connection), String>>();
+
+        // Start background async worker thread
+        let waker = scheduler_waker.clone();
+        let async_worker = Some(std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async_mqtt_worker(cmd_rx, result_tx, waker));
+        }));
+
         MQTTPublisherComponent {
             conf: inports
                 .remove("CONF")
@@ -63,7 +113,11 @@ impl Component for MQTTPublisherComponent {
             signals_in: signals_in,
             signals_out: signals_out,
             state: MQTTPublisherState::WaitingForConfig,
-            //graph_inout: graph_inout,
+            // ADR-017: Bounded IO channels
+            cmd_tx,
+            result_rx,
+            // Background async worker
+            _async_worker: async_worker,
         }
     }
 
@@ -93,9 +147,9 @@ impl Component for MQTTPublisherComponent {
 
         // Handle state transitions that require borrowing
         let current_state = std::mem::replace(&mut self.state, MQTTPublisherState::Finished);
-        if let MQTTPublisherState::Connecting { url, topic, mut result_rx } = current_state {
+        if let MQTTPublisherState::Connecting { url, topic } = current_state {
             // Check if connection completed
-            match result_rx.try_recv() {
+            match self.result_rx.try_recv() {
                 Ok(Ok((client, connection))) => {
                     // Connection successful - transition to connected state
                     self.state = MQTTPublisherState::Connected {
@@ -114,7 +168,7 @@ impl Component for MQTTPublisherComponent {
                 }
                 Err(_) => {
                     // Connection still in progress, put state back and wait
-                    self.state = MQTTPublisherState::Connecting { url, topic, result_rx };
+                    self.state = MQTTPublisherState::Connecting { url, topic };
                     context.wake_at(
                         Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
                     );
@@ -145,32 +199,30 @@ impl Component for MQTTPublisherComponent {
                     topic = topic.trim_start_matches('/');
                     debug!("topic: {}", topic);
 
-                    // Start async connection
-                    let (result_tx, result_rx) = tokio_mpsc::unbounded_channel();
-                    let url_clone = url_str.clone();
-
-                    tokio::spawn(async move {
-                        // Parse and connect to MQTT server (in async task to avoid blocking)
-                        match std::panic::catch_unwind(|| {
-                            let mut mqttoptions = MqttOptions::parse_url(&url_clone).expect("failed to parse MQTT URL");
-                            mqttoptions.set_keep_alive(Duration::from_secs(5));
-                            Client::new(mqttoptions, 10)
-                        }) {
-                            Ok((client, connection)) => {
-                                let _ = result_tx.send(Ok((client, connection)));
-                            }
-                            Err(_) => {
-                                let _ = result_tx.send(Err("Failed to create MQTT client".to_string()));
-                            }
+                    // ADR-017: Send to background async worker via bounded channel
+                    match self.cmd_tx.try_send((url_str.clone(), topic.to_string())) {
+                        Ok(()) => {
+                            debug!("MQTT connection request enqueued to async worker");
+                            self.state = MQTTPublisherState::Connecting {
+                                url: url_str,
+                                topic: topic.to_string(),
+                            };
+                            return ProcessResult::DidWork(1);
                         }
-                    });
-
-                    self.state = MQTTPublisherState::Connecting {
-                        url: url_str,
-                        topic: topic.to_string(),
-                        result_rx,
-                    };
-                    return ProcessResult::DidWork(1);
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // ADR-017: Channel full, apply backpressure
+                            debug!("MQTT command channel full, applying backpressure");
+                            warn!("MQTT connection request dropped due to full command channel");
+                            self.state = MQTTPublisherState::WaitingForConfig;
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died, component should finish
+                            warn!("MQTT async worker disconnected");
+                            self.state = MQTTPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 // No config yet, but check if we should yield budget
                 if context.remaining_budget == 0 {

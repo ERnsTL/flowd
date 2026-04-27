@@ -1,10 +1,9 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
 use log::{debug, error, info, trace, warn};
-use tokio::sync::mpsc;
 
 // component-specific
 use std::time::Duration;
@@ -32,8 +31,9 @@ pub struct TelegramBotComponent {
     // Async operation state
     state: TelegramBotState,
     config: Option<TelegramBotConfig>,
-    cmd_sender: mpsc::UnboundedSender<TelegramBotCommand>,
-    result_receiver: mpsc::UnboundedReceiver<TelegramBotResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<TelegramBotCommand>,
+    result_receiver: std::sync::mpsc::Receiver<TelegramBotResult>,
     #[allow(dead_code)]
     async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
@@ -64,8 +64,8 @@ enum TelegramBotResult {
 const TELEGRAM_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn async_telegram_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<TelegramBotCommand>,
-    result_tx: mpsc::UnboundedSender<TelegramBotResult>,
+    cmd_rx: std::sync::mpsc::Receiver<TelegramBotCommand>,
+    result_tx: std::sync::mpsc::SyncSender<TelegramBotResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let scheduler_waker = scheduler_waker;
@@ -73,7 +73,7 @@ async fn async_telegram_main(
     let mut chat_id: i64 = 0;
     let mut dispatcher_handle: Option<tokio::task::JoinHandle<()>> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             TelegramBotCommand::InitBot(token) => {
                 debug!("Initializing Telegram bot");
@@ -196,8 +196,8 @@ impl Component for TelegramBotComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<TelegramBotCommand, TelegramBotResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

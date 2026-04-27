@@ -1,10 +1,9 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
 use log::{debug, error, info, trace, warn};
-use tokio::sync::mpsc;
 
 // component-specific
 use openai::{
@@ -52,8 +51,9 @@ pub struct OpenAIChatComponent {
     config: Option<OpenAIConfig>,
     #[allow(dead_code)]
     messages: Vec<ChatCompletionMessage>,
-    cmd_sender: mpsc::UnboundedSender<OpenAICommand>,
-    result_receiver: mpsc::UnboundedReceiver<OpenAIResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<OpenAICommand>,
+    result_receiver: std::sync::mpsc::Receiver<OpenAIResult>,
     #[allow(dead_code)]
     async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
@@ -62,14 +62,14 @@ pub struct OpenAIChatComponent {
 const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 async fn async_openai_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<OpenAICommand>,
-    result_tx: mpsc::UnboundedSender<OpenAIResult>,
+    cmd_rx: std::sync::mpsc::Receiver<OpenAICommand>,
+    result_tx: std::sync::mpsc::SyncSender<OpenAIResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut config: Option<OpenAIConfig> = None;
     let mut messages: Vec<ChatCompletionMessage> = Vec::new();
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             OpenAICommand::SetConfig(new_config) => {
                 config = Some(new_config);
@@ -188,8 +188,8 @@ impl Component for OpenAIChatComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<OpenAICommand, OpenAIResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()

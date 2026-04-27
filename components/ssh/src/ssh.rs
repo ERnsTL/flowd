@@ -1,7 +1,7 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -10,7 +10,6 @@ use lexopt::prelude::*;
 use openssh;
 use std::ffi::OsString;
 use std::vec;
-use tokio::sync::mpsc;
 
 /*
 Ability to remotely execute a command and forward data to its STDIN and receive data from its STDOUT.
@@ -35,8 +34,9 @@ pub struct SSHClientComponent {
     ssh_config: Option<ParsedSSHConfig>,
     // Async operation state
     state: SSHState,
-    cmd_sender: mpsc::UnboundedSender<SSHCommand>,
-    result_receiver: mpsc::UnboundedReceiver<SSHResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<SSHCommand>,
+    result_receiver: std::sync::mpsc::Receiver<SSHResult>,
     /// JoinHandle for the dedicated async thread that runs SSH operations.
     ///
     /// This field is currently unused after thread creation but kept for architectural clarity
@@ -101,13 +101,13 @@ enum SSHState {
 }
 
 async fn async_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<SSHCommand>,
-    result_tx: mpsc::UnboundedSender<SSHResult>,
+    cmd_rx: std::sync::mpsc::Receiver<SSHCommand>,
+    result_tx: std::sync::mpsc::SyncSender<SSHResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut session: Option<openssh::Session> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             SSHCommand::Connect { config } => {
                 debug!("Connecting to SSH: {}", config.address_port);
@@ -211,8 +211,8 @@ impl Component for SSHClientComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<SSHCommand, SSHResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

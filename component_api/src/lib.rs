@@ -360,10 +360,29 @@ pub type SchedulerWaker = Arc<dyn Fn() + Send + Sync>;
 /// external systems because no callback-based wakeup is available.
 pub const DEFAULT_IO_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
+/// ADR-017: Maximum concurrent IO operations per component
+pub const DEFAULT_MAX_INFLIGHT: usize = 10;
+
+/// ADR-017: Maximum queued requests per component
+pub const DEFAULT_MAX_PENDING: usize = 100;
+
 /// Wake scheduler from background/async contexts.
 #[inline]
 pub fn wake_scheduler(waker: &Option<SchedulerWaker>) {
     if let Some(waker) = waker {
         waker();
     }
+}
+
+/// Create bounded channels for ADR-017 compliant IO components.
+/// Returns (command_sender, command_receiver, result_sender, result_receiver)
+pub fn create_io_channels<T, U>() -> (
+    std::sync::mpsc::SyncSender<T>,
+    std::sync::mpsc::Receiver<T>,
+    std::sync::mpsc::SyncSender<U>,
+    std::sync::mpsc::Receiver<U>,
+) {
+    let (cmd_tx, cmd_rx) = std::sync::mpsc::sync_channel(DEFAULT_MAX_INFLIGHT);
+    let (result_tx, result_rx) = std::sync::mpsc::sync_channel(DEFAULT_MAX_PENDING);
+    (cmd_tx, cmd_rx, result_tx, result_rx)
 }

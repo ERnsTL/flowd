@@ -1,10 +1,9 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource,
+    ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
 use log::{debug, error, info, trace, warn};
-use tokio::sync::mpsc;
 
 // component-specific
 use matrix_sdk::config::SyncSettings;
@@ -80,8 +79,9 @@ pub struct MatrixClientComponent {
     // Async operation state
     state: MatrixClientState,
     config: Option<MatrixClientConfig>,
-    cmd_sender: mpsc::UnboundedSender<MatrixClientCommand>,
-    result_receiver: mpsc::UnboundedReceiver<MatrixClientResult>,
+    // ADR-017: Bounded IO channels
+    cmd_sender: std::sync::mpsc::SyncSender<MatrixClientCommand>,
+    result_receiver: std::sync::mpsc::Receiver<MatrixClientResult>,
     #[allow(dead_code)]
     async_thread: Option<std::thread::JoinHandle<()>>,
     //graph_inout: GraphInportOutportHandle,
@@ -91,8 +91,8 @@ const MATRIX_CLIENT_INIT_TIMEOUT: Duration = Duration::from_secs(15);
 const MATRIX_SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 async fn async_matrix_main(
-    mut cmd_rx: mpsc::UnboundedReceiver<MatrixClientCommand>,
-    result_tx: mpsc::UnboundedSender<MatrixClientResult>,
+    cmd_rx: std::sync::mpsc::Receiver<MatrixClientCommand>,
+    result_tx: std::sync::mpsc::SyncSender<MatrixClientResult>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let scheduler_waker = scheduler_waker;
@@ -102,7 +102,7 @@ async fn async_matrix_main(
     let mut user_id: Option<OwnedUserId> = None;
     let mut dispatcher_handle: Option<tokio::task::JoinHandle<()>> = None;
 
-    while let Some(cmd) = cmd_rx.recv().await {
+    while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             MatrixClientCommand::InitClient(config) => {
                 debug!("Initializing Matrix client");
@@ -331,8 +331,8 @@ impl Component for MatrixClientComponent {
     where
         Self: Sized,
     {
-        let (cmd_sender, cmd_receiver) = mpsc::unbounded_channel();
-        let (result_sender, result_receiver) = mpsc::unbounded_channel();
+        // ADR-017: Create bounded IO channels
+        let (cmd_sender, cmd_receiver, result_sender, result_receiver) = create_io_channels::<MatrixClientCommand, MatrixClientResult>();
 
         let async_thread = Some(std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
