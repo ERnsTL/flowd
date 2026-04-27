@@ -1,7 +1,7 @@
 use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
-    ProcessSignalSink, ProcessSignalSource, PushError,
+    ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker,
 };
 use log::{debug, info, trace, warn};
 
@@ -11,9 +11,8 @@ use std::convert::Infallible;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 
 // Hyper imports for the old run() method
@@ -22,7 +21,7 @@ use hyper::{
     Body as HyperBody, Request as HyperRequest, Response as HyperResponse, Server as HyperServer,
     StatusCode,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 // Time formatting is handled by SystemTime
 
@@ -402,22 +401,12 @@ struct Connection {
 }
 
 #[derive(Debug)]
-enum HttpClientCommand {
-    MakeRequest(String), // URL to request
-    Shutdown,
-}
-
-#[derive(Debug)]
-enum HttpClientResult {
-    Response(Vec<u8>), // Response body
-    Error(String),     // Error message
-}
-
-#[derive(Debug, Clone)]
 enum HttpClientState {
-    Idle,
-    Processing,
-    Error(()),
+    WaitingForRequests,
+    Processing {
+        result_rx: mpsc::UnboundedReceiver<Result<Vec<u8>, String>>,
+    },
+    Finished,
 }
 
 pub struct HTTPClientComponent {
@@ -426,112 +415,17 @@ pub struct HTTPClientComponent {
     out_err: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    //graph_inout: GraphInportOutportHandle,
-
-    // Worker thread communication
-    command_tx: Sender<HttpClientCommand>,
-    result_rx: Receiver<HttpClientResult>,
-    worker_handle: Option<JoinHandle<()>>,
-
-    // Runtime state
     state: HttpClientState,
     pending_responses: std::collections::VecDeque<Vec<u8>>, // responses to send, buffered for backpressure
     pending_errors: std::collections::VecDeque<Vec<u8>>, // errors to send, buffered for backpressure
+    //graph_inout: GraphInportOutportHandle,
 }
 
 impl HTTPClientComponent {
-    fn worker_thread(
-        command_rx: Receiver<HttpClientCommand>,
-        result_tx: Sender<HttpClientResult>,
-        client: reqwest::blocking::Client,
-        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
-    ) {
-        loop {
-            // Try to receive a command
-            match command_rx.try_recv() {
-                Ok(command) => match command {
-                    HttpClientCommand::MakeRequest(url) => {
-                        debug!("Worker: making HTTP request to {}", url);
-                        match client.get(&url).send() {
-                            Ok(resp) => {
-                                debug!("Worker: got response, reading body...");
-                                let status = resp.status();
-                                match resp.bytes() {
-                                    Ok(body_bytes) => {
-                                        let body = body_bytes.to_vec();
-                                        if status.is_success() {
-                                            debug!(
-                                                "Worker: sent response body ({} bytes)",
-                                                body.len()
-                                            );
-                                            let _ =
-                                                result_tx.send(HttpClientResult::Response(body));
-                                        } else {
-                                            let message = format!(
-                                                "HTTP {}: {}",
-                                                status,
-                                                String::from_utf8_lossy(&body)
-                                            );
-                                            let _ =
-                                                result_tx.send(HttpClientResult::Error(message));
-                                        }
-                                        if let Some(ref waker) = scheduler_waker {
-                                            waker();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let error_msg = format!(
-                                            "HTTP {}: Failed to read response body: {}",
-                                            status, e
-                                        );
-                                        let _ = result_tx.send(HttpClientResult::Error(error_msg));
-                                        if let Some(ref waker) = scheduler_waker {
-                                            waker();
-                                        }
-                                        debug!("Worker: failed to read response body: {}", e);
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let error_msg = format!("HTTP request failed: {}", e);
-                                let _ = result_tx.send(HttpClientResult::Error(error_msg));
-                                if let Some(ref waker) = scheduler_waker {
-                                    waker();
-                                }
-                                debug!("Worker: HTTP request failed: {}", e);
-                            }
-                        }
-                    }
-                    HttpClientCommand::Shutdown => {
-                        debug!("Worker: received shutdown command, exiting");
-                        break;
-                    }
-                },
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    // No command, sleep briefly to avoid busy looping
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    // Main thread disconnected, exit
-                    debug!("Worker: command channel disconnected, exiting");
-                    break;
-                }
-            }
-        }
 
-        debug!("HTTP worker thread exiting");
-    }
 }
 
-impl Drop for HTTPClientComponent {
-    fn drop(&mut self) {
-        // Tell worker to exit and wait for a clean shutdown.
-        let _ = self.command_tx.send(HttpClientCommand::Shutdown);
-        if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
+
 
 impl Component for HTTPClientComponent {
     fn new(
@@ -540,26 +434,11 @@ impl Component for HTTPClientComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+        _scheduler_waker: Option<SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
     {
-        let client = reqwest::blocking::Client::builder()
-            .connect_timeout(HTTP_CONNECT_TIMEOUT)
-            .timeout(HTTP_REQUEST_TIMEOUT)
-            .build()
-            .expect("failed to build HTTP client");
-
-        // Create communication channels for worker thread
-        let (command_tx, command_rx) = mpsc::channel::<HttpClientCommand>();
-        let (result_tx, result_rx) = mpsc::channel::<HttpClientResult>();
-
-        // Spawn worker thread
-        let worker_handle = Some(thread::spawn(move || {
-            Self::worker_thread(command_rx, result_tx, client, scheduler_waker);
-        }));
-
         HTTPClientComponent {
             req: inports
                 .remove("REQ")
@@ -576,31 +455,27 @@ impl Component for HTTPClientComponent {
                 .expect("found no ERR outport")
                 .pop()
                 .unwrap(),
-            signals_in: signals_in,
-            signals_out: signals_out,
-            //graph_inout: graph_inout,
-            command_tx,
-            result_rx,
-            worker_handle,
-            state: HttpClientState::Idle,
+            signals_in,
+            signals_out,
+            state: HttpClientState::WaitingForRequests,
             pending_responses: std::collections::VecDeque::new(),
             pending_errors: std::collections::VecDeque::new(),
+            //graph_inout: graph_inout,
         }
     }
 
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
         debug!("HTTPClient is now process()ing!");
-        let mut work_units = 0u32;
 
-        // Check signals
+        // Check signals first
         if let Ok(ip) = self.signals_in.try_recv() {
             trace!(
                 "received signal ip: {}",
                 std::str::from_utf8(&ip).expect("invalid utf-8")
             );
-            // stop signal
             if ip == b"stop" {
                 info!("got stop signal, finishing");
+                self.state = HttpClientState::Finished;
                 return ProcessResult::Finished;
             } else if ip == b"ping" {
                 trace!("got ping signal, responding");
@@ -613,113 +488,143 @@ impl Component for HTTPClientComponent {
             }
         }
 
-        // Check for results from worker thread
-        while let Ok(result) = self.result_rx.try_recv() {
-            match result {
-                HttpClientResult::Response(body) => {
+        // Handle state transitions that require borrowing
+        let current_state = std::mem::replace(&mut self.state, HttpClientState::Finished);
+        if let HttpClientState::Processing { mut result_rx } = current_state {
+            // Check if request completed
+            match result_rx.try_recv() {
+                Ok(Ok(body)) => {
+                    // Request successful - send response
                     match self.out_resp.push(body) {
                         Ok(()) => {
-                            work_units += 1;
                             debug!("forwarded HTTP response to output");
+                            self.state = HttpClientState::WaitingForRequests;
+                            return ProcessResult::DidWork(1);
                         }
                         Err(PushError::Full(body)) => {
                             // Output buffer full, buffer internally for later retry
                             debug!("response output buffer full, buffering internally");
                             self.pending_responses.push_back(body);
-                            work_units += 1;
+                            self.state = HttpClientState::WaitingForRequests;
+                            return ProcessResult::DidWork(1);
                         }
                     }
                 }
-                HttpClientResult::Error(error_msg) => {
-                    match self.out_err.push(error_msg.into_bytes()) {
+                Ok(Err(error_msg)) => {
+                    // Request failed - send error
+                    match self.out_err.push(error_msg.as_bytes().to_vec()) {
                         Ok(()) => {
-                            work_units += 1;
                             debug!("forwarded HTTP error to output");
+                            self.state = HttpClientState::WaitingForRequests;
+                            return ProcessResult::DidWork(1);
                         }
                         Err(PushError::Full(error_bytes)) => {
                             // Output buffer full, buffer internally for later retry
                             debug!("error output buffer full, buffering internally");
                             self.pending_errors.push_back(error_bytes);
-                            work_units += 1;
+                            self.state = HttpClientState::WaitingForRequests;
+                            return ProcessResult::DidWork(1);
                         }
                     }
                 }
-            }
-        }
-
-        // Send any pending responses that were buffered due to backpressure
-        while context.remaining_budget > 0 && !self.pending_responses.is_empty() {
-            if let Some(pending_response) = self.pending_responses.front() {
-                match self.out_resp.push(pending_response.clone()) {
-                    Ok(()) => {
-                        self.pending_responses.pop_front();
-                        work_units += 1;
-                        context.remaining_budget -= 1;
-                        debug!("sent pending HTTP response");
-                    }
-                    Err(PushError::Full(_)) => {
-                        // Still can't send, stop trying for now
-                        break;
-                    }
+                Err(_) => {
+                    // Request still in progress, put state back and wait
+                    self.state = HttpClientState::Processing { result_rx };
+                    context.wake_at(
+                        Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                    );
+                    return ProcessResult::NoWork;
                 }
             }
-        }
-
-        // Send any pending errors that were buffered due to backpressure
-        while context.remaining_budget > 0 && !self.pending_errors.is_empty() {
-            if let Some(pending_error) = self.pending_errors.front() {
-                match self.out_err.push(pending_error.clone()) {
-                    Ok(()) => {
-                        self.pending_errors.pop_front();
-                        work_units += 1;
-                        context.remaining_budget -= 1;
-                        debug!("sent pending HTTP error");
-                    }
-                    Err(PushError::Full(_)) => {
-                        // Still can't send, stop trying for now
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Queue new requests to worker thread within remaining budget
-        while context.remaining_budget > 0 {
-            if let Ok(ip) = self.req.pop() {
-                let url = std::str::from_utf8(&ip).expect("non utf-8 data");
-                debug!("got a request: {}", &url);
-
-                // Send request to worker thread
-                if let Err(e) = self
-                    .command_tx
-                    .send(HttpClientCommand::MakeRequest(url.to_string()))
-                {
-                    warn!("failed to send HTTP request to worker: {}", e);
-                    self.state = HttpClientState::Error(());
-                } else {
-                    self.state = HttpClientState::Processing;
-                    work_units += 1;
-                    context.remaining_budget -= 1;
-                    debug!("queued HTTP request to worker thread");
-                }
-            } else {
-                break;
-            }
-        }
-
-        // are we done?
-        if self.req.is_abandoned()
-            && self.pending_responses.is_empty()
-            && self.pending_errors.is_empty()
-        {
-            info!("EOF on inport REQ and all requests processed, finishing");
-            return ProcessResult::Finished;
-        }
-
-        if work_units > 0 {
-            ProcessResult::DidWork(work_units)
         } else {
-            ProcessResult::NoWork
+            // Put the state back since we didn't handle it
+            self.state = current_state;
+        }
+
+        let current_state = std::mem::replace(&mut self.state, HttpClientState::Finished);
+        match current_state {
+            HttpClientState::WaitingForRequests => {
+                // Try to get a new request
+                if let Ok(ip) = self.req.pop() {
+                    let url = String::from_utf8(ip).expect("non utf-8 data");
+                    debug!("got a request: {}", &url);
+
+                    // Start async HTTP request
+                    let (result_tx, result_rx) = mpsc::unbounded_channel();
+
+                    tokio::spawn(async move {
+                        // Make HTTP request in async task to avoid blocking
+                        match std::panic::catch_unwind(|| async move {
+                            let client = reqwest::Client::builder()
+                                .connect_timeout(HTTP_CONNECT_TIMEOUT)
+                                .timeout(HTTP_REQUEST_TIMEOUT)
+                                .build()
+                                .expect("failed to build HTTP client");
+
+                            match client.get(&url).send().await {
+                                Ok(resp) => {
+                                    let status = resp.status();
+                                    match resp.bytes().await {
+                                        Ok(body_bytes) => {
+                                            let body = body_bytes.to_vec();
+                                            if status.is_success() {
+                                                debug!(
+                                                    "HTTP request successful, got {} bytes",
+                                                    body.len()
+                                                );
+                                                Ok(body)
+                                            } else {
+                                                let message = format!(
+                                                    "HTTP {}: {}",
+                                                    status,
+                                                    String::from_utf8_lossy(&body)
+                                                );
+                                                Err(message)
+                                            }
+                                        }
+                                        Err(e) => {
+                                            let error_msg = format!(
+                                                "HTTP {}: Failed to read response body: {}",
+                                                status, e
+                                            );
+                                            Err(error_msg)
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    let error_msg = format!("HTTP request failed: {}", e);
+                                    Err(error_msg)
+                                }
+                            }
+                        }) {
+                            Ok(fut) => {
+                                let result = fut.await;
+                                let _ = result_tx.send(result as Result<Vec<u8>, String>);
+                            }
+                            Err(_) => {
+                                let _ = result_tx.send(Err("HTTP request panicked".to_string()));
+                            }
+                        }
+                    });
+
+                    self.state = HttpClientState::Processing { result_rx };
+                    return ProcessResult::DidWork(1);
+                }
+                // No request available, but check if we should yield budget
+                if context.remaining_budget == 0 {
+                    return ProcessResult::NoWork;
+                }
+                context.remaining_budget -= 1;
+                return ProcessResult::NoWork;
+            }
+
+            HttpClientState::Processing { .. } => {
+                // This should have been handled above
+                self.state = HttpClientState::Finished;
+                ProcessResult::Finished
+            }
+
+            HttpClientState::Finished => ProcessResult::Finished,
         }
     }
 

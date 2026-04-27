@@ -9,10 +9,11 @@ path = "src/redis.rs"
 [dependencies]
 flowd_component_api = { path = "../../component_api" }
 log = "0.4"
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
 
 # for RedisPublisherComponent and RedisSubscriberComponent
-# TODO optimize - try ahash feature for 7-10% performance improvement
-redis = { version = "*", default-features = false }
+redis-async = "0.18"
 url = "2"
 
 [package.metadata.flowd]

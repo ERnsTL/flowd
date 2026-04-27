@@ -9,6 +9,7 @@ path = "src/tcp.rs"
 [dependencies]
 flowd_component_api = { path = "../../component_api" }
 log = "0.4"
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync", "time", "net"] }
 
 # for TCPClientComponent, TCPServerComponent
 url = "2"
