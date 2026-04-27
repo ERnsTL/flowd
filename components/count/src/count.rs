@@ -218,6 +218,9 @@ impl Component for CountComponent {
                                     flowd_component_api::FbpMessage::Text(text) => text.len(),
                                     flowd_component_api::FbpMessage::Value(_) => 0, // Values don't have inherent size
                                     flowd_component_api::FbpMessage::Control(_) => 0, // Controls don't have inherent size
+                                    flowd_component_api::FbpMessage::TraceData(_) => 0,
+                                    flowd_component_api::FbpMessage::TraceConnect(_) => 0,
+                                    flowd_component_api::FbpMessage::TraceDisconnect(_) => 0,
                                 };
                                 self.packetsize += msg_size;
                             }

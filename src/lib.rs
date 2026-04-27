@@ -46,6 +46,12 @@ pub use flowd_component_api::{
     ProcessSignalSink, ProcessSignalSource, PushError, WakeupNotify, PROCESSEDGE_BUFSIZE,
     PROCESSEDGE_IIP_BUFSIZE, PROCESSEDGE_SIGNAL_BUFSIZE,
 };
+use flowd_component_api::{
+    GraphNodeSpecNetwork as TraceGraphNodeSpecNetwork,
+    TraceConnectEventPayload as ApiTraceConnectEventPayload,
+    TraceDataEventPayload as ApiTraceDataEventPayload,
+    TraceDisconnectEventPayload as ApiTraceDisconnectEventPayload,
+};
 
 // configuration
 const PROCESS_HEALTHCHECK_DUR: core::time::Duration = Duration::from_secs(7); //NOTE: 7 * core::time::Duration::SECOND is not compile-time calculatable (mul const trait not implemented)
@@ -450,6 +456,7 @@ pub struct Runtime {
     status: RuntimeStatus, // for network:status, network:started, network:stopped
     //TODO ^ also contains graph = active graph, maybe replace status.graph with a pointer so that not 2 updates are neccessary?
     tracing: bool,                           //TODO implement
+    trace_sender: Option<std::sync::mpsc::Sender<FbpMessage>>,
     boundary_threads: BoundaryThreadManager, // non-component boundary handlers (for example graph outport bridge); scheduler executes components
     watchdog_thread: Option<std::thread::JoinHandle<()>>,
     watchdog_channel: Option<std::sync::mpsc::SyncSender<MessageBuf>>,
@@ -559,6 +566,7 @@ impl Default for Runtime {
             repository_version: payload.repository_version,
             status: RuntimeStatus::default(),
             tracing: false,
+            trace_sender: None,
             boundary_threads: BoundaryThreadManager::default(),
             watchdog_thread: None,
             watchdog_channel: None,
@@ -669,6 +677,7 @@ impl Runtime {
             graphs,
             schedulers: HashMap::new(),
             scheduler_threads: HashMap::new(),
+            trace_sender: None,
             ..Default::default() //TODO mock other fields as well
         }
     }
@@ -784,6 +793,35 @@ impl Runtime {
                 graph_name.clone(),
                 Arc::new(crate::scheduler::Scheduler::new()),
             );
+        }
+
+        // Initialize trace channel and thread if tracing is enabled
+        if self.tracing {
+            let (trace_tx, trace_rx) = std::sync::mpsc::channel::<FbpMessage>();
+            self.trace_sender = Some(trace_tx);
+
+            // Clone graph_inout for trace thread
+            let graph_inout_clone = graph_inout_arc.clone();
+
+            // Start trace broadcasting thread
+            std::thread::spawn(move || {
+                debug!("trace broadcasting thread started");
+                while let Ok(trace_message) = trace_rx.recv() {
+                    match trace_message {
+                        FbpMessage::TraceData(payload) => {
+                            send_trace_data(&graph_inout_clone, payload);
+                        }
+                        FbpMessage::TraceConnect(payload) => {
+                            send_trace_connect(&graph_inout_clone, payload);
+                        }
+                        FbpMessage::TraceDisconnect(payload) => {
+                            send_trace_disconnect(&graph_inout_clone, payload);
+                        }
+                        _ => warn!("received non-trace message in trace channel"),
+                    }
+                }
+                debug!("trace broadcasting thread exiting");
+            });
         }
 
         // Get scheduler reference for component registration
@@ -1037,17 +1075,55 @@ impl Runtime {
                 // arrayports: insert, but remember that this is a multimap
                 let target_process = edge.target.process.clone();
                 let scheduler_clone = scheduler_for_signaling.clone();
+                let mut edge_sink = ProcessEdgeSink::new(
+                    sink,
+                    None,
+                    Some(target_process.clone()),
+                    Some(Arc::new(move || {
+                        let _ = scheduler_clone.signal_ready(&target_process);
+                    })),
+                );
+
+                // Enable tracing if tracing is enabled
+                if self.tracing {
+                    let edge_id = format!("{}.{}-{}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
+                    if let Some(trace_sender) = &self.trace_sender {
+                        edge_sink.enable_tracing(
+                            edge_id,
+                            edge.source.process.clone(),
+                            edge.source.port.clone(),
+                            edge.target.process.clone(),
+                            edge.target.port.clone(),
+                            graph.properties.name.clone(),
+                            trace_sender.clone(),
+                        );
+                    }
+                }
+
                 sourceproc.outports.insert(
                     edge.source.port.to_ascii_uppercase(),
-                    ProcessEdgeSink::new(
-                        sink,
-                        None,
-                        Some(target_process.clone()),
-                        Some(Arc::new(move || {
-                            let _ = scheduler_clone.signal_ready(&target_process);
-                        })),
-                    ),
+                    edge_sink,
                 );
+
+                // Emit trace:connect event if tracing is enabled
+                if self.tracing {
+                    let edge_id = format!("{}.{}-{}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
+                    let connect_payload = ApiTraceConnectEventPayload {
+                        id: edge_id,
+                        src: TraceGraphNodeSpecNetwork {
+                            node: edge.source.process.clone(),
+                            port: edge.source.port.clone(),
+                            index: edge.source.index.clone(),
+                        },
+                        tgt: TraceGraphNodeSpecNetwork {
+                            node: edge.target.process.clone(),
+                            port: edge.target.port.clone(),
+                            index: edge.target.index.clone(),
+                        },
+                        graph: graph.properties.name.clone(),
+                    };
+                    send_trace_connect(&graph_inout_arc, connect_payload);
+                }
             }
         }
         for (public_name, edge) in graph.inports.iter() {
@@ -1882,6 +1958,41 @@ impl Runtime {
             ));
         }
 
+        // Emit trace:disconnect for all graph edges when tracing is active.
+        if self.tracing {
+            if let Some(active_graph) = self.graphs.get_graph(&self.graph) {
+                let active_graph = active_graph.read().expect("graph lock poisoned");
+                for edge in active_graph.edges.iter() {
+                    // IIP pseudo-edges are not runtime transport edges.
+                    if edge.data.is_some() && edge.source.process.is_empty() {
+                        continue;
+                    }
+                    let edge_id = format!(
+                        "{}.{}-{}.{}",
+                        edge.source.process, edge.source.port, edge.target.process, edge.target.port
+                    );
+                    let disconnect_payload = ApiTraceDisconnectEventPayload {
+                        id: edge_id,
+                        src: TraceGraphNodeSpecNetwork {
+                            node: edge.source.process.clone(),
+                            port: edge.source.port.clone(),
+                            index: edge.source.index.clone(),
+                        },
+                        tgt: TraceGraphNodeSpecNetwork {
+                            node: edge.target.process.clone(),
+                            port: edge.target.port.clone(),
+                            index: edge.target.index.clone(),
+                        },
+                        graph: active_graph.properties.name.clone(),
+                    };
+                    send_trace_disconnect(&graph_inout, disconnect_payload);
+                }
+            }
+        }
+
+        // Drop trace channel sender so the trace relay thread can exit cleanly.
+        self.trace_sender = None;
+
         // set status
         info!("network is shut down.");
         self.status.graph = self.graph.clone();
@@ -1953,6 +2064,7 @@ impl Runtime {
             ));
         }
         self.tracing = true;
+        info!("tracing enabled for graph '{}'", graph);
         Ok(())
     }
 
@@ -1974,6 +2086,7 @@ impl Runtime {
             ));
         }
         self.tracing = false;
+        info!("tracing disabled for graph '{}'", graph);
         Ok(())
     }
 
@@ -2276,6 +2389,47 @@ fn send_network_data(
     //TODO add debug mode check for the graph (network:debug)
     //TODO add check if edge was selected for debugging (network:edges)
     broadcast_to_clients(graph_inout, packet, "network:data");
+}
+
+#[derive(Serialize)]
+struct TraceEventMessage<T: Serialize> {
+    protocol: String,
+    command: String,
+    payload: T,
+}
+
+impl<T: Serialize> TraceEventMessage<T> {
+    fn new(command: &str, payload: T) -> Self {
+        TraceEventMessage {
+            protocol: String::from("trace"),
+            command: command.to_owned(),
+            payload,
+        }
+    }
+}
+
+fn send_trace_data(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    payload: ApiTraceDataEventPayload,
+) {
+    let message = TraceEventMessage::new("data", payload);
+    broadcast_to_clients(graph_inout, &message, "trace:data");
+}
+
+fn send_trace_connect(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    payload: ApiTraceConnectEventPayload,
+) {
+    let message = TraceEventMessage::new("connect", payload);
+    broadcast_to_clients(graph_inout, &message, "trace:connect");
+}
+
+fn send_trace_disconnect(
+    graph_inout: &Arc<Mutex<GraphInportOutportHolder>>,
+    payload: ApiTraceDisconnectEventPayload,
+) {
+    let message = TraceEventMessage::new("disconnect", payload);
+    broadcast_to_clients(graph_inout, &message, "trace:disconnect");
 }
 
 fn create_graph_inout_handle(
@@ -5241,6 +5395,13 @@ enum TraceMessage {
     Clear(TraceClearRequestPayload),
     #[serde(rename = "dump")]
     Dump(TraceDumpRequestPayload),
+    // Trace events (outgoing)
+    #[serde(rename = "data")]
+    Data(ApiTraceDataEventPayload),
+    #[serde(rename = "connect")]
+    Connect(ApiTraceConnectEventPayload),
+    #[serde(rename = "disconnect")]
+    Disconnect(ApiTraceDisconnectEventPayload),
 }
 
 // trace:start -> trace:start | trace:error

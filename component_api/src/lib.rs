@@ -4,7 +4,7 @@ use std::thread::Thread;
 use std::time::{Duration, Instant};
 
 use multimap::MultiMap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ports
 pub type ProcessInports = MultiMap<String, ProcessEdgeSource>;
@@ -21,6 +21,15 @@ pub struct ProcessEdgeSink {
     wakeup: Option<WakeupNotify>,
     proc_name: Option<String>,
     signal_ready: Option<SchedulerWaker>,
+    // Tracing fields
+    tracing_enabled: bool,
+    edge_id: Option<String>,
+    src_node: Option<String>,
+    src_port: Option<String>,
+    tgt_node: Option<String>,
+    tgt_port: Option<String>,
+    graph_name: Option<String>,
+    trace_sender: Option<std::sync::mpsc::Sender<FbpMessage>>,
 }
 
 impl ProcessEdgeSink {
@@ -35,13 +44,54 @@ impl ProcessEdgeSink {
             wakeup,
             proc_name,
             signal_ready,
+            tracing_enabled: false,
+            edge_id: None,
+            src_node: None,
+            src_port: None,
+            tgt_node: None,
+            tgt_port: None,
+            graph_name: None,
+            trace_sender: None,
         }
     }
 
     /// Push data into the edge and signal readiness if configured
     pub fn push(&mut self, data: MessageBuf) -> Result<(), PushError<MessageBuf>> {
-        match self.sink.push(data) {
+        match self.sink.push(data.clone()) {
             Ok(()) => {
+                // Emit trace:data event if tracing is enabled
+                if self.tracing_enabled {
+                    if let (Some(edge_id), Some(src_node), Some(src_port), Some(tgt_node), Some(tgt_port), Some(graph_name), Some(trace_sender)) =
+                        (&self.edge_id, &self.src_node, &self.src_port, &self.tgt_node, &self.tgt_port, &self.graph_name, &self.trace_sender) {
+                        let data_str = match &data {
+                            FbpMessage::Bytes(bytes) => format!("{} bytes", bytes.len()),
+                            FbpMessage::Text(text) => text.to_string(),
+                            FbpMessage::Value(_) => "structured data".to_string(),
+                            FbpMessage::Control(_) => "control message".to_string(),
+                            FbpMessage::TraceData(_) => "trace data".to_string(),
+                            FbpMessage::TraceConnect(_) => "trace connect".to_string(),
+                            FbpMessage::TraceDisconnect(_) => "trace disconnect".to_string(),
+                        };
+                        let trace_payload = TraceDataEventPayload {
+                            id: edge_id.clone(),
+                            src: GraphNodeSpecNetwork {
+                                node: src_node.clone(),
+                                port: src_port.clone(),
+                                index: None,
+                            },
+                            tgt: GraphNodeSpecNetwork {
+                                node: tgt_node.clone(),
+                                port: tgt_port.clone(),
+                                index: None,
+                            },
+                            graph: graph_name.clone(),
+                            data: data_str,
+                        };
+                        let trace_message = FbpMessage::TraceData(trace_payload);
+                        let _ = trace_sender.send(trace_message);
+                    }
+                }
+
                 // Signal scheduler that downstream component may be ready
                 if let Some(signal) = &self.signal_ready {
                     signal();
@@ -58,6 +108,27 @@ impl ProcessEdgeSink {
 
     pub fn proc_name(&self) -> Option<&str> {
         self.proc_name.as_deref()
+    }
+
+    /// Enable tracing for this edge sink
+    pub fn enable_tracing(
+        &mut self,
+        edge_id: String,
+        src_node: String,
+        src_port: String,
+        tgt_node: String,
+        tgt_port: String,
+        graph_name: String,
+        trace_sender: std::sync::mpsc::Sender<FbpMessage>,
+    ) {
+        self.tracing_enabled = true;
+        self.edge_id = Some(edge_id);
+        self.src_node = Some(src_node);
+        self.src_port = Some(src_port);
+        self.tgt_node = Some(tgt_node);
+        self.tgt_port = Some(tgt_port);
+        self.graph_name = Some(graph_name);
+        self.trace_sender = Some(trace_sender);
     }
 }
 
@@ -121,6 +192,9 @@ pub enum FbpMessage {
     Text(Arc<str>),          // UTF-8 text with sharing
     Value(FbpValue),         // Structured data
     Control(ControlEvent),   // Control messages
+    TraceData(TraceDataEventPayload), // Trace data events
+    TraceConnect(TraceConnectEventPayload), // Trace connect events
+    TraceDisconnect(TraceDisconnectEventPayload), // Trace disconnect events
 }
 
 impl FbpMessage {
@@ -185,7 +259,12 @@ impl FbpMessage {
 
     /// Check if this is a data message (bytes, text, or value)
     pub fn is_data(&self) -> bool {
-        !self.is_control()
+        matches!(self, Self::Bytes(_) | Self::Text(_) | Self::Value(_))
+    }
+
+    /// Check if this is a trace message
+    pub fn is_trace(&self) -> bool {
+        matches!(self, Self::TraceData(_) | Self::TraceConnect(_) | Self::TraceDisconnect(_))
     }
 }
 
@@ -611,4 +690,44 @@ pub fn calculate_backoff_delay(attempt: u32, config: &RetryConfig) -> Duration {
 
     let jittered_delay = (delay.as_millis() as f64 * (1.0 + jitter)) as u64;
     Duration::from_millis(jittered_delay.max(100)) // Minimum 100ms
+}
+
+// ----------
+// Graph structures for FBP protocol
+// ----------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct GraphNodeSpecNetwork {
+    pub node: String,
+    pub port: String,
+    pub index: Option<String>, // connection index, for addressable ports
+}
+
+// ----------
+// Trace event payload structures for FBP protocol
+// ----------
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TraceDataEventPayload {
+    pub id: String, // edge identifier
+    pub src: GraphNodeSpecNetwork, // source node/port
+    pub tgt: GraphNodeSpecNetwork, // target node/port
+    pub graph: String,
+    pub data: String, // the message data
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TraceConnectEventPayload {
+    pub id: String, // edge identifier
+    pub src: GraphNodeSpecNetwork, // source node/port
+    pub tgt: GraphNodeSpecNetwork, // target node/port
+    pub graph: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TraceDisconnectEventPayload {
+    pub id: String, // edge identifier
+    pub src: GraphNodeSpecNetwork, // source node/port
+    pub tgt: GraphNodeSpecNetwork, // target node/port
+    pub graph: String,
 }
