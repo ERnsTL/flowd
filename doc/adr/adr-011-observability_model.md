@@ -12,15 +12,9 @@ Ich baue dir ADR-0011 so, dass es:
 
 # ADR-0011: Observability Model
 
-## Status
+Status: Accepted
+Date: 2026-04-16
 
-Accepted
-
-## Date
-
-2026-04-16
-
----
 
 ## Context
 
@@ -103,7 +97,13 @@ Flowd adopts a **multi-layer, flow-native observability model** consisting of:
 3. **Introspection (graph state)**
 4. **Event streams (lifecycle and control events)**
 
----
+
+## Relations to Other ADRs
+
+* ADR-002 Scheduler
+* ADR-003 Messages
+* ADR-008 Transport
+
 
 ## Core Model
 
@@ -519,6 +519,220 @@ Requires:
 * How to store traces efficiently?
 * Should UI be built-in or external?
 * How to correlate distributed traces?
+
+
+## 7. Debug and Trace Model (FBP Integration)
+
+### Purpose
+
+The system MUST provide visibility into:
+
+* runtime state (debugging)
+* dataflow execution (tracing)
+
+These serve different purposes and MUST NOT be conflated.
+
+---
+
+## 7.1 Terminology
+
+### Debug
+
+Debug refers to runtime-level state and control information:
+
+* lifecycle events (start/stop)
+* errors
+* component state
+* scheduler state
+
+---
+
+### Trace
+
+Trace refers to the flow of information packets (IPs) through the system:
+
+* messages on edges
+* connection events
+* grouping (begingroup/endgroup)
+
+---
+
+> Trace is observational and MUST NOT affect execution.
+
+---
+
+## 7.2 FBP Protocol Mapping
+
+flowd MUST expose trace and debug information compatible with the FBP protocol.
+
+---
+
+### Trace Events (REQUIRED for UI integration)
+
+* `trace:data`
+* `trace:connect`
+* `trace:disconnect`
+* `trace:begingroup`
+* `trace:endgroup`
+
+---
+
+### Debug Events
+
+* `runtime:status`
+* `runtime:error`
+* `runtime:started`
+* `runtime:stopped`
+
+---
+
+---
+
+## 7.3 Emission Rules
+
+Trace events MUST be emitted at the following points:
+
+* when a message is transferred across an edge
+* when connections are opened/closed
+* when group boundaries are entered/exited
+
+---
+
+Debug events MUST be emitted for:
+
+* runtime lifecycle changes
+* errors and failures
+* control plane operations
+
+---
+
+---
+
+## 7.4 Integration Points (Implementation Guidance)
+
+Trace emission SHOULD occur at:
+
+* edge push operations
+* edge pop operations (optional)
+* component output boundaries
+
+---
+
+Recommended minimal model:
+
+```text
+Component → Edge → Runtime
+                 ↓
+             Trace Event
+```
+
+---
+
+---
+
+## 7.5 Performance Model
+
+Trace MUST be:
+
+* disabled by default OR configurable
+* zero or near-zero overhead when disabled
+
+Optional:
+
+* sampling
+* filtering by component / edge
+
+---
+
+---
+
+## 7.6 UI Compatibility
+
+Trace output MUST be compatible with tools such as NoFlo UI.
+
+This requires:
+
+* correct node/port identification
+* correct ordering of events
+* consistent edge mapping
+
+---
+
+---
+
+## 7.7 Guarantees
+
+Trace MUST:
+
+* reflect actual message flow
+* preserve ordering (best effort)
+* not mutate or delay messages
+
+---
+
+Trace is best-effort and not guaranteed to be complete under load.
+
+---
+
+---
+
+## 7.8 Anti-Patterns
+
+The following are forbidden:
+
+* mixing debug and trace events
+* emitting trace inside component logic instead of runtime layer
+* modifying execution behavior based on trace state
+
+---
+
+---
+
+## 7.9 Design Decision
+
+Trace is implemented at the runtime level, not within components.
+
+Components MUST remain unaware of tracing unless explicitly instrumented.
+
+
+## 7.10 Implementation Considerations
+
+Pros:
+- enables visual debugging
+- aligns with FBP ecosystem
+- improves developer productivity
+
+Cons:
+- runtime overhead if misused
+- increased complexity in runtime
+- potential large data volume
+
+Mitigation:
+- configurable tracing
+- sampling
+- selective enabling
+
+
+## Implementation Phases
+
+Phase 1:
+- Trace (message flow visualization)
+
+Phase 2:
+- Debug (runtime state)
+
+Phase 3:
+- Metrics
+
+Phase 4:
+- Logging and export
+
+
+
+
+
+
+
 
 ---
 
