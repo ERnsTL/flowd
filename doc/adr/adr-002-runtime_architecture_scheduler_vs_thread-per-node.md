@@ -1102,12 +1102,41 @@ We need to make a few strict decisions to avoid architectural drift:
 4. The transition is all-at-once. There must not be multiple execution models in the system, and no runtime switching.
 
 Additionally:
-- ProcessResult should be an explicit enum (DidWork / NoWork / Finished)
-- process() must never block
-- scheduler is the central execution engine, not an optional layer
+
+- ProcessResult MUST be an explicit enum (DidWork / NoWork / Finished)
+- The scheduler is the central execution engine, not an optional layer, and MUST NOT be bypassed.
+- process() MUST never block.
+
+  External I/O inside process() is restricted to two allowed patterns:
+
+  1. Offloaded I/O (default / recommended)
+
+     - External I/O is executed in background threads or async tasks
+     - process() only enqueues work and drains completed results
+     - completion MUST signal the scheduler
+
+  2. Bounded non-blocking reactor (allowed under strict constraints)
+
+     - process() MAY perform non-blocking I/O operations
+     - operations MUST NOT block under any circumstances
+     - execution MUST be bounded by the assigned budget
+     - no waiting, sleeping, or blocking syscalls are allowed
+
+  The following are explicitly forbidden inside process():
+
+  - blocking network calls (connect, read with blocking socket, etc.)
+  - file I/O that may block
+  - sleep / wait / thread join
+  - any operation with unbounded latency
+
+  Polling-only designs without scheduler signaling are forbidden.
 
 These constraints are normative requirements.
 Conformance MUST be validated by tests and runtime checks.
+
+Interpretation:
+
+"No blocking" means that process() must always return in bounded time, independent of external system behavior.
 
 
 ## 8. Real-Time Components
