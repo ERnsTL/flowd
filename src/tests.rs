@@ -1,8 +1,13 @@
-    use super::bench_api::linear_harness_direct;
+    use super::bench_api::{linear_harness_direct, BenchRuntimeHarness};
+    use super::{
+        Graph, GraphAddinitialRequestPayload, GraphEdge, GraphEdgeMetadata, GraphIIPSpecNetwork,
+        GraphNodeMetadata, GraphNodeSpec, GraphNodeSpecNetwork,
+    };
     use std::any::Any;
+    use std::fs;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn bench_harness_stop_does_not_deadlock_under_repetition() {
@@ -50,4 +55,151 @@
                 panic!("timeout waiting for regression loop completion (possible stop deadlock)")
             }
         }
+    }
+
+    #[test]
+    fn filereader_output_drop_auto_shutdowns_after_draining() {
+        let graph_name = "filereader_output_drop_auto_shutdown";
+        let mut graph = Graph::new(
+            graph_name.to_string(),
+            "FileReader -> Output -> Drop shutdown regression".to_string(),
+            "test".to_string(),
+        );
+
+        graph
+            .add_node(
+                graph_name.to_string(),
+                "FileReader".to_string(),
+                "file".to_string(),
+                GraphNodeMetadata {
+                    x: 80,
+                    y: 120,
+                    width: Some(72),
+                    height: Some(72),
+                    label: Some("file".to_string()),
+                    icon: None,
+                },
+            )
+            .expect("failed to add FileReader node");
+        graph
+            .add_node(
+                graph_name.to_string(),
+                "Output".to_string(),
+                "out".to_string(),
+                GraphNodeMetadata {
+                    x: 220,
+                    y: 120,
+                    width: Some(72),
+                    height: Some(72),
+                    label: Some("out".to_string()),
+                    icon: None,
+                },
+            )
+            .expect("failed to add Output node");
+        graph
+            .add_node(
+                graph_name.to_string(),
+                "Drop".to_string(),
+                "drop".to_string(),
+                GraphNodeMetadata {
+                    x: 360,
+                    y: 120,
+                    width: Some(72),
+                    height: Some(72),
+                    label: Some("drop".to_string()),
+                    icon: None,
+                },
+            )
+            .expect("failed to add Drop node");
+
+        graph
+            .add_edge(
+                graph_name.to_string(),
+                GraphEdge {
+                    source: GraphNodeSpec {
+                        process: "file".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
+                    data: None,
+                    target: GraphNodeSpec {
+                        process: "out".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
+                    metadata: GraphEdgeMetadata::new(None, None, None),
+                },
+            )
+            .expect("failed to add edge file.OUT -> out.IN");
+        graph
+            .add_edge(
+                graph_name.to_string(),
+                GraphEdge {
+                    source: GraphNodeSpec {
+                        process: "out".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
+                    data: None,
+                    target: GraphNodeSpec {
+                        process: "drop".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
+                    metadata: GraphEdgeMetadata::new(None, None, None),
+                },
+            )
+            .expect("failed to add edge out.OUT -> drop.IN");
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before unix epoch")
+            .as_nanos();
+        let mut file_path = std::env::temp_dir();
+        file_path.push(format!(
+            "flowd-filereader-test-{}-{}.txt",
+            std::process::id(),
+            unique
+        ));
+        fs::write(&file_path, "line 1\nline 2\nline 3\n")
+            .expect("failed to write FileReader test input file");
+
+        graph
+            .add_initialip(GraphAddinitialRequestPayload {
+                graph: graph_name.to_string(),
+                metadata: GraphEdgeMetadata::new(None, None, None),
+                src: GraphIIPSpecNetwork {
+                    data: file_path
+                        .to_str()
+                        .expect("test file path must be valid UTF-8")
+                        .to_string(),
+                },
+                tgt: GraphNodeSpecNetwork {
+                    node: "file".to_string(),
+                    port: "NAMES".to_string(),
+                    index: None,
+                },
+                secret: None,
+            })
+            .expect("failed to add IIP for FileReader.NAMES");
+
+        let harness = BenchRuntimeHarness::new(graph);
+        harness.start().expect("runtime failed to start");
+
+        harness
+            .wait_for_node_work_units_at_least("out", 1, Duration::from_secs(5))
+            .expect("Output did not process expected work");
+        harness
+            .wait_for_node_work_units_at_least("drop", 1, Duration::from_secs(5))
+            .expect("Drop did not receive/process expected packet");
+
+        harness
+            .wait_for_network_stopped(Duration::from_secs(20))
+            .expect("network did not auto-shutdown after pipeline drained");
+        assert!(
+            !harness.is_running(),
+            "runtime still reports network as running after auto-shutdown"
+        );
+
+        fs::remove_file(&file_path).expect("failed to remove FileReader test input file");
     }

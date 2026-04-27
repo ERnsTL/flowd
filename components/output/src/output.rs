@@ -1,9 +1,19 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
-    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, FbpValue, GraphInportOutportHandle,
+    NodeContext, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
 use log::{debug, info, trace, warn};
+
+fn message_as_utf8(message: &FbpMessage) -> Option<&str> {
+    match message {
+        FbpMessage::Text(text) => Some(text),
+        FbpMessage::Bytes(bytes) => std::str::from_utf8(bytes).ok(),
+        FbpMessage::Value(FbpValue::Text(text)) => Some(text),
+        FbpMessage::Value(FbpValue::Bytes(bytes)) => std::str::from_utf8(bytes).ok(),
+        _ => None,
+    }
+}
 
 pub struct OutputComponent {
     inn: ProcessEdgeSource,
@@ -51,9 +61,7 @@ impl Component for OutputComponent {
 
         // check signals
         if let Ok(signal) = self.signals_in.try_recv() {
-            let signal_text = signal.as_text()
-                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                .unwrap_or("");
+            let signal_text = message_as_utf8(&signal).unwrap_or("");
             trace!("received signal: {}", signal_text);
             // stop signal
             if signal_text == "stop" {
@@ -90,9 +98,7 @@ impl Component for OutputComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                let sig_text = sig.as_text()
-                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                    .unwrap_or("");
+                let sig_text = message_as_utf8(&sig).unwrap_or("");
                 trace!("received signal: {}", sig_text);
                 if sig_text == "stop" {
                     info!("got stop signal while processing, finishing");
@@ -105,14 +111,18 @@ impl Component for OutputComponent {
             }
 
             if let Ok(ip) = self.inn.pop() {
-                // output the packet data with newline
-                debug!("got a packet, printing:");
-                let text = ip.as_text().expect("non text data");
-                println!("{}", text);
+                debug!("got a packet");
+                if let Some(text) = message_as_utf8(&ip) {
+                    println!("{}", text);
+                } else if matches!(ip, FbpMessage::Bytes(_)) {
+                    info!("received binary packet, not printing");
+                } else {
+                    warn!("received unexpected message type: {:?}", ip);
+                }
 
                 // repeat - handle backpressure
                 debug!("repeating packet...");
-                match self.out.push(ip.clone()) {
+                match self.out.push(ip) {
                     Ok(()) => {
                         work_units += 1;
                         context.remaining_budget -= 1;
@@ -122,7 +132,7 @@ impl Component for OutputComponent {
                         // Output buffer full, buffer internally for later retry
                         debug!("output buffer full, buffering packet internally");
                         self.pending_packets.push_back(returned_ip);
-                        work_units += 1; // We did process the packet (printed it), just couldn't forward
+                        work_units += 1; // We did process the packet, just couldn't forward
                         context.remaining_budget -= 1;
                         // Continue processing more packets that might fit
                     }
@@ -132,15 +142,14 @@ impl Component for OutputComponent {
             }
         }
 
-        // are we done?
-        if self.inn.is_abandoned() {
-            info!("EOF on inport, finishing");
-            return ProcessResult::Finished;
-        }
-
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            // are we done?
+            if self.inn.is_abandoned() {
+                info!("EOF on inport, finishing");
+                return ProcessResult::Finished;
+            }
             ProcessResult::NoWork
         }
     }

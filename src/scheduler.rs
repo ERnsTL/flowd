@@ -281,6 +281,23 @@ impl Scheduler {
                 *work_units += outcome.work_units;
             }
 
+            if outcome.finished {
+                // Retire finished nodes permanently: they should not be polled again.
+                state.ready_flags.remove(&node_id);
+                state.timer_latest_by_node.remove(&node_id);
+                state.ready_set.remove(&node_id);
+                state.ready_queue.retain(|queued| queued != &node_id);
+                state.metrics.queue_depth = state.ready_queue.len();
+                state.metrics.time_since_last_execution.remove(&node_id);
+
+                // All nodes in this scheduler finished: allow the scheduler thread to exit.
+                if state.nodes.is_empty() && state.components.is_empty() {
+                    self.running.store(false, Ordering::Release);
+                    self.condvar.notify_all();
+                }
+                continue;
+            }
+
             let ready_flag = context.is_ready();
             if let Some(when) = context.take_wake_at() {
                 state.timer_latest_by_node.insert(node_id.clone(), when);

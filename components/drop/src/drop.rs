@@ -87,15 +87,14 @@ impl Component for DropComponent {
             }
         }
 
-        // are we done?
-        if self.inn.is_abandoned() {
-            info!("EOF on inport, finishing");
-            return ProcessResult::Finished;
-        }
-
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            // are we done?
+            if self.inn.is_abandoned() {
+                info!("EOF on inport, finishing");
+                return ProcessResult::Finished;
+            }
             ProcessResult::NoWork
         }
     }

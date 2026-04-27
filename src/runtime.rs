@@ -1603,7 +1603,48 @@ impl Runtime {
                         watchdog_threadandsignal.remove(&name);
                     }
                 }
-                if ok {
+                let all_schedulers_exited = if watchdog_threadandsignal.is_empty() {
+                    match watchdog_runtime.try_read() {
+                        Ok(runtime_read) => {
+                            !runtime_read.scheduler_threads.is_empty()
+                                && runtime_read
+                                    .scheduler_threads
+                                    .values()
+                                    .all(|scheduler_thread| scheduler_thread.is_finished())
+                        }
+                        Err(std::sync::TryLockError::WouldBlock) => false,
+                        Err(std::sync::TryLockError::Poisoned(_)) => {
+                            warn!("watchdog: runtime lock poisoned while checking scheduler completion");
+                            false
+                        }
+                    }
+                } else {
+                    false
+                };
+
+                if all_schedulers_exited {
+                    info!("process health check: all scheduler threads exited, shutting down network");
+                    let stop_err = match watchdog_runtime.try_write() {
+                        Ok(mut runtime_write) => runtime_write.stop(watchdog_graph_inout.clone(), true).err(),
+                        Err(std::sync::TryLockError::WouldBlock) => {
+                            info!("watchdog: runtime lock busy during scheduler-exited shutdown; external stop is likely in progress, exiting watchdog loop");
+                            break;
+                        }
+                        Err(std::sync::TryLockError::Poisoned(_)) => {
+                            warn!("watchdog: runtime lock poisoned during scheduler-exited shutdown");
+                            break;
+                        }
+                    };
+                    if let Some(err) = stop_err {
+                        warn!("watchdog: runtime.stop() returned error: {}", err);
+                    }
+                    let stopped_packet = {
+                        let runtime_read = watchdog_runtime.read().expect("watchdog failed to acquire lock for runtime");
+                        NetworkStoppedResponse::new(&runtime_read.status_snapshot())
+                    };
+                    send_network_stopped(&watchdog_graph_inout, &stopped_packet);
+                    break;
+                } else if ok {
                     debug!("process health check OK");
                 } else if watchdog_threadandsignal.is_empty() {
                     // network has effectively shut down

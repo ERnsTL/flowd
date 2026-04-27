@@ -204,6 +204,83 @@
             let mut outputs = self.collected_outputs.lock().expect("lock poisoned");
             outputs.clear();
         }
+
+        /// Return whether the runtime currently reports an active running network.
+        pub fn is_running(&self) -> bool {
+            self.runtime.read().expect("lock poisoned").status.running
+        }
+
+        /// Wait until the runtime reports network shutdown (`running == false`).
+        pub fn wait_for_network_stopped(
+            &self,
+            timeout: Duration,
+        ) -> std::result::Result<(), std::io::Error> {
+            let started = Instant::now();
+            while started.elapsed() < timeout {
+                if !self.is_running() {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out waiting for network auto-shutdown",
+            ))
+        }
+
+        /// Return cumulative scheduler work units for a node in the active graph.
+        pub fn node_work_units(&self, node_id: &str) -> Option<u64> {
+            let snapshot = self.runtime.read().expect("lock poisoned").status_snapshot();
+            snapshot
+                .scheduler_metrics
+                .get(&snapshot.graph)
+                .and_then(|m| m.work_units_per_node.get(node_id).copied())
+                .or_else(|| {
+                    snapshot
+                        .scheduler_metrics
+                        .values()
+                        .find_map(|m| m.work_units_per_node.get(node_id).copied())
+                })
+        }
+
+        /// Wait until a node has processed at least `min_units` of work.
+        pub fn wait_for_node_work_units_at_least(
+            &self,
+            node_id: &str,
+            min_units: u64,
+            timeout: Duration,
+        ) -> std::result::Result<(), std::io::Error> {
+            let started = Instant::now();
+            while started.elapsed() < timeout {
+                if self.node_work_units(node_id).unwrap_or(0) >= min_units {
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!(
+                    "timed out waiting for node '{}' to process at least {} work units; observed {:?}",
+                    node_id,
+                    min_units,
+                    self.all_node_work_units()
+                ),
+            ))
+        }
+
+        pub fn all_node_work_units(&self) -> Vec<(String, u64)> {
+            let snapshot = self.runtime.read().expect("lock poisoned").status_snapshot();
+            snapshot
+                .scheduler_metrics
+                .values()
+                .flat_map(|m| {
+                    m.work_units_per_node
+                        .iter()
+                        .map(|(k, v)| (k.clone(), *v))
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        }
     }
 
     fn load_graph_from_persistence_path(

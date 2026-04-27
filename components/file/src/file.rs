@@ -1,6 +1,6 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
-    ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, FbpValue, GraphInportOutportHandle,
+    NodeContext, ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, PROCESSEDGE_BUFSIZE,
 };
 use log::{debug, info, trace, warn};
@@ -13,6 +13,16 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use std::sync::mpsc;
 
+fn message_as_utf8(message: &FbpMessage) -> Option<&str> {
+    match message {
+        FbpMessage::Text(text) => Some(text),
+        FbpMessage::Bytes(bytes) => std::str::from_utf8(bytes).ok(),
+        FbpMessage::Value(FbpValue::Text(text)) => Some(text),
+        FbpMessage::Value(FbpValue::Bytes(bytes)) => std::str::from_utf8(bytes).ok(),
+        _ => None,
+    }
+}
+
 pub struct FileReaderComponent {
     conf: ProcessEdgeSource,
     out: ProcessEdgeSink,
@@ -24,6 +34,7 @@ pub struct FileReaderComponent {
     pending_files: std::collections::VecDeque<FbpMessage>, // files to send, buffered for backpressure
     pending_read: Option<mpsc::Receiver<Result<Vec<u8>, std::io::Error>>>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+    finished: bool,
 }
 
 impl Component for FileReaderComponent {
@@ -56,19 +67,23 @@ impl Component for FileReaderComponent {
             pending_files: std::collections::VecDeque::new(),
             pending_read: None,
             scheduler_waker,
+            finished: false,
         }
     }
 
     fn process(&mut self, context: &mut NodeContext) -> ProcessResult {
+        if self.finished {
+            return ProcessResult::Finished;
+        }
         debug!("FileReader is now process()ing!");
         let mut work_units = 0u32;
 
-        // Read configuration filenames if we haven't buffered them all yet
-        while self.filenames.is_empty() && !self.conf.is_abandoned() {
+        // Read configuration filenames if we haven't buffered them all yet.
+        // NOTE: IIP channels are intentionally abandoned right after enqueueing data,
+        // so we must still try to pop even when `is_abandoned()` is true.
+        while self.filenames.is_empty() {
             if let Ok(filename) = self.conf.pop() {
-                let filename_str = filename.as_text()
-                    .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                    .unwrap_or("");
+                let filename_str = message_as_utf8(&filename).unwrap_or("");
                 trace!("got filename: {}", filename_str);
                 self.filenames.push_back(filename);
             } else {
@@ -78,9 +93,7 @@ impl Component for FileReaderComponent {
 
         // check signals
         if let Ok(signal) = self.signals_in.try_recv() {
-            let signal_text = signal.as_text()
-                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                .unwrap_or("");
+            let signal_text = message_as_utf8(&signal).unwrap_or("");
             trace!("received signal: {}", signal_text);
             // stop signal
             if signal_text == "stop" {
@@ -116,10 +129,7 @@ impl Component for FileReaderComponent {
         // Start one asynchronous file read when idle.
         if self.pending_read.is_none() && !self.filenames.is_empty() {
             if let Some(filename) = self.filenames.front() {
-                let file_path = filename.as_text()
-                    .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                    .unwrap_or("")
-                    .to_owned();
+                let file_path = message_as_utf8(filename).unwrap_or("").to_owned();
                 debug!("starting async read for {}", file_path);
                 let (tx, rx) = mpsc::channel();
                 let scheduler_waker = self.scheduler_waker.clone();
@@ -139,7 +149,10 @@ impl Component for FileReaderComponent {
             if let Some(rx) = &self.pending_read {
                 match rx.try_recv() {
                     Ok(Ok(contents)) => {
-                        let content_msg = FbpMessage::from_bytes(contents);
+                        let content_msg = match std::str::from_utf8(&contents) {
+                            Ok(text) => FbpMessage::from_str(text),
+                            Err(_) => FbpMessage::from_bytes(contents),
+                        };
                         match self.out.push(content_msg) {
                             Ok(()) => {}
                             Err(PushError::Full(returned_content)) => {
@@ -153,9 +166,7 @@ impl Component for FileReaderComponent {
                     }
                     Ok(Err(e)) => {
                         if let Some(filename) = self.filenames.front() {
-                            let filename_str = filename.as_text()
-                                .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
-                                .unwrap_or("<invalid utf-8>");
+                            let filename_str = message_as_utf8(filename).unwrap_or("<invalid utf-8>");
                             warn!("failed to read file {}: {}", filename_str, e);
                         }
                         self.pending_read = None;
@@ -171,19 +182,19 @@ impl Component for FileReaderComponent {
             }
         }
 
-        // are we done?
-        if self.filenames.is_empty()
-            && self.conf.is_abandoned()
-            && self.pending_files.is_empty()
-            && self.pending_read.is_none()
-        {
-            info!("EOF on inport NAMES and all files processed, finishing");
-            return ProcessResult::Finished;
-        }
-
         if work_units > 0 {
             ProcessResult::DidWork(work_units)
         } else {
+            // are we done?
+            if self.filenames.is_empty()
+                && self.conf.is_abandoned()
+                && self.pending_files.is_empty()
+                && self.pending_read.is_none()
+            {
+                self.finished = true;
+                info!("EOF on inport NAMES and all files processed, finishing");
+                return ProcessResult::Finished;
+            }
             context.wake_at(
                 std::time::Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
             );
