@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
     wake_scheduler,
@@ -18,7 +18,7 @@ enum UnixSocketClientState {
     Connecting,
     Connected {
         client: uds::UnixSeqpacketConn,
-        pending_messages: Vec<Vec<u8>>,
+        pending_messages: Vec<FbpMessage>,
     },
     Finished,
 }
@@ -32,7 +32,7 @@ pub struct UnixSocketClientComponent {
     state: UnixSocketClientState,
     scheduler_waker: Option<SchedulerWaker>,
     read_timeout: Duration,
-    pending_outbound: std::collections::VecDeque<Vec<u8>>,
+    pending_outbound: std::collections::VecDeque<FbpMessage>,
     // ADR-017: Bounded IO channels
     cmd_tx: std::sync::mpsc::SyncSender<(UnixSocketAddr, SocketType)>,
     result_rx: std::sync::mpsc::Receiver<Result<uds::UnixSeqpacketConn, std::io::Error>>,
@@ -167,23 +167,21 @@ impl Component for UnixSocketClientComponent {
         debug!("UnixSocketClient is now process()ing!");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = UnixSocketClientState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -222,8 +220,10 @@ impl Component for UnixSocketClientComponent {
         match current_state {
             UnixSocketClientState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(url_vec) = self.conf.pop() {
-                    let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
+                if let Ok(url_msg) = self.conf.pop() {
+                    let url_str = url_msg.as_text()
+                        .or_else(|| url_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .unwrap_or("");
                     debug!("got config URL: {}", url_str);
 
                     // Parse configuration URL
@@ -458,8 +458,8 @@ pub struct UnixSocketServerComponent {
     connections: std::collections::HashMap<u32, std::os::unix::net::UnixStream>,
     next_client_id: u32,
     read_buffer: [u8; DEFAULT_READ_BUFFER_SIZE],
-    pending_outbound: std::collections::VecDeque<Vec<u8>>,
-    pending_responses: std::collections::HashMap<u32, Vec<u8>>,
+    pending_outbound: std::collections::VecDeque<FbpMessage>,
+    pending_responses: std::collections::HashMap<u32, FbpMessage>,
 }
 
 impl Component for UnixSocketServerComponent {
@@ -510,9 +510,10 @@ impl Component for UnixSocketServerComponent {
         // Initialize listener if not already done
         if self.listener.is_none() {
             // Try to read configuration
-            if let Ok(config_bytes) = self.conf.pop() {
-                let listen_path = std::str::from_utf8(&config_bytes)
-                    .expect("could not parse listen path as utf8")
+            if let Ok(config_msg) = self.conf.pop() {
+                let listen_path = config_msg.as_text()
+                    .or_else(|| config_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("")
                     .to_owned();
 
                 // Remove existing socket file if it exists
@@ -542,30 +543,28 @@ impl Component for UnixSocketServerComponent {
         }
 
         // Check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
+                warn!("received unknown signal: {}", signal_text);
             }
         }
 
         // Accept new connections within budget
         while context.remaining_budget > 0 && !self.pending_outbound.is_empty() {
             if let Some(data) = self.pending_outbound.front() {
-                match self.out.push(data.clone()) {
+                        match self.out.push(data.clone()) {
                     Ok(()) => {
                         let _ = self.pending_outbound.pop_front();
                         work_units += 1;
@@ -626,7 +625,7 @@ impl Component for UnixSocketServerComponent {
                         let framed_data =
                             format!("{}:{}", client_id, String::from_utf8_lossy(&data))
                                 .into_bytes();
-                        match self.out.push(framed_data) {
+                        match self.out.push(framed_data.into()) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
@@ -665,15 +664,16 @@ impl Component for UnixSocketServerComponent {
 
         // Send responses within remaining budget
         if context.remaining_budget > 0 {
-            if let Ok(response_data) = self.resp.pop() {
+            if let Ok(response_msg) = self.resp.pop() {
                 debug!("got response packet, parsing client ID and routing...");
 
                 // Parse client ID from framed response data: "CLIENT_ID:response_data"
-                let response_str = String::from_utf8_lossy(&response_data);
+                let response_data = response_msg.as_bytes().unwrap_or(&[]);
+                let response_str = String::from_utf8_lossy(response_data);
                 if let Some(colon_pos) = response_str.find(':') {
                     let client_id_str = &response_str[..colon_pos];
                     if let Ok(target_client_id) = client_id_str.parse::<u32>() {
-                        let actual_response = &response_data[colon_pos + 1..];
+                        let actual_response = response_data.get(colon_pos + 1..).unwrap_or(&[]);
 
                         // Find and send to the specific client
                         if let Some(socket) = self.connections.get_mut(&target_client_id) {
@@ -689,7 +689,7 @@ impl Component for UnixSocketServerComponent {
                                 Err(err) => {
                                     if err.kind() == ErrorKind::WouldBlock {
                                         self.pending_responses
-                                            .insert(target_client_id, actual_response.to_vec());
+                                            .insert(target_client_id, actual_response.to_vec().into());
                                     } else {
                                         warn!("failed to write response to client {}: {}, dropping client", target_client_id, err);
                                         connections_to_remove.push(target_client_id);
@@ -720,7 +720,8 @@ impl Component for UnixSocketServerComponent {
                 break;
             }
             if let Some(socket) = self.connections.get_mut(client_id) {
-                match socket.write_all(response_data) {
+                let response_bytes = response_data.as_bytes().unwrap_or(&[]);
+                match socket.write_all(response_bytes) {
                     Ok(_) => {
                         responses_to_remove.push(*client_id);
                         work_units += 1;

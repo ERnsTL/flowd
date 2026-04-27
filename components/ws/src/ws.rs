@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource, SchedulerWaker, create_io_channels,
     wake_scheduler, ErrorType, RetryConfig, RetryState,
@@ -25,7 +25,7 @@ enum WSClientState {
     },
     Connected {
         client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
-        pending_messages: Vec<Vec<u8>>,
+        pending_messages: Vec<FbpMessage>,
     },
     Finished,
 }
@@ -38,7 +38,7 @@ pub struct WSClientComponent {
     signals_out: ProcessSignalSink,
     state: WSClientState,
     scheduler_waker: Option<SchedulerWaker>,
-    pending_received: std::collections::VecDeque<Vec<u8>>,
+    pending_received: std::collections::VecDeque<FbpMessage>,
     // ADR-017: Bounded IO channels
     cmd_tx: std::sync::mpsc::SyncSender<String>,
     result_rx: std::sync::mpsc::Receiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>,
@@ -184,23 +184,21 @@ impl Component for WSClientComponent {
         debug!("WSClient process() called, state: {:?}", self.state);
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = WSClientState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -263,16 +261,18 @@ impl Component for WSClientComponent {
         match current_state {
             WSClientState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(url_vec) = self.conf.pop() {
-                    let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
+                if let Ok(url_msg) = self.conf.pop() {
+                    let url_str = url_msg.as_text()
+                        .or_else(|| url_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .expect("invalid utf-8");
                     debug!("got config URL: {}", url_str);
 
                     // ADR-017: Send to background async worker via bounded channel
-                    match self.cmd_tx.try_send(url_str.clone()) {
+                    match self.cmd_tx.try_send(url_str.to_string()) {
                         Ok(()) => {
                             debug!("WebSocket connection request enqueued to async worker");
                             self.state = WSClientState::Connecting {
-                                url: url_str,
+                                url: url_str.to_string(),
                             };
                             return ProcessResult::DidWork(1);
                         }
@@ -538,7 +538,7 @@ pub struct WSServerComponent {
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
     state: WSServerState,
-    pending_outbound: std::collections::VecDeque<Vec<u8>>,
+    pending_outbound: std::collections::VecDeque<FbpMessage>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -582,31 +582,31 @@ impl Component for WSServerComponent {
         debug!("WSServer process() called, state: {:?}", self.state);
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = WSServerState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         match &mut self.state {
             WSServerState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(config_vec) = self.conf.pop() {
-                    let listen_addr = std::str::from_utf8(&config_vec).expect("invalid utf-8");
+                if let Ok(config_msg) = self.conf.pop() {
+                    let listen_addr = config_msg.as_text()
+                        .or_else(|| config_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .expect("invalid utf-8");
                     debug!("got listen address: {}", listen_addr);
 
                     let listener = TcpListener::bind(listen_addr)
@@ -709,13 +709,14 @@ impl Component for WSServerComponent {
                     match websocket.read() {
                         Ok(message) => {
                             debug!("got message from connection {}, pushing to OUT", conn_id);
-                            match self.out.push(message.into_data()) {
+                            let msg_data = FbpMessage::from_bytes(message.into_data());
+                            match self.out.push(msg_data) {
                                 Ok(()) => {
                                     work_units += 1;
                                     context.remaining_budget -= 1;
                                 }
-                                Err(PushError::Full(returned)) => {
-                                    self.pending_outbound.push_back(returned);
+                                Err(PushError::Full(returned_msg)) => {
+                                    self.pending_outbound.push_back(returned_msg);
                                     break;
                                 }
                             }
@@ -751,7 +752,8 @@ impl Component for WSServerComponent {
 
                         // Send to first available connection
                         if let Some((_, websocket)) = connections.iter_mut().next() {
-                            if let Err(err) = websocket.write(Message::Binary(ip)) {
+                            let msg_bytes = ip.as_bytes().unwrap_or(&[]);
+                            if let Err(err) = websocket.write(Message::Binary(msg_bytes.to_vec())) {
                                 error!("failed to write to WebSocket: {}", err);
                                 // Connection might be broken, but we'll handle it on next read
                             } else if let Err(err) = websocket.flush() {

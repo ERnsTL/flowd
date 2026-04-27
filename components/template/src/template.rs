@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -59,22 +59,20 @@ impl Component for TeraTemplateComponent {
         debug!("TeraTemplate process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -82,7 +80,7 @@ impl Component for TeraTemplateComponent {
         if self.template.is_none() {
             if let Ok(template_data) = self.conf.pop() {
                 debug!("received template");
-                let template_str = unsafe { std::str::from_utf8_unchecked(&template_data) };
+                let template_str = template_data.as_text().expect("template must be text");
 
                 // Configure
                 let mut tera = Tera::default();
@@ -113,10 +111,8 @@ impl Component for TeraTemplateComponent {
 
                 // Prepare the context with some data
                 let mut template_context = tera::Context::new();
-                unsafe {
-                    let ip_str = std::str::from_utf8_unchecked(&ip);
-                    template_context.insert("ip", &ip_str);
-                }
+                let ip_str = ip.as_text().expect("input must be text");
+                template_context.insert("ip", &ip_str);
 
                 // Render the template with the given context
                 match tera.render("a", &template_context) {
@@ -125,7 +121,8 @@ impl Component for TeraTemplateComponent {
 
                         // Send result to out port
                         debug!("sending...");
-                        if let Ok(()) = self.out.push(rendered.trim().as_bytes().to_vec()) {
+                        let msg = FbpMessage::from_bytes(rendered.trim().as_bytes().to_vec());
+                        if let Ok(()) = self.out.push(msg) {
                             debug!("done");
                             work_units += 1;
                             context.remaining_budget -= 1;

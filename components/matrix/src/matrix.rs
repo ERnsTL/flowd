@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
@@ -379,25 +379,23 @@ impl Component for MatrixClientComponent {
         let mut work_units = 0u32;
 
         // Check signals first (signals are handled regardless of budget)
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, shutting down and finishing");
                 // Send shutdown command to async thread
                 let _ = self.cmd_sender.send(MatrixClientCommand::Shutdown);
                 self.state = MatrixClientState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -409,8 +407,7 @@ impl Component for MatrixClientComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str =
-                        std::str::from_utf8(&conf_vec).expect("failed to parse token as utf-8");
+                    let url_str = conf_vec.as_text().expect("failed to parse token as text");
                     let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
 
                     let homeserver = url
@@ -472,7 +469,8 @@ impl Component for MatrixClientComponent {
                             }
                             MatrixClientResult::MessageReceived(msg_bytes) => {
                                 debug!("Received message from Matrix, forwarding to output");
-                                if let Err(_) = self.out.push(msg_bytes) {
+                                let msg_fbp = FbpMessage::from_bytes(msg_bytes);
+                                if let Err(_) = self.out.push(msg_fbp) {
                                     error!("Failed to send message to output");
                                     return ProcessResult::Finished;
                                 }
@@ -495,12 +493,13 @@ impl Component for MatrixClientComponent {
 
                 // Check for outgoing messages to send within remaining budget
                 if context.remaining_budget > 0 {
-                    if let Ok(msg_bytes) = self.inn.pop() {
+                    if let Ok(msg_fbp) = self.inn.pop() {
                         debug!("Received message to send to Matrix");
+                        let msg_bytes = msg_fbp.as_bytes().unwrap_or(&[]);
                         // Send message command to async thread
                         if let Err(_) = self
                             .cmd_sender
-                            .send(MatrixClientCommand::SendMessage(msg_bytes))
+                            .send(MatrixClientCommand::SendMessage(msg_bytes.to_vec()))
                         {
                             error!("Failed to send message command");
                             return ProcessResult::Finished;

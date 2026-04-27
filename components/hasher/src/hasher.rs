@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -58,18 +58,19 @@ impl Component for HasherComponent {
         let mut hasher = hasher_factory.build_hasher();
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             }
         }
 
@@ -77,9 +78,10 @@ impl Component for HasherComponent {
         while context.remaining_budget > 0 {
             if let Ok(ip) = self.inn.pop() {
                 debug!("hashing packet...");
-                hasher.write(&ip);
+                let bytes = ip.as_bytes().unwrap_or(&[]);
+                hasher.write(bytes);
                 let hash_value = hasher.finish();
-                let outip = format!("{:016x}", hash_value).into_bytes();
+                let outip = FbpMessage::from_str(&format!("{:016x}", hash_value));
 
                 match self.out.push(outip) {
                     Ok(_) => {

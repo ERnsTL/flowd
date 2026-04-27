@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
     SchedulerWaker, wake_scheduler, ErrorType, RetryConfig, RetryState,
@@ -27,7 +27,7 @@ enum MQTTPublisherState {
         client: rumqttc::Client,
         connection: rumqttc::Connection,
         topic: String,
-        pending_messages: Vec<Vec<u8>>,
+        pending_messages: Vec<FbpMessage>,
     },
     Finished,
 }
@@ -148,23 +148,21 @@ impl Component for MQTTPublisherComponent {
         debug!("MQTTPublisher process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = MQTTPublisherState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -232,8 +230,8 @@ impl Component for MQTTPublisherComponent {
         match current_state {
             MQTTPublisherState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(url_vec) = self.conf.pop() {
-                    let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
+                if let Ok(url_msg) = self.conf.pop() {
+                    let url_str = url_msg.as_text().expect("invalid text");
                     debug!("got config URL: {}", url_str);
 
                     // Get topic from URL
@@ -248,11 +246,11 @@ impl Component for MQTTPublisherComponent {
                     debug!("topic: {}", topic);
 
                     // ADR-017: Send to background async worker via bounded channel
-                    match self.cmd_tx.try_send((url_str.clone(), topic.to_string())) {
+                    match self.cmd_tx.try_send((url_str.to_string(), topic.to_string())) {
                         Ok(()) => {
                             debug!("MQTT connection request enqueued to async worker");
                             self.state = MQTTPublisherState::Connecting {
-                                url: url_str,
+                                url: url_str.to_string(),
                                 topic: topic.to_string(),
                             };
                             return ProcessResult::DidWork(1);
@@ -492,23 +490,21 @@ impl Component for MQTTSubscriberComponent {
         debug!("MQTTSubscriber process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = MQTTSubscriberState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -570,8 +566,8 @@ impl Component for MQTTSubscriberComponent {
         match current_state {
             MQTTSubscriberState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(url_vec) = self.conf.pop() {
-                    let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
+                if let Ok(url_msg) = self.conf.pop() {
+                    let url_str = url_msg.as_text().expect("invalid text");
                     debug!("got config URL: {}", url_str);
 
                     // Get topic from URL
@@ -587,12 +583,12 @@ impl Component for MQTTSubscriberComponent {
 
                     // Start async connection
                     let (result_tx, result_rx) = tokio_mpsc::unbounded_channel();
-                    let url_clone = url_str.clone();
+                    let url_clone = url_str.to_string();
 
                     tokio::spawn(async move {
                         // Parse and connect to MQTT server (in async task to avoid blocking)
                         match std::panic::catch_unwind(|| {
-                            let mut mqttoptions = MqttOptions::parse_url(&url_clone).expect("failed to parse MQTT URL");
+                            let mut mqttoptions = MqttOptions::parse_url(url_clone).expect("failed to parse MQTT URL");
                             mqttoptions.set_keep_alive(Duration::from_secs(5));
                             Client::new(mqttoptions, 10)
                         }) {
@@ -606,7 +602,7 @@ impl Component for MQTTSubscriberComponent {
                     });
 
                     self.state = MQTTSubscriberState::Connecting {
-                        url: url_str,
+                        url: url_str.to_string(),
                         topic: topic.to_string(),
                         result_rx,
                     };
@@ -637,7 +633,8 @@ impl Component for MQTTSubscriberComponent {
                     Ok(Ok(message_data)) => {
                         // Received a message
                         debug!("Received message from MQTT topic '{}'", topic);
-                        if let Ok(()) = self.out.push(message_data) {
+                        let message_msg = FbpMessage::from_bytes(message_data);
+                        if let Ok(()) = self.out.push(message_msg) {
                             return ProcessResult::DidWork(1);
                         }
                         // Output buffer full, will try again next time

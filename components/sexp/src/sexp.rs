@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -107,22 +107,20 @@ impl Component for SexpComponent {
         let mut work_units = 0u32;
 
         // Check signals first (signals are handled regardless of budget)
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -130,7 +128,9 @@ impl Component for SexpComponent {
         while context.remaining_budget > 0 {
             if let Ok(ip) = self.inn.pop() {
                 // read packet - expecting UTF-8 string
-                let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
+                let mut text = ip.as_text()
+                    .or_else(|| ip.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
                 debug!("got a text to trim: {}", &text);
 
                 // trim string
@@ -140,7 +140,8 @@ impl Component for SexpComponent {
 
                 // send it
                 debug!("forwarding trimmed string...");
-                if let Err(_) = self.out.push(Vec::from(text)) {
+                let output_msg = FbpMessage::from_str(&text);
+                if let Err(_) = self.out.push(output_msg) {
                     error!("Failed to send trimmed string to output");
                     return ProcessResult::Finished;
                 }

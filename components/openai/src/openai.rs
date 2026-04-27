@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
@@ -31,7 +31,7 @@ struct OpenAIConfig {
 enum OpenAICommand {
     SetConfig(OpenAIConfig),  // set configuration
     SetInitialPrompt(String), // set initial system prompt
-    ChatCompletion(Vec<u8>),  // user message bytes
+    ChatCompletion(flowd_component_api::FbpMessage),  // user message
 }
 
 #[derive(Debug)]
@@ -88,15 +88,14 @@ async fn async_openai_main(
             }
             OpenAICommand::ChatCompletion(msg_bytes) => {
                 if let Some(ref cfg) = config {
-                    let user_message_content =
-                        String::from_utf8(msg_bytes).expect("invalid utf-8 in message");
+                    let user_message_content = msg_bytes.as_text().expect("invalid text in message");
 
                     // Prepare messages for this request
                     let request_messages = if cfg.context {
                         // Add user message to context
                         messages.push(ChatCompletionMessage {
                             role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content),
+                            content: Some(user_message_content.to_string()),
                             name: None,
                             function_call: None,
                             tool_call_id: None,
@@ -107,7 +106,7 @@ async fn async_openai_main(
                         // Single-turn conversation
                         vec![ChatCompletionMessage {
                             role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content),
+                            content: Some(user_message_content.to_string()),
                             name: None,
                             function_call: None,
                             tool_call_id: None,
@@ -237,23 +236,21 @@ impl Component for OpenAIChatComponent {
         let mut work_units = 0u32;
 
         // Check signals first (signals are handled regardless of budget)
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, shutting down and finishing");
                 self.state = OpenAIChatState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -265,7 +262,7 @@ impl Component for OpenAIChatComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                    let url_str = conf_vec.as_text().expect("invalid text");
                     let url = url::Url::parse(url_str).expect("failed to parse configuration URL");
 
                     // Get API key
@@ -340,14 +337,13 @@ impl Component for OpenAIChatComponent {
             }
             OpenAIChatState::WaitingForInitialPrompt => {
                 // Check if we have initial prompt on IN port
-                if let Ok(prompt_bytes) = self.inn.pop() {
-                    let prompt_str =
-                        String::from_utf8(prompt_bytes).expect("invalid utf-8 in initial prompt");
+                if let Ok(prompt_msg) = self.inn.pop() {
+                    let prompt_str = prompt_msg.as_text().expect("invalid text in initial prompt");
 
                     // Send initial prompt to async thread
                     if let Err(_) = self
                         .cmd_sender
-                        .send(OpenAICommand::SetInitialPrompt(prompt_str))
+                        .send(OpenAICommand::SetInitialPrompt(prompt_str.to_string()))
                     {
                         error!("Failed to send initial prompt command");
                         return ProcessResult::Finished;
@@ -373,7 +369,8 @@ impl Component for OpenAIChatComponent {
                         match result {
                             OpenAIResult::ChatResponse(response) => {
                                 debug!("Received AI response, forwarding to output");
-                                if let Err(_) = self.out.push(response.as_bytes().to_vec()) {
+                                let response_msg = FbpMessage::from_bytes(response.as_bytes().to_vec());
+                                if let Err(_) = self.out.push(response_msg) {
                                     error!("Failed to send response to output");
                                     return ProcessResult::Finished;
                                 }

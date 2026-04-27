@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -26,7 +26,7 @@ enum AppendState {
 #[derive(Debug)]
 enum AppendCommand {
     Connect(String),
-    Append(Vec<u8>),
+    Append(FbpMessage),
     Shutdown,
 }
 
@@ -47,7 +47,7 @@ pub struct IMAPAppendComponent {
     cmd_tx: Sender<AppendCommand>,
     result_rx: Receiver<AppendResult>,
     worker_handle: Option<JoinHandle<()>>,
-    pending_input: VecDeque<Vec<u8>>,
+    pending_input: VecDeque<FbpMessage>,
     inflight_appends: usize,
 }
 
@@ -95,18 +95,19 @@ impl Component for IMAPAppendComponent {
         debug!("IMAPAppend process() called, state: {:?}", self.state);
         let mut work_units = 0u32;
 
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 let _ = self.cmd_tx.send(AppendCommand::Shutdown);
                 self.state = AppendState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else if signal_text == "ping" {
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             }
         }
 
@@ -135,9 +136,7 @@ impl Component for IMAPAppendComponent {
         match self.state {
             AppendState::WaitingForConfig => {
                 if let Ok(url_vec) = self.conf.pop() {
-                    let url = std::str::from_utf8(&url_vec)
-                        .expect("invalid utf-8")
-                        .to_owned();
+                    let url = url_vec.as_text().expect("invalid text").to_owned();
                     if self.cmd_tx.send(AppendCommand::Connect(url)).is_err() {
                         self.state = AppendState::Finished;
                         return ProcessResult::Finished;
@@ -321,18 +320,19 @@ impl Component for IMAPFetchIdleComponent {
         debug!("IMAPFetchIdle process() called, state: {:?}", self.state);
         let mut work_units = 0u32;
 
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 let _ = self.cmd_tx.send(FetchCommand::Shutdown);
                 self.state = FetchState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+            } else if signal_text == "ping" {
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             }
         }
 
@@ -370,7 +370,8 @@ impl Component for IMAPFetchIdleComponent {
             let Some(msg) = self.pending_messages.front().cloned() else {
                 break;
             };
-            match self.out.push(msg) {
+            let msg_fbp = FbpMessage::from_bytes(msg);
+            match self.out.push(msg_fbp) {
                 Ok(()) => {
                     self.pending_messages.pop_front();
                     context.remaining_budget -= 1;
@@ -383,9 +384,7 @@ impl Component for IMAPFetchIdleComponent {
         match self.state {
             FetchState::WaitingForConfig => {
                 if let Ok(url_vec) = self.conf.pop() {
-                    let url = std::str::from_utf8(&url_vec)
-                        .expect("invalid utf-8")
-                        .to_owned();
+                    let url = url_vec.as_text().expect("invalid text").to_owned();
                     if self.cmd_tx.send(FetchCommand::Connect(url)).is_err() {
                         self.state = FetchState::Finished;
                         return ProcessResult::Finished;
@@ -483,7 +482,8 @@ fn append_worker_loop(
             },
             AppendCommand::Append(packet) => {
                 if let Some(sess) = session.as_mut() {
-                    match sess.append(mailbox.as_str(), packet) {
+                    let bytes = packet.as_bytes().unwrap_or(&[]);
+                    match sess.append(mailbox.as_str(), bytes) {
                         Ok(_) => AppendResult::Appended,
                         Err(e) => AppendResult::Error(e.to_string()),
                     }

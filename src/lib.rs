@@ -994,7 +994,7 @@ impl Runtime {
                 //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
                 let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
                 // send IIP
-                sink.push(iip.clone().into_bytes())
+                sink.push(FbpMessage::from_str(&iip.clone()))
                     .expect("failed to send IIP into process channel"); //TODO optimize as_bytes() / clone or String in Edge struct
                                                                         // insert into inports of target process
                 let targetproc = ports_all
@@ -1344,15 +1344,12 @@ impl Runtime {
                             trace!("begin of iteration");
                             // check signals
                             //TODO optimize, there is also try_recv() and recv_timeout()
-                            if let Ok(ip) = signals.try_recv() {
-                                //TODO optimize string conversions
-                                trace!(
-                                    "received signal ip: {}",
-                                    str::from_utf8(&ip).expect("invalid utf-8")
-                                ); //TODO optimize conversion
-                                   // stop signal
-                                if ip == b"stop" {
-                                    //TODO optimize conversion
+                            if let Ok(signal) = signals.try_recv() {
+                                let signal_text = signal.as_text()
+                                    .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                                    .unwrap_or("");
+                                trace!("received signal: {}", signal_text);
+                                if signal_text == "stop" {
                                     info!("got stop signal, exiting");
                                     break;
                                 }
@@ -1476,8 +1473,11 @@ impl Runtime {
             debug!("watchdog is running");
             let mut missed_pongs: HashMap<String, u8> = HashMap::new();
             'watchdog_loop: loop {
-                while let Ok(ip) = watchdog_signalsource2.try_recv() {
-                    if ip == b"stop" {
+                while let Ok(signal) = watchdog_signalsource2.try_recv() {
+                    let signal_text = signal.as_text()
+                        .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .unwrap_or("");
+                    if signal_text == "stop" {
                         debug!("got stop signal, exiting");
                         break 'watchdog_loop;
                     }
@@ -1508,7 +1508,7 @@ impl Runtime {
                         continue;
                     }
                     // send query to process
-                    match proc.0.try_send(b"ping".to_vec()) {
+                    match proc.0.try_send(FbpMessage::from_str("ping")) {
                         Ok(_) => {},
                         Err(std::sync::mpsc::TrySendError::Full(_)) => {
                             warn!("process {} signal channel full", name);
@@ -1536,13 +1536,16 @@ impl Runtime {
                     let mut disconnected = false;
                     while wait_started.elapsed() < core::time::Duration::from_millis(1000) {
                         match proc.3.recv_timeout(WATCHDOG_POLL_DUR) {
-                            Ok(ip) => {
-                                if ip == b"pong" {    //TODO harden - may be a response from some other process -> send a nonce?
+                            Ok(signal) => {
+                                let signal_text = signal.as_text()
+                                    .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                                    .unwrap_or("");
+                                if signal_text == "pong" {    //TODO harden - may be a response from some other process -> send a nonce?
                                     trace!("process {} OK ({}ms)", name, chrono::Utc::now() - now);
                                     debug!("process {} OK", name);
                                     missed_pongs.remove(name);
                                 } else {
-                                    warn!("process {} sent a spurious response: {}", name, str::from_utf8(&ip).expect("got non-utf8 data"));
+                                    warn!("process {} sent a spurious response: {}", name, signal_text);
                                     //TODO one spurious response currently trips up the logic
                                 }
                                 got_pong = true;
@@ -1752,10 +1755,10 @@ impl Runtime {
             info!("stop: signaling {}", name);
             // wake first, then send stop non-blocking to avoid deadlock on full bounded channels
             proc.joinhandle.thread().unpark();
-            let mut pending = b"stop".to_vec();
+            let mut pending = FbpMessage::from_str("stop");
             let mut sent_or_disconnected = false;
             for _ in 0..STOP_SIGNAL_MAX_RETRIES {
-                match proc.signal.try_send(pending) {
+                match proc.signal.try_send(pending.clone()) {
                     Ok(()) => {
                         sent_or_disconnected = true;
                         proc.joinhandle.thread().unpark();
@@ -2066,12 +2069,12 @@ impl Runtime {
             "runtime: got a packet for port {}: {:?}",
             payload.port, payload.payload
         );
-        let mut packet = payload
-            .payload
-            .as_ref()
-            .expect("graph inport runtime:packet is missing payload")
-            .clone()
-            .into_bytes();
+        let mut packet = FbpMessage::from_str(
+            payload
+                .payload
+                .as_ref()
+                .expect("graph inport runtime:packet is missing payload"),
+        );
         let wait_started = Instant::now();
         loop {
             let mut graph_inout_locked = graph_inout.lock().expect("lock poisoned");

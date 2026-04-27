@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
@@ -256,32 +256,30 @@ impl Component for SSHClientComponent {
         debug!("SSHClient process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, disconnecting and finishing");
                 // Send disconnect command to async thread
                 let _ = self.cmd_sender.send(SSHCommand::Disconnect);
                 self.state = SSHState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         // Check if we have CMD configuration
         if self.cmd_config.is_none() {
             if let Ok(cmd_ip) = self.cmd.pop() {
-                let cmd_line = std::str::from_utf8(&cmd_ip).expect("invalid utf-8 in CMD IP");
+                let cmd_line = cmd_ip.as_text().expect("CMD must be text");
                 debug!("received CMD config: {}", cmd_line);
                 self.cmd_config = Some(cmd_line.to_string());
                 return ProcessResult::DidWork(1); // Configuration processed
@@ -304,7 +302,7 @@ impl Component for SSHClientComponent {
                 let mut retry = false;
                 let mut pipe_out: bool = false;
 
-                let conf_words_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                let conf_words_str = conf_vec.as_text().expect("CONF must be text");
                 let conf_words = shell_words::split(conf_words_str)
                     .expect("failed to parse command-line of sub-process");
                 let mut parser = lexopt::Parser::from_args(conf_words);
@@ -482,9 +480,10 @@ impl Component for SSHClientComponent {
                 // Check if we have input to execute
                 if let Ok(input) = self.inn.pop() {
                     if let Some(cmd) = &self.cmd_config {
+                        let input_bytes = input.as_bytes().unwrap_or(&[]).to_vec();
                         if let Err(_) = self.cmd_sender.send(SSHCommand::Execute {
                             command: cmd.clone(),
-                            input,
+                            input: input_bytes,
                         }) {
                             error!("Failed to send execute command");
                             return ProcessResult::Finished;
@@ -505,7 +504,8 @@ impl Component for SSHClientComponent {
                 if let Ok(result) = self.result_receiver.try_recv() {
                     match result {
                         SSHResult::Output(output) => {
-                            if let Err(_) = self.out.push(output) {
+                            let msg_out = FbpMessage::from_bytes(output);
+                            if let Err(_) = self.out.push(msg_out) {
                                 error!("Failed to send output");
                                 return ProcessResult::Finished;
                             }

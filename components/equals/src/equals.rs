@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -14,8 +14,8 @@ pub struct EqualsComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    cmp_value: Option<Vec<u8>>,
-    pending_packets: std::collections::VecDeque<(Vec<u8>, bool)>, // (packet, route_to_true)
+    cmp_value: Option<FbpMessage>,
+    pending_packets: std::collections::VecDeque<(FbpMessage, bool)>, // (packet, route_to_true)
 }
 
 impl Component for EqualsComponent {
@@ -66,10 +66,7 @@ impl Component for EqualsComponent {
         // Read configuration if not yet configured
         if self.cmp_value.is_none() {
             if let Ok(cmp_data) = self.cmp.pop() {
-                trace!(
-                    "got cmp value: {}",
-                    std::str::from_utf8(&cmp_data).expect("invalid utf-8")
-                );
+                trace!("got cmp value");
                 self.cmp_value = Some(cmp_data);
             } else {
                 trace!("no cmp value available yet");
@@ -80,23 +77,21 @@ impl Component for EqualsComponent {
         let cmp_value = self.cmp_value.as_ref().unwrap();
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -128,16 +123,17 @@ impl Component for EqualsComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let sig_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal: {}", sig_text);
+                if sig_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if sig_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let pong_msg = FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 
@@ -180,10 +176,7 @@ impl Component for EqualsComponent {
 
         // Check for new cmp value (runtime updates)
         if let Ok(new_cmp) = self.cmp.pop() {
-            trace!(
-                "got new cmp value: {}",
-                std::str::from_utf8(&new_cmp).expect("invalid utf-8")
-            );
+            trace!("got new cmp value");
             self.cmp_value = Some(new_cmp);
         }
 

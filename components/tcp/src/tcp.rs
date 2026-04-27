@@ -1,6 +1,6 @@
 #![feature(addr_parse_ascii)] // for TCPClientComponent -> SocketAddr::parse_ascii()
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
     wake_scheduler,
@@ -32,7 +32,7 @@ enum ClientState {
         retry_state: RetryState,
     },
     Connected {
-        pending_messages: Vec<Vec<u8>>,
+        pending_messages: Vec<FbpMessage>,
     },
     Finished,
 }
@@ -45,7 +45,7 @@ pub struct TCPClientComponent {
     signals_out: ProcessSignalSink,
     state: ClientState,
     scheduler_waker: Option<SchedulerWaker>,
-    pending_received: std::collections::VecDeque<Vec<u8>>,
+    pending_received: std::collections::VecDeque<FbpMessage>,
     // ADR-017: Bounded IO channels
     cmd_tx: std::sync::mpsc::SyncSender<SocketAddr>,
     result_rx: std::sync::mpsc::Receiver<Result<TcpStream, std::io::Error>>,
@@ -175,23 +175,21 @@ impl Component for TCPClientComponent {
         debug!("TCPClient is now process()ing!");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = ClientState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -256,8 +254,10 @@ impl Component for TCPClientComponent {
         match current_state {
             ClientState::WaitingForConfig => {
                 // Try to get configuration
-                if let Ok(url_vec) = self.conf.pop() {
-                    let url_str = String::from_utf8(url_vec).expect("invalid utf-8");
+                if let Ok(url_msg) = self.conf.pop() {
+                    let url_str = url_msg.as_text()
+                        .or_else(|| url_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .expect("invalid utf-8");
                     debug!("got config URL: {}", url_str);
 
                     // Parse address from URL
@@ -534,8 +534,8 @@ pub struct TCPServerComponent {
     listener: Option<TcpListener>,
     connections: HashMap<u32, Connection>,
     next_client_id: u32,
-    pending_responses: HashMap<u32, Vec<u8>>, // client_id -> response data
-    pending_outbound: std::collections::VecDeque<Vec<u8>>,
+    pending_responses: HashMap<u32, FbpMessage>, // client_id -> response data
+    pending_outbound: std::collections::VecDeque<FbpMessage>,
 }
 
 impl Component for TCPServerComponent {
@@ -584,8 +584,9 @@ impl Component for TCPServerComponent {
 
         // Read configuration if not yet configured
         if self.listener.is_none() {
-            if let Ok(listen_addr_bytes) = self.conf.pop() {
-                let listen_addr = std::str::from_utf8(&listen_addr_bytes)
+            if let Ok(listen_addr_msg) = self.conf.pop() {
+                let listen_addr = listen_addr_msg.as_text()
+                    .or_else(|| listen_addr_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
                     .expect("invalid utf-8 listen address")
                     .to_owned();
                 self.listen_addr = Some(listen_addr.clone());
@@ -614,23 +615,21 @@ impl Component for TCPServerComponent {
         }
 
         // Check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -708,21 +707,17 @@ impl Component for TCPServerComponent {
                         *last_active = Instant::now();
 
                         // Frame data with client ID for multi-client support
-                        let framed_data =
-                            format!("{}:{}", client_id, String::from_utf8_lossy(&data))
-                                .into_bytes();
-                        match self.out.push(framed_data) {
+                        let framed_data_str = format!("{}:{}", client_id, String::from_utf8_lossy(&data));
+                        let framed_msg = FbpMessage::from_bytes(framed_data_str.into_bytes());
+                        match self.out.push(framed_msg) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
                                 debug!("sent received data from client {} to output", client_id);
                             }
-                            Err(PushError::Full(_)) => {
+                            Err(PushError::Full(returned_msg)) => {
                                 debug!("output buffer full, buffering received data from client {}", client_id);
-                                self.pending_outbound.push_back(
-                                    format!("{}:{}", client_id, String::from_utf8_lossy(&data))
-                                        .into_bytes(),
-                                );
+                                self.pending_outbound.push_back(returned_msg);
                                 work_units += 1;
                                 context.remaining_budget -= 1;
                             }
@@ -753,11 +748,12 @@ impl Component for TCPServerComponent {
                 debug!("got response packet, parsing client ID and routing...");
 
                 // Parse client ID from framed response data: "CLIENT_ID:response_data"
-                let response_str = String::from_utf8_lossy(&response_data);
+                let response_bytes = response_data.as_bytes().unwrap_or(&[]);
+                let response_str = String::from_utf8_lossy(response_bytes);
                 if let Some(colon_pos) = response_str.find(':') {
                     let client_id_str = &response_str[..colon_pos];
                     if let Ok(target_client_id) = client_id_str.parse::<u32>() {
-                        let actual_response = &response_data[colon_pos + 1..];
+                        let actual_response = &response_bytes[colon_pos + 1..];
 
                         // Find and send to the specific client
                         if let Some(connection) = self.connections.get_mut(&target_client_id) {
@@ -777,8 +773,9 @@ impl Component for TCPServerComponent {
                                     match e.kind() {
                                         ErrorKind::WouldBlock => {
                                             // Would block, buffer for later retry
+                                            let response_msg = FbpMessage::from_bytes(actual_response.to_vec());
                                             self.pending_responses
-                                                .insert(target_client_id, actual_response.to_vec());
+                                                .insert(target_client_id, response_msg);
                                             work_units += 1;
                                             context.remaining_budget -= 1;
                                             debug!(
@@ -832,7 +829,8 @@ impl Component for TCPServerComponent {
 
             if let Some(connection) = self.connections.get_mut(client_id) {
                 let ConnectionState::Active { .. } = &connection.state;
-                match connection.sock.write_all(response_data) {
+                let response_bytes = response_data.as_bytes().unwrap_or(&[]);
+                match connection.sock.write_all(response_bytes) {
                     Ok(()) => {
                         debug!("sent buffered response to TCP client {}", client_id);
                         work_units += 1;

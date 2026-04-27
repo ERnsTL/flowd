@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
     wake_scheduler,
@@ -627,8 +627,8 @@ impl Component for HTTPClientComponent {
         debug!("HTTPClient is now process()ing!");
 
         // Check for configuration updates (ADR-017 compliance)
-        if let Ok(conf_bytes) = self.conf.pop() {
-            if let Ok(conf_str) = std::str::from_utf8(&conf_bytes) {
+        if let Ok(conf_msg) = self.conf.pop() {
+            if let Some(conf_str) = conf_msg.as_text() {
                 // Parse JSON configuration for retry parameters
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(conf_str) {
                     if let Some(max_retries) = config.get("max_retries").and_then(|v| v.as_u64()) {
@@ -650,23 +650,21 @@ impl Component for HTTPClientComponent {
         }
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 self.state = HttpClientState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -676,8 +674,11 @@ impl Component for HTTPClientComponent {
         match current_state {
             HttpClientState::WaitingForRequests => {
                 // Try to get a new request
-                if let Ok(ip) = self.req.pop() {
-                    let url = String::from_utf8(ip).expect("non utf-8 data");
+                if let Ok(url_msg) = self.req.pop() {
+                    let url = url_msg.as_text()
+                        .or_else(|| url_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                        .expect("non utf-8 data")
+                        .to_string();
                     debug!("got a request: {}", &url);
 
                     // ADR-017: Send to background async worker via bounded channel
@@ -712,7 +713,7 @@ impl Component for HTTPClientComponent {
                         match result {
                             Ok(body) => {
                                 // Request successful - send response
-                                match self.out_resp.push(body) {
+                                match self.out_resp.push(body.into()) {
                                     Ok(()) => {
                                         debug!("forwarded HTTP response to output");
                                         self.state = HttpClientState::WaitingForRequests;
@@ -721,7 +722,7 @@ impl Component for HTTPClientComponent {
                                     Err(PushError::Full(body)) => {
                                         // Output buffer full, buffer internally for later retry
                                         debug!("response output buffer full, buffering internally");
-                                        self.pending_responses.push_back(body);
+                                        self.pending_responses.push_back(body.as_bytes().unwrap_or(&[]).to_vec());
                                         self.state = HttpClientState::WaitingForRequests;
                                         return ProcessResult::DidWork(1);
                                     }
@@ -729,7 +730,7 @@ impl Component for HTTPClientComponent {
                             }
                             Err(error_msg) => {
                                 // Request failed - send error
-                                match self.out_err.push(error_msg.as_bytes().to_vec()) {
+                                match self.out_err.push(error_msg.as_bytes().to_vec().into()) {
                                     Ok(()) => {
                                         debug!("forwarded HTTP error to output");
                                         self.state = HttpClientState::WaitingForRequests;
@@ -738,7 +739,7 @@ impl Component for HTTPClientComponent {
                                     Err(PushError::Full(error_bytes)) => {
                                         // Output buffer full, buffer internally for later retry
                                         debug!("error output buffer full, buffering internally");
-                                        self.pending_errors.push_back(error_bytes);
+                                        self.pending_errors.push_back(error_bytes.as_bytes().unwrap_or(&[]).to_vec());
                                         self.state = HttpClientState::WaitingForRequests;
                                         return ProcessResult::DidWork(1);
                                     }
@@ -909,8 +910,9 @@ impl Component for HTTPServerComponent {
 
         // Always try to read configuration (in case it arrives late)
         let mut config_changed = false;
-        if let Ok(listen_addr_bytes) = self.conf.pop() {
-            let conf_str = std::str::from_utf8(&listen_addr_bytes)
+        if let Ok(listen_addr_msg) = self.conf.pop() {
+            let conf_str = listen_addr_msg.as_text()
+                .or_else(|| listen_addr_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
                 .expect("invalid utf-8 listen address")
                 .to_owned();
             let (listen_addr, keep_alive_timeout) = parse_http_server_conf(&conf_str);
@@ -926,8 +928,10 @@ impl Component for HTTPServerComponent {
             config_changed = true;
         }
 
-        if let Ok(routes_bytes) = self.routes.pop() {
-            let routes_str = std::str::from_utf8(&routes_bytes).expect("invalid utf-8 routes");
+        if let Ok(routes_msg) = self.routes.pop() {
+            let routes_str = routes_msg.as_text()
+                .or_else(|| routes_msg.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .expect("invalid utf-8 routes");
             let routes_config: Vec<RouteConfig> = routes_str
                 .split(",")
                 .filter_map(|route_spec| {
@@ -974,23 +978,21 @@ impl Component for HTTPServerComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -1695,7 +1697,8 @@ impl Component for HTTPServerComponent {
                 if let Some(index) = route_index {
                     if index < self.req.len() {
                         // Contract for REQ payload is a newline-delimited request envelope.
-                        match self.req[index].push(encode_request_for_req_port(&request_to_send)) {
+                        let req_msg = FbpMessage::from_bytes(encode_request_for_req_port(&request_to_send));
+                        match self.req[index].push(req_msg) {
                             Ok(()) => {
                                 self.pending_requests.pop_front();
                                 work_units += 1;
@@ -1762,8 +1765,9 @@ impl Component for HTTPServerComponent {
 
         // Read responses from FBP network
         while context.remaining_budget > 0 {
-            if let Ok(response_body) = self.resp.pop() {
+            if let Ok(response_msg) = self.resp.pop() {
                 if let Some(request_id) = self.response_wait_queue.pop_front() {
+                    let response_body = response_msg.as_bytes().unwrap_or(&[]).to_vec();
                     let response = HttpResponse {
                         status_code: 200,
                         status_text: "OK".to_string(),

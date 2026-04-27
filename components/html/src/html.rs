@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -58,22 +58,20 @@ impl Component for HTMLStripComponent {
         debug!("HTMLStrip process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -85,11 +83,13 @@ impl Component for HTMLStripComponent {
                 debug!("got a packet, stripping...");
 
                 // Strip HTML tags
-                let ip_out = HTMLStripComponent::remove_html_tags(ip);
+                let ip_bytes = ip.as_bytes().unwrap_or(&[]);
+                let ip_out = HTMLStripComponent::remove_html_tags(ip_bytes.to_vec());
+                let msg_out = FbpMessage::from_bytes(ip_out);
 
                 // Send it
                 debug!("sending...");
-                if let Ok(()) = self.out.push(ip_out) {
+                if let Ok(()) = self.out.push(msg_out) {
                     debug!("done");
                     work_units += 1;
                     context.remaining_budget -= 1;
@@ -236,30 +236,27 @@ impl Component for HTMLQueryComponent {
         debug!("HTMLQuery process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         // Check if we have configuration
         if self.query.is_none() {
             if let Ok(query_vec) = self.conf.pop() {
-                let query_str =
-                    std::str::from_utf8(&query_vec).expect("invalid utf-8 in config IP");
+                let query_str = query_vec.as_text().expect("XPath query must be text");
                 debug!("received XPath query: {}", query_str);
                 match xpath::parse(query_str) {
                     Ok(xpath_query) => {
@@ -287,8 +284,8 @@ impl Component for HTMLQueryComponent {
                 debug!("got a packet, processing...");
 
                 // Process packet
-                match html::parse(std::str::from_utf8(&ip).expect("failed to use IP data as UTF-8"))
-                {
+                let ip_text = ip.as_text().unwrap_or("");
+                match html::parse(ip_text) {
                     Ok(document) => {
                         let xpath_item_tree = XpathItemTree::from(&document);
                         match xpath_query.apply(&xpath_item_tree) {
@@ -298,10 +295,11 @@ impl Component for HTMLQueryComponent {
                                     for item in item_set.into_iter() {
                                         // Prepare packet
                                         let vec_out = item.to_string().into_bytes();
+                                        let msg_out = FbpMessage::from_bytes(vec_out);
 
                                         // Send it
                                         debug!("sending...");
-                                        if let Ok(()) = self.out.push(vec_out) {
+                                        if let Ok(()) = self.out.push(msg_out) {
                                             debug!("done");
                                             work_units += 1;
                                             context.remaining_budget -= 1;

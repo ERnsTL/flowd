@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, PROCESSEDGE_BUFSIZE,
 };
@@ -20,8 +20,8 @@ pub struct FileReaderComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    filenames: std::collections::VecDeque<Vec<u8>>,
-    pending_files: std::collections::VecDeque<Vec<u8>>, // files to send, buffered for backpressure
+    filenames: std::collections::VecDeque<FbpMessage>,
+    pending_files: std::collections::VecDeque<FbpMessage>, // files to send, buffered for backpressure
     pending_read: Option<mpsc::Receiver<Result<Vec<u8>, std::io::Error>>>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
@@ -66,10 +66,10 @@ impl Component for FileReaderComponent {
         // Read configuration filenames if we haven't buffered them all yet
         while self.filenames.is_empty() && !self.conf.is_abandoned() {
             if let Ok(filename) = self.conf.pop() {
-                trace!(
-                    "got filename: {}",
-                    std::str::from_utf8(&filename).expect("invalid utf-8")
-                );
+                let filename_str = filename.as_text()
+                    .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("got filename: {}", filename_str);
                 self.filenames.push_back(filename);
             } else {
                 break;
@@ -77,23 +77,21 @@ impl Component for FileReaderComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -118,8 +116,9 @@ impl Component for FileReaderComponent {
         // Start one asynchronous file read when idle.
         if self.pending_read.is_none() && !self.filenames.is_empty() {
             if let Some(filename) = self.filenames.front() {
-                let file_path = std::str::from_utf8(filename)
-                    .expect("non utf-8 data")
+                let file_path = filename.as_text()
+                    .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("")
                     .to_owned();
                 debug!("starting async read for {}", file_path);
                 let (tx, rx) = mpsc::channel();
@@ -140,7 +139,8 @@ impl Component for FileReaderComponent {
             if let Some(rx) = &self.pending_read {
                 match rx.try_recv() {
                     Ok(Ok(contents)) => {
-                        match self.out.push(contents) {
+                        let content_msg = FbpMessage::from_bytes(contents);
+                        match self.out.push(content_msg) {
                             Ok(()) => {}
                             Err(PushError::Full(returned_content)) => {
                                 self.pending_files.push_back(returned_content);
@@ -153,11 +153,10 @@ impl Component for FileReaderComponent {
                     }
                     Ok(Err(e)) => {
                         if let Some(filename) = self.filenames.front() {
-                            warn!(
-                                "failed to read file {}: {}",
-                                std::str::from_utf8(filename).unwrap_or("<invalid utf-8>"),
-                                e
-                            );
+                            let filename_str = filename.as_text()
+                                .or_else(|| filename.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                                .unwrap_or("<invalid utf-8>");
+                            warn!("failed to read file {}: {}", filename_str, e);
                         }
                         self.pending_read = None;
                         self.filenames.pop_front();
@@ -278,9 +277,9 @@ impl Component for FileTailerComponent {
 
         // Read configuration if not yet configured
         if self.filename.is_none() {
-            if let Ok(file_name_bytes) = self.conf.pop() {
-                let file_name = std::str::from_utf8(&file_name_bytes)
-                    .expect("failed to parse filename as UTF-8");
+            if let Ok(file_name_msg) = self.conf.pop() {
+                let file_name = file_name_msg.as_text()
+                    .expect("failed to parse filename as text");
                 trace!("got filename: {}", file_name);
                 // staart::TailedFile currently requires a `Copy` path type.
                 // Keep one leaked &'static str for the lifetime of this component instance.
@@ -312,30 +311,28 @@ impl Component for FileTailerComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         // First, try to send any pending lines that were buffered due to backpressure
         while context.remaining_budget > 0 && !self.pending_lines.is_empty() {
             if let Some(pending_line) = self.pending_lines.front() {
-                match self.out.push(pending_line.clone()) {
+                match self.out.push(pending_line.clone().into()) {
                     Ok(()) => {
                         self.pending_lines.pop_front();
                         work_units += 1;
@@ -354,16 +351,17 @@ impl Component for FileTailerComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while checking file
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let signal_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal: {}", signal_text);
+                if signal_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if signal_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let pong_msg = FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 
@@ -376,7 +374,8 @@ impl Component for FileTailerComponent {
                     if lines.len() > 0 {
                         debug!("got line(s), sending...");
                         // Try to send it
-                        match self.out.push(lines) {
+                        let lines_msg = FbpMessage::from_bytes(lines);
+                        match self.out.push(lines_msg) {
                             Ok(()) => {
                                 work_units += 1;
                                 context.remaining_budget -= 1;
@@ -385,7 +384,8 @@ impl Component for FileTailerComponent {
                             Err(PushError::Full(returned_lines)) => {
                                 // Output buffer full, buffer internally for later retry
                                 debug!("output buffer full, buffering lines internally");
-                                self.pending_lines.push_back(returned_lines);
+                                let bytes = returned_lines.as_bytes().unwrap_or(&[]).to_vec();
+                                self.pending_lines.push_back(bytes);
                                 work_units += 1; // We checked the file, just couldn't send
                                 context.remaining_budget -= 1;
                             }
@@ -506,9 +506,9 @@ impl Component for FileWriterComponent {
 
         // Read configuration if not yet configured
         if self.filename.is_none() || self.writer_tx.is_none() {
-            if let Ok(file_name_bytes) = self.conf.pop() {
-                let file_name = std::str::from_utf8(&file_name_bytes)
-                    .expect("failed to parse filename as UTF-8");
+            if let Ok(file_name_msg) = self.conf.pop() {
+                let file_name = file_name_msg.as_text()
+                    .expect("failed to parse filename as text");
                 trace!("got filename: {}", file_name);
                 self.filename = Some(file_name.to_string());
                 let (data_tx, data_rx) = mpsc::sync_channel::<Vec<u8>>(PROCESSEDGE_BUFSIZE);
@@ -551,23 +551,21 @@ impl Component for FileWriterComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -582,7 +580,8 @@ impl Component for FileWriterComponent {
 
         if let Ok(chunk) = self.inn.read_chunk(self.inn.slots()) {
             for ip in chunk {
-                self.pending_writes.push_back(ip);
+                let bytes = ip.as_bytes().unwrap_or(&[]).to_vec();
+                self.pending_writes.push_back(bytes);
             }
         }
 

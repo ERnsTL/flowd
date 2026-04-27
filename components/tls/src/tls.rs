@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -25,8 +25,8 @@ pub struct TLSClientComponent {
     // Runtime state
     conn: Option<rustls::ClientConnection>,
     sock: Option<TcpStream>,
-    pending_data: std::collections::VecDeque<Vec<u8>>, // data to send, buffered for backpressure
-    pending_received: std::collections::VecDeque<Vec<u8>>,
+    pending_data: std::collections::VecDeque<FbpMessage>, // data to send, buffered for backpressure
+    pending_received: std::collections::VecDeque<FbpMessage>,
     connect_result: Option<mpsc::Receiver<Result<(rustls::ClientConnection, TcpStream), String>>>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
@@ -124,9 +124,9 @@ impl Component for TLSClientComponent {
 
         // Read configuration and establish connection asynchronously.
         if self.conn.is_none() && self.connect_result.is_none() {
-            if let Ok(url_vec) = self.conf.pop() {
-                let url_str = std::str::from_utf8(&url_vec)
-                    .expect("invalid utf-8")
+            if let Ok(url_msg) = self.conf.pop() {
+                let url_str = url_msg.as_text()
+                    .expect("invalid text")
                     .to_owned();
                 let (tx, rx) = mpsc::channel();
                 let scheduler_waker = self.scheduler_waker.clone();
@@ -200,23 +200,21 @@ impl Component for TLSClientComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -225,7 +223,8 @@ impl Component for TLSClientComponent {
             if let (Some(conn), Some(sock)) = (&mut self.conn, &mut self.sock) {
                 if let Some(pending_data) = self.pending_data.front() {
                     // Write to TLS connection
-                    match conn.writer().write(pending_data) {
+                    let pending_bytes = pending_data.as_bytes().unwrap_or(&[]);
+                    match conn.writer().write(pending_bytes) {
                         Ok(_) => {
                             // Complete the TLS handshake/write
                             match conn.complete_io(sock) {
@@ -274,7 +273,8 @@ impl Component for TLSClientComponent {
 
                 for ip in chunk.into_iter() {
                     if let (Some(conn), Some(sock)) = (&mut self.conn, &mut self.sock) {
-                        match conn.writer().write(&ip) {
+                        let ip_bytes = ip.as_bytes().unwrap_or(&[]);
+                        match conn.writer().write(ip_bytes) {
                             Ok(_) => {
                                 match conn.complete_io(sock) {
                                     Ok(_) => {
@@ -361,7 +361,8 @@ impl Component for TLSClientComponent {
                         if bytes_in > 0 {
                             debug!("got {} bytes from TLS server", bytes_in);
                             let data = Vec::from(&buf[0..bytes_in]);
-                            match self.out.push(data) {
+                            let data_msg = FbpMessage::from_bytes(data);
+                            match self.out.push(data_msg) {
                                 Ok(()) => {
                                     work_units += 1;
                                     context.remaining_budget -= 1;
@@ -369,7 +370,8 @@ impl Component for TLSClientComponent {
                                 }
                                 Err(PushError::Full(_returned_data)) => {
                                     debug!("output buffer full, buffering received data");
-                                    self.pending_received.push_back(Vec::from(&buf[0..bytes_in]));
+                                    let data_msg = FbpMessage::from_bytes(Vec::from(&buf[0..bytes_in]));
+                                    self.pending_received.push_back(data_msg);
                                     work_units += 1;
                                     context.remaining_budget -= 1;
                                 }
@@ -483,8 +485,8 @@ pub struct TLSServerComponent {
     listener: Option<std::net::TcpListener>,
     connections: std::collections::HashMap<u32, Connection>,
     next_client_id: u32,
-    pending_outbound: std::collections::VecDeque<Vec<u8>>,
-    pending_responses: std::collections::VecDeque<Vec<u8>>,
+    pending_outbound: std::collections::VecDeque<FbpMessage>,
+    pending_responses: std::collections::VecDeque<FbpMessage>,
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
@@ -562,22 +564,22 @@ impl Component for TLSServerComponent {
         // Read configuration if not yet configured
         if self.server_config.is_none() {
             // Try to read configuration
-            if let Ok(listen_addr_bytes) = self.conf.pop() {
+            if let Ok(listen_addr_msg) = self.conf.pop() {
                 self.listen_addr = Some(
-                    std::str::from_utf8(&listen_addr_bytes)
-                        .expect("invalid utf-8 listen address")
+                    listen_addr_msg.as_text()
+                        .expect("invalid text listen address")
                         .to_owned(),
                 );
                 trace!("got listen address: {}", self.listen_addr.as_ref().unwrap());
             }
 
             if let Ok(cert_bytes) = self.cert.pop() {
-                self.cert_data = Some(cert_bytes);
+                self.cert_data = Some(cert_bytes.as_bytes().unwrap_or(&[]).to_vec());
                 trace!("got certificate data");
             }
 
             if let Ok(key_bytes) = self.key.pop() {
-                self.key_data = Some(key_bytes);
+                self.key_data = Some(key_bytes.as_bytes().unwrap_or(&[]).to_vec());
                 trace!("got private key data");
             }
 
@@ -617,23 +619,21 @@ impl Component for TLSServerComponent {
         }
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -798,7 +798,8 @@ impl Component for TLSServerComponent {
                             if bytes_in > 0 {
                                 debug!("got {} bytes from TLS client {}", bytes_in, client_id);
                                 let data = Vec::from(&buf[0..bytes_in]);
-                                match self.out.push(data) {
+                                let data_msg = FbpMessage::from_bytes(data);
+                                match self.out.push(data_msg) {
                                     Ok(()) => {
                                         connection.last_active = Instant::now();
                                         work_units += 1;
@@ -807,7 +808,8 @@ impl Component for TLSServerComponent {
                                     }
                                     Err(PushError::Full(_returned_data)) => {
                                         debug!("output buffer full, buffering received data from client {}", client_id);
-                                        self.pending_outbound.push_back(Vec::from(&buf[0..bytes_in]));
+                                        let data_msg = FbpMessage::from_bytes(Vec::from(&buf[0..bytes_in]));
+                                        self.pending_outbound.push_back(data_msg);
                                         work_units += 1;
                                         context.remaining_budget -= 1;
                                     }
@@ -870,7 +872,8 @@ impl Component for TLSServerComponent {
                     } = &mut connection.state
                     {
                         if let (Some(conn), Some(sock)) = (conn, sock) {
-                            match conn.writer().write(&response_data) {
+                            let response_bytes = response_data.as_bytes().unwrap_or(&[]);
+                            match conn.writer().write(response_bytes) {
                                 Ok(_) => {
                                     match conn.complete_io(sock) {
                                         Ok(_) => {

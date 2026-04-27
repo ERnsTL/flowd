@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -59,29 +59,27 @@ impl Component for CronComponent {
         debug!("Cron process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         // Check if we have configuration
         if self.schedule.is_none() {
             if let Ok(ip) = self.when.pop() {
-                let cron_str = std::str::from_utf8(&ip).expect("invalid utf-8 in config IP");
+                let cron_str = ip.as_text().expect("invalid text in config IP");
                 debug!("received cron schedule: {}", cron_str);
                 match Schedule::from_str(cron_str) {
                     Ok(schedule) => {
@@ -117,7 +115,8 @@ impl Component for CronComponent {
             info!("Cron firing at: {}", next);
             debug!("sending tick");
 
-            if let Ok(()) = self.tick.push(vec![]) {
+            let tick_msg = FbpMessage::from_bytes(vec![]);
+            if let Ok(()) = self.tick.push(tick_msg) {
                 self.timer_armed = false;
                 // Get next schedule time and arm next timer.
                 if let Some(schedule) = self.schedule.as_mut() {

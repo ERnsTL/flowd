@@ -19,7 +19,7 @@ pub struct CountComponent {
     sum: u64,
     start: Option<chrono::DateTime<chrono::Utc>>,
     start_1st: Option<chrono::DateTime<chrono::Utc>>,
-    pending_reports: std::collections::VecDeque<String>,
+    pending_reports: std::collections::VecDeque<flowd_component_api::FbpMessage>,
 }
 
 #[derive(Clone, Copy)]
@@ -42,10 +42,8 @@ impl CountComponent {
         if let Err(flowd_component_api::PushError::Full(returned)) =
             self.out.push(message)
         {
-            // Convert back to string for storage in pending_reports
-            if let Some(text) = returned.as_text() {
-                self.pending_reports.push_back(text.to_string());
-            }
+            // Store the returned message in pending_reports
+            self.pending_reports.push_back(returned);
         }
 
         // Send network output with the final count
@@ -141,8 +139,7 @@ impl Component for CountComponent {
 
         while context.remaining_budget > 0 && !self.pending_reports.is_empty() {
             if let Some(report) = self.pending_reports.front().cloned() {
-                let message = flowd_component_api::FbpMessage::from_text(report);
-                match self.out.push(message) {
+                match self.out.push(report) {
                     Ok(()) => {
                         self.pending_reports.pop_front();
                         work_units += 1;

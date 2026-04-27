@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -10,7 +10,7 @@ pub struct RepeatComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    pending_out: std::collections::VecDeque<Vec<u8>>,
+    pending_out: std::collections::VecDeque<FbpMessage>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -60,17 +60,15 @@ impl Component for RepeatComponent {
 
         // check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+            let signal_text = ip.as_text().unwrap_or("");
+            trace!("received signal ip: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
             }
         }
 
@@ -78,16 +76,14 @@ impl Component for RepeatComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let signal_text = sig.as_text().unwrap_or("");
+                trace!("received signal ip: {}", signal_text);
+                if signal_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if signal_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
                 }
             }
 

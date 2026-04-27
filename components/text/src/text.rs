@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -15,7 +15,7 @@ pub struct TextReplaceComponent {
     // Runtime state
     replacements: Vec<(String, String)>,
     config_complete: bool,
-    pending_packets: std::collections::VecDeque<Vec<u8>>,
+    pending_packets: std::collections::VecDeque<FbpMessage>,
 }
 
 impl Component for TextReplaceComponent {
@@ -64,11 +64,10 @@ impl Component for TextReplaceComponent {
             // Read replacement pairs from CONF port
             while self.conf.slots() >= 2 {
                 if let (Ok(from), Ok(to)) = (self.conf.pop(), self.conf.pop()) {
-                    let from_str =
-                        String::from_utf8(from).expect("invalid utf-8 in replacement from");
-                    let to_str = String::from_utf8(to).expect("invalid utf-8 in replacement to");
+                    let from_str = from.as_text().expect("invalid text in replacement from");
+                    let to_str = to.as_text().expect("invalid text in replacement to");
                     trace!("got replacement pair: from={} to={}", from_str, to_str);
-                    self.replacements.push((from_str, to_str));
+                    self.replacements.push((from_str.to_string(), to_str.to_string()));
                 } else {
                     break;
                 }
@@ -90,22 +89,17 @@ impl Component for TextReplaceComponent {
 
         // check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+            let signal_text = ip.as_text().unwrap_or("");
+            trace!("received signal ip: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal ip: {}", signal_text)
             }
         }
 
@@ -131,22 +125,20 @@ impl Component for TextReplaceComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let signal_text = sig.as_text().unwrap_or("");
+                trace!("received signal ip: {}", signal_text);
+                if signal_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if signal_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
                 }
             }
 
             if let Ok(ip) = self.inn.pop() {
                 // read packet - expecting UTF-8 string
-                let mut text = String::from_utf8(ip).expect("non utf-8 data");
+                let mut text = ip.as_text().expect("non-text data").to_string();
                 debug!("got a text to process: {}", text);
 
                 // apply text replacements
@@ -156,8 +148,8 @@ impl Component for TextReplaceComponent {
 
                 // Try to send the processed packet
                 debug!("forwarding...");
-                let processed_bytes = text.into_bytes();
-                match self.out.push(processed_bytes.clone()) {
+                let processed_msg = FbpMessage::from_str(&text);
+                match self.out.push(processed_msg) {
                     Ok(()) => {
                         work_units += 1;
                         context.remaining_budget -= 1;

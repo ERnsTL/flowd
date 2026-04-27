@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -10,7 +10,7 @@ pub struct TrimComponent {
     out: ProcessEdgeSink,
     signals_in: ProcessSignalSource,
     signals_out: ProcessSignalSink,
-    pending_out: std::collections::VecDeque<Vec<u8>>,
+    pending_out: std::collections::VecDeque<FbpMessage>,
     //graph_inout: GraphInportOutportHandle,
 }
 
@@ -63,22 +63,17 @@ impl Component for TrimComponent {
 
         // check signals
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+            let signal_text = ip.as_text().unwrap_or("");
+            trace!("received signal ip: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal ip: {}", signal_text)
             }
         }
 
@@ -86,32 +81,31 @@ impl Component for TrimComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while draining a busy input buffer
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let signal_text = sig.as_text().unwrap_or("");
+                trace!("received signal ip: {}", signal_text);
+                if signal_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if signal_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
                 }
             }
 
             if let Ok(ip) = self.inn.pop() {
                 // read packet - expecting UTF-8 string
-                let mut text = std::str::from_utf8(&ip).expect("non utf-8 data");
+                let text = ip.as_text().expect("non-text data");
                 debug!("got a text to trim: {}", &text);
 
                 // trim string
                 debug!("len before trim: {}", text.len());
-                text = text.trim();
-                debug!("len after trim: {}", text.len());
+                let trimmed = text.trim();
+                debug!("len after trim: {}", trimmed.len());
 
                 // send it
                 debug!("forwarding trimmed string...");
-                match self.out.push(Vec::from(text)) {
+                let output_msg = FbpMessage::from_str(trimmed);
+                match self.out.push(output_msg) {
                     Ok(()) => {
                         debug!("done");
                         work_units += 1;

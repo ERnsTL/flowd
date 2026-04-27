@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
 };
@@ -258,25 +258,23 @@ impl Component for ZeroconfResponderComponent {
         debug!("ZeroconfResponder process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, unregistering and finishing");
                 // Send unregister command to async thread
                 let _ = self.cmd_sender.send(ZeroconfResponderCommand::Unregister);
                 self.state = ZeroconfResponderState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -288,8 +286,7 @@ impl Component for ZeroconfResponderComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str =
-                        std::str::from_utf8(&conf_vec).expect("configuration URL is invalid utf-8");
+                    let url_str = conf_vec.as_text().expect("configuration URL is invalid text");
                     let url = url::Url::parse(&url_str).expect("failed to parse URL");
 
                     // get instance name
@@ -517,25 +514,23 @@ impl Component for ZeroconfBrowserComponent {
         debug!("ZeroconfBrowser process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, stopping browser and finishing");
                 // Send stop command to async thread
                 let _ = self.cmd_sender.send(ZeroconfBrowserCommand::Stop);
                 self.state = ZeroconfBrowserState::Finished;
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -547,7 +542,7 @@ impl Component for ZeroconfBrowserComponent {
                     debug!("received CONF config, parsing...");
 
                     // Parse configuration (extracted from original run() method)
-                    let url_str = std::str::from_utf8(&conf_vec).expect("invalid utf-8");
+                    let url_str = conf_vec.as_text().expect("invalid text");
                     let url = url::Url::parse(&url_str).expect("failed to parse URL");
 
                     // get service name from URL
@@ -595,7 +590,8 @@ impl Component for ZeroconfBrowserComponent {
                     match result {
                         ZeroconfBrowserResult::ServiceFound(url) => {
                             debug!("Service found, sending to output: {}", url);
-                            if let Err(_) = self.out.push(url.into_bytes()) {
+                            let msg = FbpMessage::from_bytes(url.into_bytes());
+                            if let Err(_) = self.out.push(msg) {
                                 error!("Failed to send service result to output");
                                 return ProcessResult::Finished;
                             }

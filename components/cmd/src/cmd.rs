@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -115,7 +115,7 @@ impl Component for CmdComponent {
         // Load configuration if not loaded
         if !self.config_loaded {
             if let Ok(cmd_ip) = self.cmd.pop() {
-                let cmd_line = std::str::from_utf8(cmd_ip.as_slice()).expect("invalid utf-8");
+                let cmd_line = cmd_ip.as_text().expect("CMD must be text");
                 let mut cmd_words =
                     shell_words::split(cmd_line).expect("failed to parse command-line");
                 if cmd_words.len() > 0 {
@@ -134,9 +134,8 @@ impl Component for CmdComponent {
             }
 
             if let Ok(conf_ip) = self.conf.pop() {
-                let mut parser = lexopt::Parser::from_args(vec![OsString::from(
-                    std::str::from_utf8(&conf_ip).expect("invalid utf-8"),
-                )]);
+                let conf_text = conf_ip.as_text().expect("CONF must be text");
+                let mut parser = lexopt::Parser::from_args(vec![OsString::from(conf_text)]);
                 while let Some(arg) = parser.next().expect("could not call next()") {
                     match arg {
                         Long("retry") => {
@@ -173,12 +172,12 @@ impl Component for CmdComponent {
         }
 
         // Check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 // Cleanup any running subprocess
                 if let SubprocessState::Running {
@@ -198,14 +197,12 @@ impl Component for CmdComponent {
                     }
                 }
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                );
+                warn!("received unknown signal: {}", signal_text);
             }
         }
 
@@ -231,8 +228,9 @@ impl Component for CmdComponent {
                                 // Start stdin thread
                                 let stdin_thread = std::thread::spawn(move || {
                                     let mut writer = writer;
+                                    let ip_bytes = ip.as_bytes().unwrap_or(&[]);
                                     writer
-                                        .write_all(ip.as_slice())
+                                        .write_all(ip_bytes)
                                         .expect("could not write to stdin");
                                     drop(writer);
                                 });
@@ -276,7 +274,8 @@ impl Component for CmdComponent {
                 if context.remaining_budget > 0 {
                     match stdout_rx.try_recv() {
                         Ok(line) => {
-                            match self.out.push(line) {
+                            let msg_out = FbpMessage::from_bytes(line);
+                            match self.out.push(msg_out) {
                                 Ok(()) => {
                                     work_done += 1;
                                     context.remaining_budget -= 1;

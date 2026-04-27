@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -68,29 +68,23 @@ impl Component for JSONQueryComponent {
 
         // Check signals first
         if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+            let signal_text = ip.as_text().unwrap_or("");
+            trace!("received signal ip: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let _ = self.signals_out.try_send(FbpMessage::from_str("pong"));
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal ip: {}", signal_text)
             }
         }
 
         // Check if we have configuration
         if self.query.is_none() {
-            if let Ok(filter_vec) = self.conf.pop() {
-                let filter_str =
-                    std::str::from_utf8(&filter_vec).expect("invalid utf-8 in config IP");
+            if let Ok(filter_msg) = self.conf.pop() {
+                let filter_str = filter_msg.as_text().expect("invalid text in config IP");
                 debug!("received query: {}", filter_str);
 
                 // Configure
@@ -136,7 +130,8 @@ impl Component for JSONQueryComponent {
         while context.remaining_budget > 0 && !self.inn.is_empty() {
             if let Ok(ip) = self.inn.pop() {
                 debug!("got a packet, processing...");
-                match serde_json::from_slice::<serde_json::Value>(&ip) {
+                let json_bytes = ip.as_bytes().unwrap_or(&[]);
+                match serde_json::from_slice::<serde_json::Value>(json_bytes) {
                     Ok(input) => {
                         // Iterator over the output values
                         let result = filter.run((Ctx::new([], &inputs), Val::from(input)));
@@ -149,7 +144,8 @@ impl Component for JSONQueryComponent {
 
                                     // Send it
                                     debug!("sending...");
-                                    if let Ok(()) = self.out.push(vec_out) {
+                                    let output_msg = FbpMessage::from_bytes(vec_out);
+                                    if let Ok(()) = self.out.push(output_msg) {
                                         debug!("done");
                                         work_units += 1;
                                         context.remaining_budget -= 1;

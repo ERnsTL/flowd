@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource,
 };
@@ -57,25 +57,27 @@ impl Component for RegexpExtractComponent {
         debug!("RegexpExtract process() called");
 
         // Check signals first
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
-            if ip == b"stop" {
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
+            } else {
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
         // Check if we have configuration
         if self.regexp.is_none() {
             if let Ok(regexp_vec) = self.conf.pop() {
-                let regexp_str =
-                    std::str::from_utf8(&regexp_vec).expect("invalid utf-8 in config IP");
+                let regexp_str = regexp_vec.as_text().expect("regexp must be text");
                 debug!("received regexp: {}", regexp_str);
                 match Regex::new(regexp_str) {
                     Ok(regexp) => {
@@ -103,46 +105,43 @@ impl Component for RegexpExtractComponent {
                 debug!("got packet, processing...");
 
                 // Apply regexp
-                match std::str::from_utf8(&ip) {
-                    Ok(input_str) => {
-                        if let Some(captures) = regexp.captures(input_str) {
-                            // Get first capture
-                            if let Some(capture) = captures.get(1) {
-                                let capture_str = capture.as_str();
+                let input_str = ip.as_text().unwrap_or("");
+                if let Some(captures) = regexp.captures(input_str) {
+                    // Get first capture
+                    if let Some(capture) = captures.get(1) {
+                        let capture_str = capture.as_str();
 
-                                // Send results
-                                debug!("sending...");
-                                if let Ok(()) = self.out.push(capture_str.as_bytes().to_vec()) {
-                                    debug!("done");
-                                    work_units += 1;
-                                    context.remaining_budget -= 1;
-                                } else {
-                                    // Output buffer full, stop processing for now
-                                    break;
-                                }
-                            } else {
-                                // No first capture, send empty
-                                debug!("no first capture, sending empty");
-                                if let Ok(()) = self.out.push(vec![]) {
-                                    work_units += 1;
-                                    context.remaining_budget -= 1;
-                                } else {
-                                    break;
-                                }
-                            }
+                        // Send results
+                        debug!("sending...");
+                        let msg = FbpMessage::from_bytes(capture_str.as_bytes().to_vec());
+                        if let Ok(()) = self.out.push(msg) {
+                            debug!("done");
+                            work_units += 1;
+                            context.remaining_budget -= 1;
                         } else {
-                            // No match, send empty value
-                            info!("no match");
-                            if let Ok(()) = self.out.push(vec![]) {
-                                work_units += 1;
-                                context.remaining_budget -= 1;
-                            } else {
-                                break;
-                            }
+                            // Output buffer full, stop processing for now
+                            break;
+                        }
+                    } else {
+                        // No first capture, send empty
+                        debug!("no first capture, sending empty");
+                        let msg = FbpMessage::from_bytes(vec![]);
+                        if let Ok(()) = self.out.push(msg) {
+                            work_units += 1;
+                            context.remaining_budget -= 1;
+                        } else {
+                            break;
                         }
                     }
-                    Err(err) => {
-                        warn!("failed to parse IP as UTF-8: {}", err);
+                } else {
+                    // No match, send empty value
+                    info!("no match");
+                    let msg = FbpMessage::from_bytes(vec![]);
+                    if let Ok(()) = self.out.push(msg) {
+                        work_units += 1;
+                        context.remaining_budget -= 1;
+                    } else {
+                        break;
                     }
                 }
 

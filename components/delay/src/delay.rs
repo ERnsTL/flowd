@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -47,7 +47,7 @@ fn parse_delay(s: &str) -> Result<Duration, String> {
 
 #[derive(Clone)]
 struct DelayedPacket {
-    data: Vec<u8>,
+    data: FbpMessage,
     ready_time: Instant,
 }
 
@@ -100,7 +100,7 @@ impl Component for DelayComponent {
         // Read config if not already read
         if self.delay.is_none() {
             if let Ok(config_data) = self.conf.pop() {
-                let config_str = std::str::from_utf8(&config_data).expect("invalid utf-8 config");
+                let config_str = config_data.as_text().expect("config must be text");
                 match parse_delay(config_str) {
                     Ok(d) => {
                         self.delay = Some(d);
@@ -123,18 +123,19 @@ impl Component for DelayComponent {
         let delay = self.delay.unwrap();
 
         // Check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             }
         }
 
@@ -142,16 +143,17 @@ impl Component for DelayComponent {
         while context.remaining_budget > 0 {
             // Check for stop signals during processing
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let sig_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal: {}", sig_text);
+                if sig_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
+                } else if sig_text == "ping" {
                     trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                    let pong_msg = FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 

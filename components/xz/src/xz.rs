@@ -1,5 +1,5 @@
 use flowd_component_api::{
-    Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
+    Component, ComponentComponentPayload, ComponentPort, FbpMessage, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError,
 };
@@ -17,7 +17,7 @@ pub struct XzCompressComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    pending_packets: std::collections::VecDeque<Vec<u8>>, // packets to send, buffered for backpressure
+    pending_packets: std::collections::VecDeque<FbpMessage>, // packets to send, buffered for backpressure
 }
 
 const COMPRESSION_LEVEL: u32 = 9; //TODO maybe make configurable
@@ -58,23 +58,22 @@ impl Component for XzCompressComponent {
         let mut work_units = 0u32;
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -100,16 +99,17 @@ impl Component for XzCompressComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while processing packets
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let sig_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal during processing: {}", sig_text);
+                if sig_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else if sig_text == "ping" {
+                    trace!("got ping signal during processing, responding");
+                    let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 
@@ -123,7 +123,7 @@ impl Component for XzCompressComponent {
                 //TODO support for chunks via open bracket, closing bracket
                 let vec_buf = Vec::new();
                 let mut compressor = XzEncoder::new(vec_buf, COMPRESSION_LEVEL);
-                compressor.write(&ip).expect("failed to write into encoder");
+                compressor.write(ip.as_bytes().unwrap_or(&[])).expect("failed to write into encoder");
                 //TODO this does not take into account the final bytes written by finish(), but when requesting the totals after the call to finish(), there is a borrow checker error
                 debug!(
                     "compression: {} bytes in, {} bytes out",
@@ -134,7 +134,8 @@ impl Component for XzCompressComponent {
 
                 // Try to send it
                 debug!("sending...");
-                match self.out.push(vec_out) {
+                let output_msg = FbpMessage::from_bytes(vec_out);
+                match self.out.push(output_msg) {
                     Ok(()) => {
                         work_units += 1;
                         context.remaining_budget -= 1;
@@ -224,7 +225,7 @@ pub struct XzDecompressComponent {
     signals_out: ProcessSignalSink,
     //graph_inout: GraphInportOutportHandle,
     // Runtime state
-    pending_packets: std::collections::VecDeque<Vec<u8>>, // packets to send, buffered for backpressure
+    pending_packets: std::collections::VecDeque<FbpMessage>, // packets to send, buffered for backpressure
 }
 
 impl Component for XzDecompressComponent {
@@ -263,23 +264,22 @@ impl Component for XzDecompressComponent {
         let mut work_units = 0u32;
 
         // check signals
-        if let Ok(ip) = self.signals_in.try_recv() {
-            trace!(
-                "received signal ip: {}",
-                std::str::from_utf8(&ip).expect("invalid utf-8")
-            );
+        if let Ok(signal) = self.signals_in.try_recv() {
+            let signal_text = signal.as_text()
+                .or_else(|| signal.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                .unwrap_or("");
+            trace!("received signal: {}", signal_text);
+
             // stop signal
-            if ip == b"stop" {
+            if signal_text == "stop" {
                 info!("got stop signal, finishing");
                 return ProcessResult::Finished;
-            } else if ip == b"ping" {
+            } else if signal_text == "ping" {
                 trace!("got ping signal, responding");
-                let _ = self.signals_out.try_send(b"pong".to_vec());
+                let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                let _ = self.signals_out.try_send(pong_msg);
             } else {
-                warn!(
-                    "received unknown signal ip: {}",
-                    std::str::from_utf8(&ip).expect("invalid utf-8")
-                )
+                warn!("received unknown signal: {}", signal_text)
             }
         }
 
@@ -305,32 +305,31 @@ impl Component for XzDecompressComponent {
         while context.remaining_budget > 0 {
             // stay responsive to stop/ping even while processing packets
             if let Ok(sig) = self.signals_in.try_recv() {
-                trace!(
-                    "received signal ip: {}",
-                    std::str::from_utf8(&sig).expect("invalid utf-8")
-                );
-                if sig == b"stop" {
+                let sig_text = sig.as_text()
+                    .or_else(|| sig.as_bytes().and_then(|b| std::str::from_utf8(b).ok()))
+                    .unwrap_or("");
+                trace!("received signal during processing: {}", sig_text);
+                if sig_text == "stop" {
                     info!("got stop signal while processing, finishing");
                     return ProcessResult::Finished;
-                } else if sig == b"ping" {
-                    trace!("got ping signal, responding");
-                    let _ = self.signals_out.try_send(b"pong".to_vec());
+                } else if sig_text == "ping" {
+                    trace!("got ping signal during processing, responding");
+                    let pong_msg = flowd_component_api::FbpMessage::from_str("pong");
+                    let _ = self.signals_out.try_send(pong_msg);
                 }
             }
 
             if let Ok(ip) = self.inn.pop() {
                 // prepare packet
                 debug!("got a packet, decompressing...");
-                // nothing to do
+                let input_bytes = ip.as_bytes().unwrap_or(&[]);
 
                 // decompress
                 //TODO optimize - currently, every packet is processed with a new Decoder instance
                 //TODO support for chunks via open bracket, closing bracket
                 let vec_buf = Vec::new();
                 let mut decompressor = XzDecoder::new(vec_buf);
-                decompressor
-                    .write(&ip)
-                    .expect("failed to write into decoder");
+                decompressor.write(input_bytes).expect("failed to write into decoder");
                 debug!(
                     "decompression: {} bytes in, {} bytes out",
                     decompressor.total_in(),
@@ -340,7 +339,8 @@ impl Component for XzDecompressComponent {
 
                 // Try to send it
                 debug!("sending...");
-                match self.out.push(vec_out) {
+                let output_msg = flowd_component_api::FbpMessage::from_bytes(vec_out);
+                match self.out.push(output_msg) {
                     Ok(()) => {
                         work_units += 1;
                         context.remaining_budget -= 1;
@@ -348,7 +348,7 @@ impl Component for XzDecompressComponent {
                     }
                     Err(PushError::Full(returned_packet)) => {
                         // Output buffer full, buffer internally for later retry
-                        debug!("output buffer full, buffering decompressed packet internally");
+                        debug!("output buffer full, buffering compressed packet internally");
                         self.pending_packets.push_back(returned_packet);
                         work_units += 1; // We processed the packet, just couldn't send
                         context.remaining_budget -= 1;
