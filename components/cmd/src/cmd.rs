@@ -11,6 +11,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 enum SubprocessState {
     Idle,
@@ -322,6 +323,9 @@ impl Component for CmdComponent {
 
                 if work_done > 0 {
                     return ProcessResult::DidWork(work_done);
+                } else {
+                    // Schedule periodic wakeup to check for child exit
+                    context.wake_at(Instant::now() + Duration::from_millis(10));
                 }
             }
             SubprocessState::Completed => {
