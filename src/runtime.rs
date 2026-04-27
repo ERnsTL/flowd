@@ -724,14 +724,14 @@ impl Runtime {
             ));
         }
 
-        // Initialize scheduler for this graph if not already done
+        // Initialize a fresh scheduler instance for this start cycle.
+        // Reusing a previously stopped scheduler can carry `running=false`
+        // into the next run, causing immediate scheduler thread exit.
         let graph_name = graph.properties.name.clone();
-        if !self.schedulers.contains_key(&graph_name) {
-            self.schedulers.insert(
-                graph_name.clone(),
-                Arc::new(crate::scheduler::Scheduler::new()),
-            );
-        }
+        self.schedulers.insert(
+            graph_name.clone(),
+            Arc::new(crate::scheduler::Scheduler::new()),
+        );
 
         // Initialize trace channel and dispatch thread.
         // We always keep this pipeline active because network:data debug streaming

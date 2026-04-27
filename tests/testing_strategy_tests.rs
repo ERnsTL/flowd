@@ -31,6 +31,35 @@ fn test_linear_pipeline() {
 }
 
 #[test]
+fn test_start_stop_start_same_graph_regression() {
+    let harness = new_repeat_harness("start_stop_start_same_graph_regression_test");
+
+    // First run
+    harness.start().expect("first start should succeed");
+    harness
+        .send_input("IN", b"first_run_data")
+        .expect("first run input should be accepted");
+    harness
+        .wait_for_output("OUT", 1, SHORT_TIMEOUT)
+        .expect("first run should produce output");
+    harness.assert_outputs_sequence_equal("OUT", &[b"first_run_data"]);
+    harness.stop().expect("first stop should succeed");
+
+    // Second run on the same graph/runtime instance.
+    // Regression target: scheduler must not exit immediately due to stale state.
+    harness.clear_outputs();
+    harness.start().expect("second start should succeed");
+    harness
+        .send_input("IN", b"second_run_data")
+        .expect("second run input should be accepted");
+    harness
+        .wait_for_output("OUT", 1, SHORT_TIMEOUT)
+        .expect("second run should produce output");
+    harness.assert_outputs_sequence_equal("OUT", &[b"second_run_data"]);
+    harness.stop().expect("second stop should succeed");
+}
+
+#[test]
 fn test_message_integrity() {
     let harness = new_repeat_harness("message_integrity_test");
 
