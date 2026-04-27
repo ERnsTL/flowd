@@ -9,7 +9,7 @@ use log::{debug, error, info, trace, warn};
 // component-specific
 use std::io::{ErrorKind, Read, Write};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc as tokio_mpsc;
+
 use uds::UnixSocketAddr;
 
 #[derive(Debug)]

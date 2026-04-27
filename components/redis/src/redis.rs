@@ -2,7 +2,7 @@ use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, SchedulerWaker, create_io_channels,
-    wake_scheduler,
+    wake_scheduler, ErrorType, RetryConfig, RetryState,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -10,8 +10,19 @@ use log::{debug, error, info, trace, warn};
 use redis_async::client::connect::RespConnectionInner;
 use tokio_util::codec::Framed;
 use redis_async::resp::RespCodec;
-use std::time::{Instant};
+use std::time::Instant;
 use tokio::sync::mpsc as tokio_mpsc;
+
+// ADR-017: Error classification for Redis connections
+fn classify_redis_error(error: &str) -> ErrorType {
+    // Redis connection errors are generally transient (network issues, server unavailable)
+    // Only permanent errors would be invalid configuration or authentication
+    if error.contains("invalid") || error.contains("auth") || error.contains("unauthorized") {
+        ErrorType::Permanent
+    } else {
+        ErrorType::Transient
+    }
+}
 
 
 
@@ -20,6 +31,12 @@ enum RedisPublisherState {
     Connecting {
         url: String,
         channel: String,
+    },
+    // ADR-017: Retry states for failed connections
+    RetryingConnection {
+        url: String,
+        channel: String,
+        retry_state: RetryState,
     },
     Connected {
         url: String,
@@ -41,11 +58,14 @@ pub struct RedisPublisherComponent {
     result_rx: std::sync::mpsc::Receiver<Result<Framed<RespConnectionInner, RespCodec>, String>>,
     // Background async worker
     _async_worker: Option<std::thread::JoinHandle<()>>,
+    // ADR-017: Retry configuration and state
+    retry_config: RetryConfig,
+    retry_state: RetryState,
 }
 
 // ADR-017: Async Redis worker that runs in background thread with Tokio runtime
 async fn async_redis_worker(
-    mut cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
+    cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
     result_tx: std::sync::mpsc::SyncSender<Result<Framed<RespConnectionInner, RespCodec>, String>>,
     waker: Option<SchedulerWaker>,
 ) {
@@ -116,6 +136,9 @@ impl Component for RedisPublisherComponent {
             result_rx,
             // Background async worker
             _async_worker: async_worker,
+            // ADR-017: Retry configuration
+            retry_config: RetryConfig::default(),
+            retry_state: RetryState::new(),
         }
     }
 
@@ -160,9 +183,34 @@ impl Component for RedisPublisherComponent {
                     return ProcessResult::DidWork(1);
                 }
                 Ok(Err(e)) => {
-                    error!("Redis connection failed: {}", e);
-                    self.state = RedisPublisherState::Finished;
-                    return ProcessResult::Finished;
+                    // ADR-017: Classify error and handle retry logic
+                    let error_type = classify_redis_error(&e);
+                    match error_type {
+                        ErrorType::Transient => {
+                            if self.retry_state.should_retry(error_type, &self.retry_config) {
+                                let mut retry_state = std::mem::take(&mut self.retry_state);
+                                retry_state.calculate_next_retry(&self.retry_config);
+                                retry_state.last_error_type = error_type;
+                                warn!("Redis connection failed (transient error), will retry in {:?} (attempt {}): {}",
+                                      retry_state.next_retry_at - Instant::now(), retry_state.attempt, e);
+                                self.state = RedisPublisherState::RetryingConnection {
+                                    url,
+                                    channel,
+                                    retry_state,
+                                };
+                                return ProcessResult::DidWork(1);
+                            } else {
+                                error!("Redis connection failed after {} retries, giving up: {}", self.retry_config.max_retries, e);
+                                self.state = RedisPublisherState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                        }
+                        ErrorType::Permanent => {
+                            error!("Redis connection failed (permanent error), not retrying: {}", e);
+                            self.state = RedisPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 Err(_) => {
                     // Connection still in progress, put state back and wait
@@ -234,6 +282,40 @@ impl Component for RedisPublisherComponent {
                 // This should have been handled above
                 self.state = RedisPublisherState::Finished;
                 ProcessResult::Finished
+            }
+
+            // ADR-017: Handle retry state
+            RedisPublisherState::RetryingConnection { url, channel, retry_state } => {
+                // Check if it's time to retry
+                if retry_state.is_ready_to_retry() {
+                    // Try to send connection request again
+                    match self.cmd_tx.try_send((url.clone(), channel.clone())) {
+                        Ok(()) => {
+                            debug!("Redis retry connection request enqueued to async worker (attempt {})", retry_state.attempt);
+                            self.state = RedisPublisherState::Connecting { url, channel };
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // Channel full, wait and try again later
+                            context.wake_at(
+                                Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                            );
+                            self.state = RedisPublisherState::RetryingConnection { url, channel, retry_state };
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died
+                            warn!("Redis async worker disconnected during retry");
+                            self.state = RedisPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                } else {
+                    // Not ready to retry yet, schedule wakeup
+                    context.wake_at(retry_state.next_retry_at);
+                    self.state = RedisPublisherState::RetryingConnection { url, channel, retry_state };
+                    return ProcessResult::NoWork;
+                }
             }
 
             RedisPublisherState::Connected {

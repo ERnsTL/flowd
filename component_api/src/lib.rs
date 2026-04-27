@@ -386,3 +386,97 @@ pub fn create_io_channels<T, U>() -> (
     let (result_tx, result_rx) = std::sync::mpsc::sync_channel(DEFAULT_MAX_PENDING);
     (cmd_tx, cmd_rx, result_tx, result_rx)
 }
+
+// ADR-017: Retry and error classification utilities
+
+/// Error classification for ADR-017 compliance
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorType {
+    /// Transient errors that should be retried (network timeouts, connection failures, 5xx)
+    Transient,
+    /// Permanent errors that should fail immediately (4xx, invalid config, auth failures)
+    Permanent,
+}
+
+/// Configuration for retry behavior per ADR-017
+#[derive(Debug, Clone)]
+pub struct RetryConfig {
+    pub max_retries: u32,
+    pub initial_delay: Duration,
+    pub backoff_multiplier: f64,
+    pub max_delay: Duration,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 3,
+            initial_delay: Duration::from_secs(1),
+            backoff_multiplier: 2.0,
+            max_delay: Duration::from_secs(30),
+        }
+    }
+}
+
+/// State tracking for retry attempts
+#[derive(Debug, Clone)]
+pub struct RetryState {
+    pub attempt: u32,
+    pub next_retry_at: Instant,
+    pub last_error_type: ErrorType,
+}
+
+impl Default for RetryState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RetryState {
+    pub fn new() -> Self {
+        Self {
+            attempt: 0,
+            next_retry_at: Instant::now(),
+            last_error_type: ErrorType::Transient,
+        }
+    }
+
+    /// Check if we should retry based on error type and attempt count
+    pub fn should_retry(&self, error_type: ErrorType, config: &RetryConfig) -> bool {
+        match error_type {
+            ErrorType::Permanent => false,
+            ErrorType::Transient => self.attempt < config.max_retries,
+        }
+    }
+
+    /// Calculate next retry time with exponential backoff
+    pub fn calculate_next_retry(&mut self, config: &RetryConfig) {
+        self.attempt += 1;
+        let delay = config.initial_delay.as_millis() as f64
+            * config.backoff_multiplier.powi(self.attempt.saturating_sub(1) as i32);
+        let delay = Duration::from_millis(delay as u64).min(config.max_delay);
+        self.next_retry_at = Instant::now() + delay;
+    }
+
+    /// Check if it's time to retry
+    pub fn is_ready_to_retry(&self) -> bool {
+        Instant::now() >= self.next_retry_at
+    }
+}
+
+/// Calculate exponential backoff delay with jitter
+pub fn calculate_backoff_delay(attempt: u32, config: &RetryConfig) -> Duration {
+    let base_delay = config.initial_delay.as_millis() as f64
+        * config.backoff_multiplier.powi(attempt.saturating_sub(1) as i32);
+    let delay = Duration::from_millis(base_delay as u64).min(config.max_delay);
+
+    // Add jitter (±25%) to prevent thundering herd
+    use std::time::SystemTime;
+    let jitter = (SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64 % 50) as f64 / 100.0 - 0.25; // -0.25 to +0.25
+
+    let jittered_delay = (delay.as_millis() as f64 * (1.0 + jitter)) as u64;
+    Duration::from_millis(jittered_delay.max(100)) // Minimum 100ms
+}

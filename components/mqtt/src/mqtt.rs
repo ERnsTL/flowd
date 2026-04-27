@@ -2,7 +2,7 @@ use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, create_io_channels,
-    SchedulerWaker, wake_scheduler,
+    SchedulerWaker, wake_scheduler, ErrorType, RetryConfig, RetryState,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -16,6 +16,12 @@ enum MQTTPublisherState {
     Connecting {
         url: String,
         topic: String,
+    },
+    // ADR-017: Retry states for failed connections
+    RetryingConnection {
+        url: String,
+        topic: String,
+        retry_state: RetryState,
     },
     Connected {
         client: rumqttc::Client,
@@ -37,13 +43,27 @@ pub struct MQTTPublisherComponent {
     result_rx: std::sync::mpsc::Receiver<Result<(rumqttc::Client, rumqttc::Connection), String>>,
     // Background async worker
     _async_worker: Option<std::thread::JoinHandle<()>>,
+    // ADR-017: Retry configuration and state
+    retry_config: RetryConfig,
+    retry_state: RetryState,
 }
 
-const MQTT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+
+// ADR-017: Error classification for MQTT connections
+fn classify_mqtt_error(error: &str) -> ErrorType {
+    // MQTT connection errors are generally transient (network issues, broker unavailable)
+    // Only permanent errors would be invalid configuration
+    if error.contains("invalid") || error.contains("malformed") || error.contains("unauthorized") {
+        ErrorType::Permanent
+    } else {
+        ErrorType::Transient
+    }
+}
 
 // ADR-017: Async MQTT worker that runs in background thread with Tokio runtime
 async fn async_mqtt_worker(
-    mut cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
+    cmd_rx: std::sync::mpsc::Receiver<(String, String)>,
     result_tx: std::sync::mpsc::SyncSender<Result<(rumqttc::Client, rumqttc::Connection), String>>,
     waker: Option<SchedulerWaker>,
 ) {
@@ -118,6 +138,9 @@ impl Component for MQTTPublisherComponent {
             result_rx,
             // Background async worker
             _async_worker: async_worker,
+            // ADR-017: Retry configuration
+            retry_config: RetryConfig::default(),
+            retry_state: RetryState::new(),
         }
     }
 
@@ -162,9 +185,34 @@ impl Component for MQTTPublisherComponent {
                     return ProcessResult::DidWork(1);
                 }
                 Ok(Err(e)) => {
-                    error!("MQTT connection failed: {}", e);
-                    self.state = MQTTPublisherState::Finished;
-                    return ProcessResult::Finished;
+                    // ADR-017: Classify error and handle retry logic
+                    let error_type = classify_mqtt_error(&e);
+                    match error_type {
+                        ErrorType::Transient => {
+                            if self.retry_state.should_retry(error_type, &self.retry_config) {
+                                let mut retry_state = std::mem::take(&mut self.retry_state);
+                                retry_state.calculate_next_retry(&self.retry_config);
+                                retry_state.last_error_type = error_type;
+                                warn!("MQTT connection failed (transient error), will retry in {:?} (attempt {}): {}",
+                                      retry_state.next_retry_at - Instant::now(), retry_state.attempt, e);
+                                self.state = MQTTPublisherState::RetryingConnection {
+                                    url,
+                                    topic,
+                                    retry_state,
+                                };
+                                return ProcessResult::DidWork(1);
+                            } else {
+                                error!("MQTT connection failed after {} retries, giving up: {}", self.retry_config.max_retries, e);
+                                self.state = MQTTPublisherState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                        }
+                        ErrorType::Permanent => {
+                            error!("MQTT connection failed (permanent error), not retrying: {}", e);
+                            self.state = MQTTPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 Err(_) => {
                     // Connection still in progress, put state back and wait
@@ -236,6 +284,40 @@ impl Component for MQTTPublisherComponent {
                 // This should have been handled above
                 self.state = MQTTPublisherState::Finished;
                 ProcessResult::Finished
+            }
+
+            // ADR-017: Handle retry state
+            MQTTPublisherState::RetryingConnection { url, topic, retry_state } => {
+                // Check if it's time to retry
+                if retry_state.is_ready_to_retry() {
+                    // Try to send connection request again
+                    match self.cmd_tx.try_send((url.clone(), topic.clone())) {
+                        Ok(()) => {
+                            debug!("MQTT retry connection request enqueued to async worker (attempt {})", retry_state.attempt);
+                            self.state = MQTTPublisherState::Connecting { url, topic };
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // Channel full, wait and try again later
+                            context.wake_at(
+                                Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                            );
+                            self.state = MQTTPublisherState::RetryingConnection { url, topic, retry_state };
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died
+                            warn!("MQTT async worker disconnected during retry");
+                            self.state = MQTTPublisherState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                } else {
+                    // Not ready to retry yet, schedule wakeup
+                    context.wake_at(retry_state.next_retry_at);
+                    self.state = MQTTPublisherState::RetryingConnection { url, topic, retry_state };
+                    return ProcessResult::NoWork;
+                }
             }
 
             MQTTPublisherState::Connected {

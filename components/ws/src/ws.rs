@@ -2,14 +2,14 @@ use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult, PushError,
     ProcessSignalSink, ProcessSignalSource, SchedulerWaker, create_io_channels,
-    wake_scheduler,
+    wake_scheduler, ErrorType, RetryConfig, RetryState,
 };
 use log::{debug, error, info, trace, warn};
 
 // component-specific
 use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc as tokio_mpsc;
+
 use tungstenite::protocol::Message;
 
 #[derive(Debug)]
@@ -17,6 +17,11 @@ enum WSClientState {
     WaitingForConfig,
     Connecting {
         url: String,
+    },
+    // ADR-017: Retry states for failed connections
+    RetryingConnection {
+        url: String,
+        retry_state: RetryState,
     },
     Connected {
         client: tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
@@ -39,10 +44,53 @@ pub struct WSClientComponent {
     result_rx: std::sync::mpsc::Receiver<Result<tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>, tungstenite::Error>>,
     // Background async worker
     _async_worker: Option<std::thread::JoinHandle<()>>,
+    // ADR-017: Retry configuration and state
+    retry_config: RetryConfig,
+    retry_state: RetryState,
 }
 
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
+
+// ADR-017: Error classification for WebSocket connections
+fn classify_ws_error(error: &tungstenite::Error) -> ErrorType {
+    match error {
+        // Transient errors that should be retried
+        tungstenite::Error::Io(io_err) => match io_err.kind() {
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock => ErrorType::Transient,
+            std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted => ErrorType::Transient,
+            std::io::ErrorKind::NetworkUnreachable | std::io::ErrorKind::HostUnreachable => ErrorType::Transient,
+            _ => ErrorType::Transient, // Default network errors to transient
+        },
+
+        // HTTP errors - 5xx are transient, 4xx are permanent
+        tungstenite::Error::Http(response) => {
+            if response.status().is_server_error() {
+                ErrorType::Transient
+            } else {
+                ErrorType::Permanent
+            }
+        }
+
+        // TLS errors - often transient
+        tungstenite::Error::Tls(_) => ErrorType::Transient,
+
+        // Protocol errors - permanent
+        tungstenite::Error::Protocol(_) => ErrorType::Permanent,
+
+        // Capacity/URL errors - permanent
+        tungstenite::Error::Capacity(_) | tungstenite::Error::Url(_) => ErrorType::Permanent,
+
+        // Connection closed - transient (might reconnect)
+        tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed => ErrorType::Transient,
+
+        // UTF-8 errors - permanent
+        tungstenite::Error::Utf8 => ErrorType::Permanent,
+
+        // Other errors default to transient
+        _ => ErrorType::Transient,
+    }
+}
 
 // ADR-017: Async WebSocket worker that runs in background thread with Tokio runtime
 async fn async_ws_worker(
@@ -126,6 +174,9 @@ impl Component for WSClientComponent {
             result_rx,
             // Background async worker
             _async_worker: async_worker,
+            // ADR-017: Retry configuration
+            retry_config: RetryConfig::default(),
+            retry_state: RetryState::new(),
         }
     }
 
@@ -170,9 +221,33 @@ impl Component for WSClientComponent {
                     return ProcessResult::DidWork(1);
                 }
                 Ok(Err(e)) => {
-                    error!("WebSocket connection failed: {}", e);
-                    self.state = WSClientState::Finished;
-                    return ProcessResult::Finished;
+                    // ADR-017: Classify error and handle retry logic
+                    let error_type = classify_ws_error(&e);
+                    match error_type {
+                        ErrorType::Transient => {
+                            if self.retry_state.should_retry(error_type, &self.retry_config) {
+                                let mut retry_state = std::mem::take(&mut self.retry_state);
+                                retry_state.calculate_next_retry(&self.retry_config);
+                                retry_state.last_error_type = error_type;
+                                warn!("WebSocket connection failed (transient error), will retry in {:?} (attempt {}): {}",
+                                      retry_state.next_retry_at - Instant::now(), retry_state.attempt, e);
+                                self.state = WSClientState::RetryingConnection {
+                                    url: url.clone(),
+                                    retry_state,
+                                };
+                                return ProcessResult::DidWork(1);
+                            } else {
+                                error!("WebSocket connection failed after {} retries, giving up: {}", self.retry_config.max_retries, e);
+                                self.state = WSClientState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                        }
+                        ErrorType::Permanent => {
+                            error!("WebSocket connection failed (permanent error), not retrying: {}", e);
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 Err(_) => {
                     // Connection still in progress, wait
@@ -265,6 +340,40 @@ impl Component for WSClientComponent {
                 // This should have been handled above
                 self.state = WSClientState::Finished;
                 ProcessResult::Finished
+            }
+
+            // ADR-017: Handle retry state
+            WSClientState::RetryingConnection { url, retry_state } => {
+                // Check if it's time to retry
+                if retry_state.is_ready_to_retry() {
+                    // Try to send connection request again
+                    match self.cmd_tx.try_send(url.clone()) {
+                        Ok(()) => {
+                            debug!("WebSocket retry connection request enqueued to async worker (attempt {})", retry_state.attempt);
+                            self.state = WSClientState::Connecting { url };
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // Channel full, wait and try again later
+                            context.wake_at(
+                                Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                            );
+                            self.state = WSClientState::RetryingConnection { url, retry_state };
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died
+                            warn!("WebSocket async worker disconnected during retry");
+                            self.state = WSClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                } else {
+                    // Not ready to retry yet, schedule wakeup
+                    context.wake_at(retry_state.next_retry_at);
+                    self.state = WSClientState::RetryingConnection { url, retry_state };
+                    return ProcessResult::NoWork;
+                }
             }
 
             WSClientState::Connected {

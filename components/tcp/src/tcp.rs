@@ -3,7 +3,8 @@ use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
-    wake_scheduler, DEFAULT_MAX_INFLIGHT, DEFAULT_MAX_PENDING,
+    wake_scheduler,
+    ErrorType, RetryConfig, RetryState,
 };
 use log::{debug, error, info, trace, warn};
 
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc as tokio_mpsc;
+
 
 // for non-blocking I/O
 use mio::Token;
@@ -24,6 +25,11 @@ enum ClientState {
     WaitingForConfig,
     Connecting {
         addr: SocketAddr,
+    },
+    // ADR-017: Retry states for failed connections
+    RetryingConnection {
+        addr: SocketAddr,
+        retry_state: RetryState,
     },
     Connected {
         pending_messages: Vec<Vec<u8>>,
@@ -45,6 +51,9 @@ pub struct TCPClientComponent {
     result_rx: std::sync::mpsc::Receiver<Result<TcpStream, std::io::Error>>,
     // Background async worker
     _async_worker: Option<std::thread::JoinHandle<()>>,
+    // ADR-017: Retry configuration and state
+    retry_config: RetryConfig,
+    retry_state: RetryState,
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(10000);
@@ -52,9 +61,31 @@ const READ_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const WRITE_TIMEOUT: Option<Duration> = Some(Duration::from_millis(500));
 const READ_BUFFER: usize = 4096;
 
+// ADR-017: Error classification for TCP connections
+fn classify_tcp_error(error: &std::io::Error) -> ErrorType {
+    match error.kind() {
+        // Transient errors that should be retried
+        ErrorKind::TimedOut | ErrorKind::Interrupted | ErrorKind::WouldBlock => ErrorType::Transient,
+
+        // Connection-related errors that are often transient
+        ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
+            ErrorType::Transient
+        }
+
+        // Network unreachable, host unreachable - could be transient
+        ErrorKind::NetworkUnreachable | ErrorKind::HostUnreachable => ErrorType::Transient,
+
+        // Permanent errors that should fail immediately
+        ErrorKind::NotFound | ErrorKind::PermissionDenied | ErrorKind::InvalidInput => ErrorType::Permanent,
+
+        // Default to transient for unknown errors (network issues, etc.)
+        _ => ErrorType::Transient,
+    }
+}
+
 // ADR-017: Async TCP worker that runs in background thread with Tokio runtime
 async fn async_tcp_worker(
-    mut cmd_rx: std::sync::mpsc::Receiver<SocketAddr>,
+    cmd_rx: std::sync::mpsc::Receiver<SocketAddr>,
     result_tx: std::sync::mpsc::SyncSender<Result<TcpStream, std::io::Error>>,
     waker: Option<SchedulerWaker>,
 ) {
@@ -134,6 +165,9 @@ impl Component for TCPClientComponent {
             result_rx,
             // Background async worker
             _async_worker: async_worker,
+            // ADR-017: Retry configuration
+            retry_config: RetryConfig::default(),
+            retry_state: RetryState::new(),
         }
     }
 
@@ -180,9 +214,33 @@ impl Component for TCPClientComponent {
                     return ProcessResult::DidWork(1);
                 }
                 Ok(Err(e)) => {
-                    error!("TCP connection failed: {}", e);
-                    self.state = ClientState::Finished;
-                    return ProcessResult::Finished;
+                    // ADR-017: Classify error and handle retry logic
+                    let error_type = classify_tcp_error(&e);
+                    match error_type {
+                        ErrorType::Transient => {
+                            if self.retry_state.should_retry(error_type, &self.retry_config) {
+                                let mut retry_state = std::mem::take(&mut self.retry_state);
+                                retry_state.calculate_next_retry(&self.retry_config);
+                                retry_state.last_error_type = error_type;
+                                warn!("TCP connection failed (transient error), will retry in {:?} (attempt {}): {}",
+                                      retry_state.next_retry_at - Instant::now(), retry_state.attempt, e);
+                                self.state = ClientState::RetryingConnection {
+                                    addr: *addr,
+                                    retry_state,
+                                };
+                                return ProcessResult::DidWork(1);
+                            } else {
+                                error!("TCP connection failed after {} retries, giving up: {}", self.retry_config.max_retries, e);
+                                self.state = ClientState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                        }
+                        ErrorType::Permanent => {
+                            error!("TCP connection failed (permanent error), not retrying: {}", e);
+                            self.state = ClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
                 }
                 Err(_) => {
                     // Connection still in progress, wait
@@ -289,6 +347,40 @@ impl Component for TCPClientComponent {
                 // This should have been handled above
                 self.state = ClientState::Finished;
                 ProcessResult::Finished
+            }
+
+            // ADR-017: Handle retry state
+            ClientState::RetryingConnection { addr, retry_state } => {
+                // Check if it's time to retry
+                if retry_state.is_ready_to_retry() {
+                    // Try to send connection request again
+                    match self.cmd_tx.try_send(addr) {
+                        Ok(()) => {
+                            debug!("TCP retry connection request enqueued to async worker (attempt {})", retry_state.attempt);
+                            self.state = ClientState::Connecting { addr };
+                            return ProcessResult::DidWork(1);
+                        }
+                        Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                            // Channel full, wait and try again later
+                            context.wake_at(
+                                Instant::now() + flowd_component_api::DEFAULT_IO_POLL_INTERVAL,
+                            );
+                            self.state = ClientState::RetryingConnection { addr, retry_state };
+                            return ProcessResult::NoWork;
+                        }
+                        Err(std::sync::mpsc::TrySendError::Disconnected(_)) => {
+                            // Worker thread died
+                            warn!("TCP async worker disconnected during retry");
+                            self.state = ClientState::Finished;
+                            return ProcessResult::Finished;
+                        }
+                    }
+                } else {
+                    // Not ready to retry yet, schedule wakeup
+                    context.wake_at(retry_state.next_retry_at);
+                    self.state = ClientState::RetryingConnection { addr, retry_state };
+                    return ProcessResult::NoWork;
+                }
             }
 
             ClientState::Connected { mut pending_messages } => {

@@ -8,7 +8,7 @@ use log::{debug, error, info, trace, warn};
 // component-specific
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use std::time::Duration;
-use tokio::sync::mpsc;
+
 
 /*
 Goal: Finding the flowd instance to connect to in the network, enabling "zero configuration" and dynamic setups.

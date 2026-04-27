@@ -2,7 +2,7 @@ use flowd_component_api::{
     Component, ComponentComponentPayload, ComponentPort, GraphInportOutportHandle, NodeContext,
     ProcessEdgeSink, ProcessEdgeSource, ProcessInports, ProcessOutports, ProcessResult,
     ProcessSignalSink, ProcessSignalSource, PushError, SchedulerWaker, create_io_channels,
-    wake_scheduler, DEFAULT_MAX_INFLIGHT, DEFAULT_MAX_PENDING,
+    wake_scheduler,
 };
 use log::{debug, info, trace, warn};
 
@@ -13,7 +13,7 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 // Async imports
-use tokio::sync::mpsc;
+
 
 // Time formatting is handled by SystemTime
 
@@ -438,7 +438,7 @@ pub struct HTTPClientComponent {
 
 // ADR-017: Async HTTP worker that runs in background thread with Tokio runtime
 async fn async_http_worker(
-    mut cmd_rx: std::sync::mpsc::Receiver<String>,
+    cmd_rx: std::sync::mpsc::Receiver<String>,
     result_tx: std::sync::mpsc::SyncSender<Result<Vec<u8>, String>>,
     waker: Option<SchedulerWaker>,
 ) {
