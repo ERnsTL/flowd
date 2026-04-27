@@ -40,9 +40,8 @@ const READ_BUFFER: usize = 65536; // is allocated once and re-used for each read
 #[derive(Debug)]
 #[allow(dead_code)]
 enum ConnectionState {
-    Handshaking {
-        conn: Option<rustls::ServerConnection>,
-        sock: Option<TcpStream>,
+    PendingHandshake {
+        handshake_result: mpsc::Receiver<Result<(rustls::ServerConnection, TcpStream), String>>,
     },
     Active {
         conn: Option<rustls::ServerConnection>,
@@ -486,6 +485,7 @@ pub struct TLSServerComponent {
     next_client_id: u32,
     pending_outbound: std::collections::VecDeque<Vec<u8>>,
     pending_responses: std::collections::VecDeque<Vec<u8>>,
+    scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 }
 
 impl Component for TLSServerComponent {
@@ -495,7 +495,7 @@ impl Component for TLSServerComponent {
         signals_in: ProcessSignalSource,
         signals_out: ProcessSignalSink,
         _graph_inout: GraphInportOutportHandle,
-        _scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
+        scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
     ) -> Self
     where
         Self: Sized,
@@ -538,6 +538,7 @@ impl Component for TLSServerComponent {
             next_client_id: 0,
             pending_outbound: std::collections::VecDeque::new(),
             pending_responses: std::collections::VecDeque::new(),
+            scheduler_waker,
         }
     }
 
@@ -659,15 +660,47 @@ impl Component for TLSServerComponent {
                         let client_id = self.next_client_id;
                         self.next_client_id += 1;
 
+                        // Spawn async handshake
+                        let (tx, rx) = mpsc::channel();
+                        let scheduler_waker = self.scheduler_waker.clone();
+                        std::thread::spawn(move || {
+                            let result = (|| -> Result<(rustls::ServerConnection, TcpStream), String> {
+                                // Perform handshake in a loop until complete or error
+                                let mut conn = conn;
+                                let mut sock = sock;
+                                loop {
+                                    match conn.complete_io(&mut sock) {
+                                        Ok(_) => {
+                                            // Handshake complete
+                                            break Ok((conn, sock));
+                                        }
+                                        Err(e) => {
+                                            if e.kind() == std::io::ErrorKind::WouldBlock {
+                                                // Would block, sleep a bit and retry
+                                                std::thread::sleep(std::time::Duration::from_millis(10));
+                                                continue;
+                                            } else {
+                                                break Err(e.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                            })();
+                            let _ = tx.send(result);
+                            if let Some(waker) = scheduler_waker {
+                                waker();
+                            }
+                        });
+
                         let connection = Connection {
-                            state: ConnectionState::Handshaking { conn: Some(conn), sock: Some(sock) },
+                            state: ConnectionState::PendingHandshake { handshake_result: rx },
                             last_active: Instant::now(),
                         };
 
                         self.connections.insert(client_id, connection);
                         work_units += 1;
                         context.remaining_budget -= 1;
-                        debug!("new TLS connection {} in handshaking state", client_id);
+                        debug!("new TLS connection {} pending async handshake", client_id);
                     }
                     Err(e) => {
                         if e.kind() != std::io::ErrorKind::WouldBlock {
@@ -688,14 +721,11 @@ impl Component for TLSServerComponent {
             }
 
             match &mut connection.state {
-                ConnectionState::Handshaking { conn, sock } => {
-                    // Try to complete TLS handshake
-                    match conn.as_mut().unwrap().complete_io(sock.as_mut().unwrap()) {
-                        Ok(_) => {
+                ConnectionState::PendingHandshake { handshake_result } => {
+                    // Check if async handshake completed
+                    match handshake_result.try_recv() {
+                        Ok(Ok((conn, sock))) => {
                             // Handshake complete
-                            let conn = conn.take().unwrap();
-                            let sock = sock.take().unwrap();
-
                             connection.state = ConnectionState::Active {
                                 conn: Some(conn),
                                 sock: Some(sock),
@@ -706,20 +736,24 @@ impl Component for TLSServerComponent {
                             context.remaining_budget -= 1;
                             debug!("TLS handshake completed for client {}", client_id);
                         }
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                // Still handshaking, check timeout
-                                if connection.last_active.elapsed() > Duration::from_secs(30) {
-                                    warn!("TLS handshake timeout for client {}", client_id);
-                                    connections_to_remove.push(*client_id);
-                                }
-                            } else {
-                                warn!("TLS handshake failed for client {}: {}", client_id, e);
+                        Ok(Err(err)) => {
+                            warn!("TLS handshake failed for client {}: {}", client_id, err);
+                            connections_to_remove.push(*client_id);
+                        }
+                        Err(mpsc::TryRecvError::Empty) => {
+                            // Still pending, check timeout
+                            if connection.last_active.elapsed() > Duration::from_secs(30) {
+                                warn!("TLS handshake timeout for client {}", client_id);
                                 connections_to_remove.push(*client_id);
                             }
                         }
+                        Err(mpsc::TryRecvError::Disconnected) => {
+                            warn!("TLS handshake channel disconnected for client {}", client_id);
+                            connections_to_remove.push(*client_id);
+                        }
                     }
                 }
+
 
                 ConnectionState::Active {
                     conn,
