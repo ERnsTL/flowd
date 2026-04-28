@@ -267,6 +267,7 @@ And yes, `fbp-spec` is a separate thing, but it’s for component/graph data-dri
 
 ## noflo-ui: Issues, peculiarities and things in need of clarification
 
+* noflo-ui uses several non-standard runtime protocol messages that are not defined in the FBP protocol schema, including `runtime:reconnet`, `runtime:open`, `runtime:sendComponent`, `runtime:sendGraphChanges`, `runtime:sendGraph`, `runtime:sendSubgraph`, `runtime:loadTests`, and `runtime:runTests` - though these appear to be noflo-ui internal actions rather than protocol messages sent to the runtime (observed in tmp/noflo-ui/graphs/RuntimeMiddleware.fbp line 7, commit c0a72e6efd1dee34270858a52c0d6c3932df3f9f)
 * noflo-ui error "connection failed" = runtime down or real network problem
 * noflo-ui error "connection timed out" is more than network-level connection timeout; testsuite and noflo-ui does WebSocket upgrade, runtime:getruntime, component:list, network:status, component:getsource ...TODO anything more?
 * Firefox seems to automatically use wss:// even if requesting ws:// in connection URL
