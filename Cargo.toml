@@ -85,6 +85,8 @@ flowd-sexp = { path = "components/sexp" }
 flowd-delay = { path = "components/delay" }
 flowd-vis = { path = "components/vis" }
 flowd-panic = { path = "components/panic" }
+flowd-email = { path = "components/email" }
+flowd-router = { path = "components/router" }
 
 # for build.rs
 [build-dependencies]

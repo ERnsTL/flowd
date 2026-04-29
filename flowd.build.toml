@@ -286,3 +286,13 @@ struct = "FlowdVisComponent"
 name = "Panic"
 crate = "flowd-panic"
 struct = "PanicComponent"
+
+[[components.entry]]
+name = "EmailParser"
+crate = "flowd-email"
+struct = "EmailParserComponent"
+
+[[components.entry]]
+name = "GenericRouter"
+crate = "flowd-router"
+struct = "GenericRouterComponent"
