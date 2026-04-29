@@ -144,6 +144,21 @@ crate = "flowd-imap"
 struct = "IMAPFetchIdleComponent"
 
 [[components.entry]]
+name = "IMAPFetch"
+crate = "flowd-imap"
+struct = "IMAPFetchComponent"
+
+[[components.entry]]
+name = "IMAPMoveCopy"
+crate = "flowd-imap"
+struct = "IMAPMoveCopyComponent"
+
+[[components.entry]]
+name = "IMAPDelete"
+crate = "flowd-imap"
+struct = "IMAPDeleteComponent"
+
+[[components.entry]]
 name = "OpenAIChat"
 crate = "flowd-openai"
 struct = "OpenAIChatComponent"
