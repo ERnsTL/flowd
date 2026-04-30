@@ -790,6 +790,7 @@ pub struct IMAPFetchComponent {
     cmd_tx: Sender<NewFetchCommand>,
     result_rx: Receiver<NewFetchResult>,
     worker_handle: Option<JoinHandle<()>>,
+    pending_messages: VecDeque<Vec<u8>>,
     poll_inflight: bool,
 }
 
@@ -828,6 +829,7 @@ impl Component for IMAPFetchComponent {
             cmd_tx,
             result_rx,
             worker_handle,
+            pending_messages: VecDeque::new(),
             poll_inflight: false,
         }
     }
@@ -857,28 +859,26 @@ impl Component for IMAPFetchComponent {
         }
 
         // Handle results from worker
-        if let Ok(result) = self.result_rx.try_recv() {
+        while let Ok(result) = self.result_rx.try_recv() {
             match result {
                 NewFetchResult::Connected => {
                     info!("IMAP connection established");
                     self.state = NewFetchState::Active;
+                    self.poll_inflight = false;
                     work_units += 1;
                 }
                 NewFetchResult::Messages(messages) => {
                     for message_json in messages {
                         let json_str = serde_json::to_string(&message_json)
                             .unwrap_or_else(|_| r#"{"error": "failed to serialize message"}"#.to_string());
-                        let output_msg = FbpMessage::from_bytes(json_str.into_bytes());
-                        if let Err(_) = self.out.push(output_msg) {
-                            warn!("output buffer full, dropping message");
-                        }
+                        self.pending_messages.push_back(json_str.into_bytes());
                     }
                     self.poll_inflight = false;
                     work_units += 1;
                 }
                 NewFetchResult::IdleTimeout => {
                     self.poll_inflight = false;
-                    // Continue polling
+                    work_units += 1;
                 }
                 NewFetchResult::Error(e) => {
                     error!("IMAP error: {}", e);
@@ -890,6 +890,21 @@ impl Component for IMAPFetchComponent {
                     self.state = NewFetchState::Finished;
                     return ProcessResult::Finished;
                 }
+            }
+        }
+
+        while context.remaining_budget > 0 {
+            let Some(msg) = self.pending_messages.front().cloned() else {
+                break;
+            };
+            let output_msg = FbpMessage::from_bytes(msg);
+            match self.out.push(output_msg) {
+                Ok(()) => {
+                    self.pending_messages.pop_front();
+                    context.remaining_budget -= 1;
+                    work_units += 1;
+                }
+                Err(PushError::Full(_)) => break,
             }
         }
 
@@ -913,7 +928,7 @@ impl Component for IMAPFetchComponent {
                 return ProcessResult::NoWork;
             }
             NewFetchState::Active => {
-                if !self.poll_inflight {
+                if !self.poll_inflight && self.pending_messages.is_empty() {
                     if self.cmd_tx.send(NewFetchCommand::Poll).is_err() {
                         self.state = NewFetchState::Finished;
                         return ProcessResult::Finished;
@@ -923,6 +938,10 @@ impl Component for IMAPFetchComponent {
                 }
             }
             NewFetchState::Finished => return ProcessResult::Finished,
+        }
+
+        if !self.pending_messages.is_empty() {
+            context.signal_ready();
         }
 
         if work_units > 0 {
