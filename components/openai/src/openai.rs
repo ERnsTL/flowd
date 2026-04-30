@@ -61,6 +61,18 @@ pub struct OpenAIChatComponent {
 
 const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+fn message_to_utf8_text(msg: &FbpMessage) -> Result<String, String> {
+    if let Some(text) = msg.as_text() {
+        return Ok(text.to_string());
+    }
+    if let Some(bytes) = msg.as_bytes() {
+        return std::str::from_utf8(bytes)
+            .map(|s| s.to_string())
+            .map_err(|e| format!("message bytes are not valid UTF-8: {}", e));
+    }
+    Err("message must be text or UTF-8 bytes".to_string())
+}
+
 async fn async_openai_main(
     cmd_rx: std::sync::mpsc::Receiver<OpenAICommand>,
     result_tx: std::sync::mpsc::SyncSender<OpenAIResult>,
@@ -88,14 +100,26 @@ async fn async_openai_main(
             }
             OpenAICommand::ChatCompletion(msg_bytes) => {
                 if let Some(ref cfg) = config {
-                    let user_message_content = msg_bytes.as_text().expect("invalid text in message");
+                    let user_message_content = match message_to_utf8_text(&msg_bytes) {
+                        Ok(text) => text,
+                        Err(e) => {
+                            let _ = result_tx.send(OpenAIResult::Error(format!(
+                                "invalid message payload for OpenAI chat completion: {}",
+                                e
+                            )));
+                            if let Some(ref waker) = scheduler_waker {
+                                waker();
+                            }
+                            continue;
+                        }
+                    };
 
                     // Prepare messages for this request
                     let request_messages = if cfg.context {
                         // Add user message to context
                         messages.push(ChatCompletionMessage {
                             role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content.to_string()),
+                            content: Some(user_message_content.clone()),
                             name: None,
                             function_call: None,
                             tool_call_id: None,
@@ -106,7 +130,7 @@ async fn async_openai_main(
                         // Single-turn conversation
                         vec![ChatCompletionMessage {
                             role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content.to_string()),
+                            content: Some(user_message_content),
                             name: None,
                             function_call: None,
                             tool_call_id: None,
@@ -338,12 +362,18 @@ impl Component for OpenAIChatComponent {
             OpenAIChatState::WaitingForInitialPrompt => {
                 // Check if we have initial prompt on IN port
                 if let Ok(prompt_msg) = self.inn.pop() {
-                    let prompt_str = prompt_msg.as_text().expect("invalid text in initial prompt");
+                    let prompt_str = match message_to_utf8_text(&prompt_msg) {
+                        Ok(text) => text,
+                        Err(e) => {
+                            error!("invalid initial prompt payload: {}", e);
+                            return ProcessResult::Finished;
+                        }
+                    };
 
                     // Send initial prompt to async thread
                     if let Err(_) = self
                         .cmd_sender
-                        .send(OpenAICommand::SetInitialPrompt(prompt_str.to_string()))
+                        .send(OpenAICommand::SetInitialPrompt(prompt_str))
                     {
                         error!("Failed to send initial prompt command");
                         return ProcessResult::Finished;
