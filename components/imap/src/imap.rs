@@ -249,7 +249,7 @@ enum FetchState {
 
 #[derive(Debug)]
 enum FetchCommand {
-    Connect(String),
+    Connect(FetchConfig),
     Poll,
     Shutdown,
 }
@@ -261,6 +261,14 @@ enum FetchResult {
     IdleTimeout,
     Error(String),
     Stopped,
+}
+
+#[derive(Debug, Clone)]
+struct FetchConfig {
+    url: String,
+    delete: bool,
+    include_full: bool,
+    include_uid: bool,
 }
 
 pub struct IMAPFetchIdleComponent {
@@ -385,13 +393,22 @@ impl Component for IMAPFetchIdleComponent {
             FetchState::WaitingForConfig => {
                 if let Ok(url_vec) = self.conf.pop() {
                     let url = url_vec.as_text().expect("invalid text").to_owned();
-                    if self.cmd_tx.send(FetchCommand::Connect(url)).is_err() {
-                        self.state = FetchState::Finished;
-                        return ProcessResult::Finished;
+                    match parse_fetch_config(&url) {
+                        Ok(fetch_conf) => {
+                            if self.cmd_tx.send(FetchCommand::Connect(fetch_conf)).is_err() {
+                                self.state = FetchState::Finished;
+                                return ProcessResult::Finished;
+                            }
+                            self.state = FetchState::Connecting;
+                            self.poll_inflight = true;
+                            work_units += 1;
+                        }
+                        Err(e) => {
+                            error!("invalid IMAPFetchIdle CONF: {}", e);
+                            self.state = FetchState::Finished;
+                            return ProcessResult::Finished;
+                        }
                     }
-                    self.state = FetchState::Connecting;
-                    self.poll_inflight = true;
-                    work_units += 1;
                 }
             }
             FetchState::Connecting => {}
@@ -425,7 +442,7 @@ impl Component for IMAPFetchIdleComponent {
     {
         ComponentComponentPayload {
             name: String::from("IMAPFetchIdle"),
-            description: String::from("Fetches and then idles on the IMAP mailbox given in CONF and forwards received messages to the OUT outport."),
+            description: String::from("Fetches and then idles on the IMAP mailbox given in CONF and forwards received messages to the OUT outport. Supports CONF query params delete=true|false and retrieve=full|uid|full,uid."),
             icon: String::from("cloud-download"),
             subgraph: false,
             in_ports: vec![ComponentPort {
@@ -434,9 +451,9 @@ impl Component for IMAPFetchIdleComponent {
                 schema: None,
                 required: true,
                 is_arrayport: false,
-                description: String::from("connection URL which includes encryption, server, username, password, mailbox name"),
+                description: String::from("connection URL with optional query params: delete=true|false and retrieve=full|uid|full,uid"),
                 values_allowed: vec![],
-                value_default: String::from("imaps://username:password@example.com:993/INBOX"),
+                value_default: String::from("imaps://username:password@example.com:993/INBOX?delete=false&retrieve=full"),
             }],
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
@@ -518,13 +535,35 @@ fn fetch_worker_loop(
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut session: Option<imap::Session<native_tls::TlsStream<std::net::TcpStream>>> = None;
+    let mut fetch_config = FetchConfig {
+        url: String::new(),
+        delete: false,
+        include_full: true,
+        include_uid: false,
+    };
 
     while let Ok(cmd) = cmd_rx.recv() {
         let result = match cmd {
-            FetchCommand::Connect(url) => match login_and_connect(&url) {
+            FetchCommand::Connect(config) => match login_and_connect(&config.url) {
                 Ok((mut sess, _mailbox)) => {
+                    fetch_config = config;
                     // fetch unseen once immediately after connect
-                    let initial = fetch_unseen_messages(&mut sess).unwrap_or_default();
+                    let initial: Vec<Vec<u8>> =
+                        fetch_unseen_messages_configurable(&mut sess, fetch_config.delete)
+                        .map(|messages| {
+                            messages
+                                .into_iter()
+                                .map(|(uid, body)| {
+                                    encode_fetch_output(
+                                        &uid,
+                                        &body,
+                                        fetch_config.include_full,
+                                        fetch_config.include_uid,
+                                    )
+                                })
+                                .collect::<Vec<Vec<u8>>>()
+                        })
+                        .unwrap_or_default();
                     session = Some(sess);
                     if !initial.is_empty() {
                         let _ = result_tx.send(FetchResult::Messages(initial));
@@ -536,8 +575,23 @@ fn fetch_worker_loop(
             FetchCommand::Poll => {
                 if let Some(sess) = session.as_mut() {
                     match sess.idle().and_then(|idle| idle.wait_with_timeout(IDLE_POLL_TIMEOUT)) {
-                        Ok(WaitOutcome::MailboxChanged) => match fetch_unseen_messages(sess) {
-                            Ok(messages) => FetchResult::Messages(messages),
+                        Ok(WaitOutcome::MailboxChanged) => match fetch_unseen_messages_configurable(
+                            sess,
+                            fetch_config.delete,
+                        ) {
+                            Ok(messages) => FetchResult::Messages(
+                                messages
+                                    .into_iter()
+                                    .map(|(uid, body)| {
+                                        encode_fetch_output(
+                                            &uid,
+                                            &body,
+                                            fetch_config.include_full,
+                                            fetch_config.include_uid,
+                                        )
+                                    })
+                                    .collect(),
+                            ),
                             Err(e) => FetchResult::Error(e),
                         },
                         Ok(WaitOutcome::TimedOut) => FetchResult::IdleTimeout,
@@ -565,6 +619,63 @@ fn fetch_worker_loop(
         if let Some(waker) = scheduler_waker.as_ref() {
             waker();
         }
+    }
+}
+
+fn parse_fetch_config(conf_url: &str) -> Result<FetchConfig, String> {
+    let parsed = url::Url::parse(conf_url).map_err(|e| e.to_string())?;
+
+    let mut delete = false;
+    let mut include_full = true;
+    let mut include_uid = false;
+
+    for (key, value) in parsed.query_pairs() {
+        if key.eq_ignore_ascii_case("delete") {
+            delete = value
+                .parse::<bool>()
+                .map_err(|_| format!("invalid delete value '{}', expected true or false", value))?;
+        } else if key.eq_ignore_ascii_case("retrieve") {
+            include_full = false;
+            include_uid = false;
+            for token in value.split(',').map(|t| t.trim().to_ascii_lowercase()) {
+                match token.as_str() {
+                    "full" => include_full = true,
+                    "uid" => include_uid = true,
+                    "" => {}
+                    _ => {
+                        return Err(format!(
+                            "invalid retrieve token '{}', expected full and/or uid",
+                            token
+                        ));
+                    }
+                }
+            }
+            if !include_full && !include_uid {
+                return Err("retrieve must include at least one of full or uid".to_string());
+            }
+        }
+    }
+
+    Ok(FetchConfig {
+        url: conf_url.to_string(),
+        delete,
+        include_full,
+        include_uid,
+    })
+}
+
+fn encode_fetch_output(uid: &str, body: &[u8], include_full: bool, include_uid: bool) -> Vec<u8> {
+    match (include_full, include_uid) {
+        (true, false) => body.to_vec(),
+        (false, true) => uid.as_bytes().to_vec(),
+        (true, true) => serde_json::to_vec(&serde_json::json!({
+            "uid": uid,
+            "body": body
+        }))
+        .unwrap_or_else(|_| {
+            br#"{"error":"failed to serialize fetched message","uid":"","body":[]}"#.to_vec()
+        }),
+        (false, false) => Vec::new(),
     }
 }
 
@@ -1376,9 +1487,10 @@ impl Drop for IMAPDeleteComponent {
     }
 }
 
-fn fetch_unseen_messages(
+fn fetch_unseen_messages_configurable(
     imap_session: &mut imap::Session<native_tls::TlsStream<std::net::TcpStream>>,
-) -> Result<Vec<Vec<u8>>, String> {
+    delete: bool,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
     let uids_set = imap_session
         .uid_search("UNSEEN")
         .map_err(|e| e.to_string())?;
@@ -1402,14 +1514,16 @@ fn fetch_unseen_messages(
 
     let mut out = Vec::new();
     for message in messages.iter() {
-        if let Some(body) = message.body() {
-            out.push(body.to_vec());
+        if let (Some(uid), Some(body)) = (message.uid, message.body()) {
+            out.push((uid.to_string(), body.to_vec()));
         }
     }
 
-    imap_session
-        .uid_store(&uid_set, "+FLAGS (\\Deleted)")
-        .map_err(|e| e.to_string())?;
+    if delete {
+        imap_session
+            .uid_store(&uid_set, "+FLAGS (\\Deleted)")
+            .map_err(|e| e.to_string())?;
+    }
 
     Ok(out)
 }
