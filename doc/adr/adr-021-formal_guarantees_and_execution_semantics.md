@@ -156,6 +156,7 @@ Each guarantee is:
 | ----------- | ------------- |
 | Single edge | FIFO          |
 | Node input  | per-edge FIFO |
+| IIP + edge on same inport (startup) | IIPs are delivered before packets from that connected edge |
 
 ---
 
@@ -163,6 +164,23 @@ Each guarantee is:
 
 * no global ordering across edges
 * no ordering across distributed boundaries
+
+#### Clarification: IIP + Connected Edge on Same Inport
+
+When a node inport has both:
+
+* one incoming non-IIP edge, and
+* one or more IIPs targeting the same inport
+
+the runtime enqueues IIPs into that edge channel during graph startup before source-node execution begins. Therefore:
+
+* IIPs on that inport are observed before packets emitted later by the connected source component
+* FIFO remains valid within that shared channel
+
+Scope limits:
+
+* this guarantee is startup-scoped for initial IIPs
+* it does not imply global ordering versus other edges or distributed links
 
 ---
 

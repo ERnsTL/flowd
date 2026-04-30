@@ -1,7 +1,7 @@
     use super::bench_api::{linear_harness_direct, BenchRuntimeHarness};
     use super::{
         Graph, GraphAddinitialRequestPayload, GraphEdge, GraphEdgeMetadata, GraphIIPSpecNetwork,
-        GraphNodeMetadata, GraphNodeSpec, GraphNodeSpecNetwork,
+        GraphNodeMetadata, GraphNodeSpec, GraphNodeSpecNetwork, GraphPort, GraphPortMetadata,
     };
     use std::any::Any;
     use std::fs;
@@ -202,4 +202,121 @@
         );
 
         fs::remove_file(&file_path).expect("failed to remove FileReader test input file");
+    }
+
+    #[test]
+    fn iip_and_regular_edge_can_share_same_non_array_inport() {
+        let graph_name = "iip_and_regular_edge_same_inport";
+        let mut graph = Graph::new(
+            graph_name.to_string(),
+            "IIP + incoming edge on same inport".to_string(),
+            "test".to_string(),
+        );
+
+        graph.outports.insert(
+            "OUT".to_string(),
+            GraphPort {
+                process: "target".to_string(),
+                port: "OUT".to_string(),
+                metadata: GraphPortMetadata { x: 200, y: 0 },
+            },
+        );
+
+        graph
+            .add_node(
+                graph_name.to_string(),
+                "Repeat".to_string(),
+                "source".to_string(),
+                GraphNodeMetadata {
+                    x: 40,
+                    y: 80,
+                    width: Some(72),
+                    height: Some(72),
+                    label: Some("source".to_string()),
+                    icon: None,
+                },
+            )
+            .expect("failed to add source Repeat node");
+
+        graph
+            .add_node(
+                graph_name.to_string(),
+                "Repeat".to_string(),
+                "target".to_string(),
+                GraphNodeMetadata {
+                    x: 180,
+                    y: 80,
+                    width: Some(72),
+                    height: Some(72),
+                    label: Some("target".to_string()),
+                    icon: None,
+                },
+            )
+            .expect("failed to add target Repeat node");
+
+        graph
+            .add_edge(
+                graph_name.to_string(),
+                GraphEdge {
+                    source: GraphNodeSpec {
+                        process: "source".to_string(),
+                        port: "OUT".to_string(),
+                        index: None,
+                    },
+                    data: None,
+                    target: GraphNodeSpec {
+                        process: "target".to_string(),
+                        port: "IN".to_string(),
+                        index: None,
+                    },
+                    metadata: GraphEdgeMetadata::new(None, None, None),
+                },
+            )
+            .expect("failed to add edge source.OUT -> target.IN");
+
+        graph
+            .add_initialip(GraphAddinitialRequestPayload {
+                graph: graph_name.to_string(),
+                src: GraphIIPSpecNetwork {
+                    data: "iip-message".to_string(),
+                },
+                tgt: GraphNodeSpecNetwork {
+                    node: "target".to_string(),
+                    port: "IN".to_string(),
+                    index: None,
+                },
+                metadata: GraphEdgeMetadata::new(None, None, None),
+                secret: None,
+            })
+            .expect("failed to add IIP to target.IN");
+
+        graph
+            .add_initialip(GraphAddinitialRequestPayload {
+                graph: graph_name.to_string(),
+                src: GraphIIPSpecNetwork {
+                    data: "edge-message".to_string(),
+                },
+                tgt: GraphNodeSpecNetwork {
+                    node: "source".to_string(),
+                    port: "IN".to_string(),
+                    index: None,
+                },
+                metadata: GraphEdgeMetadata::new(None, None, None),
+                secret: None,
+            })
+            .expect("failed to add IIP to source.IN");
+
+        let harness = BenchRuntimeHarness::new(graph);
+        harness.start().expect("runtime failed to start");
+
+        harness
+            .wait_for_outport_data("OUT", 2, Duration::from_secs(3))
+            .expect("did not receive both packets on OUT");
+
+        harness.assert_outputs_set_equal(
+            "OUT",
+            &[b"iip-message".as_ref(), b"edge-message".as_ref()],
+        );
+
+        harness.stop().expect("runtime stop failed");
     }

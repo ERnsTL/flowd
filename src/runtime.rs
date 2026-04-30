@@ -934,9 +934,14 @@ impl Runtime {
             }
         }
         drop(known_source_processes);
-        // arrayports: check if all edges having the same target process have a target port that is marked as an arry port
+        // arrayports: check if all non-IIP edges having the same target process have a target port that is marked as an array port
         let mut known_target_processes: MultiMap<String, String> = MultiMap::new();
         for edge in graph.edges.iter() {
+            // IIPs are allowed in addition to one incoming edge on a non-array inport.
+            // They are injected into the matching edge channel further below.
+            if edge.data.is_some() {
+                continue;
+            }
             if let Some(ports) = known_target_processes.get_vec_mut(&edge.target.process) {
                 // check for multiple connections to the same target port
                 if ports.contains(&edge.target.port) {
@@ -975,6 +980,16 @@ impl Runtime {
             }
         }
         drop(known_target_processes);
+
+        let mut iips_per_target: HashMap<(String, String), Vec<String>> = HashMap::new();
+        for edge in graph.edges.iter() {
+            if let Some(iip) = &edge.data {
+                iips_per_target
+                    .entry((edge.target.process.clone(), edge.target.port.clone()))
+                    .or_insert_with(Vec::new)
+                    .push(iip.clone());
+            }
+        }
 
         // generate all connections
         struct ProcPorts {
@@ -1025,108 +1040,115 @@ impl Runtime {
 
         // Clone scheduler for signaling closures
         let scheduler_for_signaling = scheduler_arc.clone();
-        // fill keys with connections
+        // fill keys with non-IIP connections first
         for edge in graph.edges.iter() {
-            if let Some(iip) = &edge.data {
-                // prepare IIP edge
-                debug!(
-                    "preparing edge from IIP to {}.{}",
-                    edge.target.process, edge.target.port
-                );
-                //TODO sink will not be hooked up to anything when leaving this for loop; is that good?
-                let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
-                // send IIP
-                sink.push(FbpMessage::from_text(iip.clone()))
-                    .expect("failed to send IIP into process channel"); //TODO optimize as_bytes() / clone or String in Edge struct
-                                                                        // insert into inports of target process
-                let targetproc = ports_all
-                    .get_mut(&edge.target.process)
-                    .expect("process IIP target assignment process not found");
-                // arrayports: insert, but remember that this is a multimap
-                // Compatibility: graph payloads from clients/tests often use lowercase "in"/"out",
-                // but built-in components require uppercase port keys ("IN"/"OUT").
-                targetproc
-                    .inports
-                    .insert(edge.target.port.to_ascii_uppercase(), source);
-                // assign into outports of source process
-                // nothing to do in case of IIP - this also means that sink will go ouf ot scope and that source.is_abandoned() = Arc::strong_count() will be 1
-                // in summary: IIP ports are closed/abandoned
-            } else {
-                // prepare edge
-                debug!(
-                    "preparing edge from {}.{} to {}.{}",
-                    edge.source.process, edge.source.port, edge.target.process, edge.target.port
-                );
-                let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
+            if edge.data.is_some() {
+                continue;
+            }
 
-                // insert into inports of target process
-                let targetproc = ports_all
-                    .get_mut(&edge.target.process)
-                    .expect("process IIP target assignment process not found");
-                // arrayports: insert, but remember that this is a multimap
-                // Compatibility: normalize protocol port names to component runtime port names.
-                targetproc
-                    .inports
-                    .insert(edge.target.port.to_ascii_uppercase(), source);
-                // assign into outports of source process
-                let sourceproc = ports_all
-                    .get_mut(&edge.source.process)
-                    .expect("process source assignment process not found");
-                // arrayports: insert, but remember that this is a multimap
-                let target_process = edge.target.process.clone();
-                let scheduler_clone = scheduler_for_signaling.clone();
-                let mut edge_sink = ProcessEdgeSink::new(
-                    sink,
-                    None,
-                    Some(target_process.clone()),
-                    Some(Arc::new(move || {
-                        let _ = scheduler_clone.signal_ready(&target_process);
-                    })),
-                );
+            // prepare edge
+            debug!(
+                "preparing edge from {}.{} to {}.{}",
+                edge.source.process, edge.source.port, edge.target.process, edge.target.port
+            );
+            let (sink, source) = ProcessEdge::new(PROCESSEDGE_BUFSIZE);
 
-                // Enable per-edge trace events that feed trace protocol and network:data debug stream.
+            // insert into inports of target process
+            let targetproc = ports_all
+                .get_mut(&edge.target.process)
+                .expect("process IIP target assignment process not found");
+            // arrayports: insert, but remember that this is a multimap
+            // Compatibility: normalize protocol port names to component runtime port names.
+            targetproc
+                .inports
+                .insert(edge.target.port.to_ascii_uppercase(), source);
+            // assign into outports of source process
+            let sourceproc = ports_all
+                .get_mut(&edge.source.process)
+                .expect("process source assignment process not found");
+            // arrayports: insert, but remember that this is a multimap
+            let target_process = edge.target.process.clone();
+            let scheduler_clone = scheduler_for_signaling.clone();
+            let mut edge_sink = ProcessEdgeSink::new(
+                sink,
+                None,
+                Some(target_process.clone()),
+                Some(Arc::new(move || {
+                    let _ = scheduler_clone.signal_ready(&target_process);
+                })),
+            );
+
+            let iip_target_key = (edge.target.process.clone(), edge.target.port.clone());
+            if let Some(iips) = iips_per_target.remove(&iip_target_key) {
+                for iip in iips {
+                    edge_sink
+                        .push(FbpMessage::from_text(iip))
+                        .expect("failed to inject IIP into process edge channel");
+                }
+            }
+
+            // Enable per-edge trace events that feed trace protocol and network:data debug stream.
+            let edge_id = format!(
+                "{}.{}-{}.{}",
+                edge.source.process, edge.source.port, edge.target.process, edge.target.port
+            );
+            if let Some(trace_sender) = &self.trace_sender {
+                edge_sink.enable_tracing(
+                    edge_id,
+                    edge.source.process.clone(),
+                    edge.source.port.clone(),
+                    edge.target.process.clone(),
+                    edge.target.port.clone(),
+                    graph.properties.name.clone(),
+                    trace_sender.clone(),
+                );
+            }
+
+            sourceproc.outports.insert(
+                edge.source.port.to_ascii_uppercase(),
+                edge_sink,
+            );
+
+            // Emit trace:connect event if tracing is enabled
+            if self.tracing {
                 let edge_id = format!(
                     "{}.{}-{}.{}",
                     edge.source.process, edge.source.port, edge.target.process, edge.target.port
                 );
-                if let Some(trace_sender) = &self.trace_sender {
-                    edge_sink.enable_tracing(
-                        edge_id,
-                        edge.source.process.clone(),
-                        edge.source.port.clone(),
-                        edge.target.process.clone(),
-                        edge.target.port.clone(),
-                        graph.properties.name.clone(),
-                        trace_sender.clone(),
-                    );
-                }
-
-                sourceproc.outports.insert(
-                    edge.source.port.to_ascii_uppercase(),
-                    edge_sink,
-                );
-
-                // Emit trace:connect event if tracing is enabled
-                if self.tracing {
-                    let edge_id = format!("{}.{}-{}.{}", edge.source.process, edge.source.port, edge.target.process, edge.target.port);
-                    let connect_payload = ApiTraceConnectEventPayload {
-                        id: edge_id,
-                        src: TraceGraphNodeSpecNetwork {
-                            node: edge.source.process.clone(),
-                            port: edge.source.port.clone(),
-                            index: edge.source.index.clone(),
-                        },
-                        tgt: TraceGraphNodeSpecNetwork {
-                            node: edge.target.process.clone(),
-                            port: edge.target.port.clone(),
-                            index: edge.target.index.clone(),
-                        },
-                        graph: graph.properties.name.clone(),
-                    };
-                    send_trace_connect(&graph_inout_arc, connect_payload);
-                }
+                let connect_payload = ApiTraceConnectEventPayload {
+                    id: edge_id,
+                    src: TraceGraphNodeSpecNetwork {
+                        node: edge.source.process.clone(),
+                        port: edge.source.port.clone(),
+                        index: edge.source.index.clone(),
+                    },
+                    tgt: TraceGraphNodeSpecNetwork {
+                        node: edge.target.process.clone(),
+                        port: edge.target.port.clone(),
+                        index: edge.target.index.clone(),
+                    },
+                    graph: graph.properties.name.clone(),
+                };
+                send_trace_connect(&graph_inout_arc, connect_payload);
             }
         }
+
+        // Remaining IIPs have no matching incoming edge and therefore keep their dedicated channel.
+        for ((target_process, target_port), iips) in iips_per_target.into_iter() {
+            for iip in iips {
+                debug!("preparing edge from IIP to {}.{}", target_process, target_port);
+                let (mut sink, source) = ProcessEdge::new(PROCESSEDGE_IIP_BUFSIZE);
+                sink.push(FbpMessage::from_text(iip))
+                    .expect("failed to send IIP into process channel");
+                let targetproc = ports_all
+                    .get_mut(&target_process)
+                    .expect("process IIP target assignment process not found");
+                targetproc
+                    .inports
+                    .insert(target_port.to_ascii_uppercase(), source);
+            }
+        }
+
         for (public_name, edge) in graph.inports.iter() {
             // prepare edge
             debug!(
