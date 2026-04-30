@@ -180,7 +180,7 @@ Components are integrated at compile time.
 
 To use components:
 
-1. Add crate dependency (local path recommended)
+1. Add crate dependency (local path or git repository reference)
 2. Register in `flowd.build.toml`
 3. Build
 
@@ -328,7 +328,7 @@ Professional services around `flowd` are available, including:
 
 Contact:
 
-[https://www.summitsolutions.at/contactus](https://www.summitsolutions.at/contactus) or book a [strategy meeting](https://www.summitsolutions.at/appointment/1).
+[https://www.summitsolutions.at/contactus](https://www.summitsolutions.at/contactus) or book a [strategy session](https://www.summitsolutions.at/appointment/1).
 
 For details, see [commercial options](doc/business/commercial.md).
 
