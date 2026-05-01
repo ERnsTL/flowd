@@ -204,7 +204,17 @@ schema_ref may reference:
 - registry-based schema entries
 - external schema resources
 
-Resolution is implementation-defined but must be deterministic.
+### Schema Resolution (Normative)
+
+schema_ref resolution MUST follow a deterministic and portable strategy:
+
+1. If schema_ref matches a registry entry → resolve from TypeRegistry
+2. Else if schema_ref is an inline identifier → resolve within graph scope
+3. External schema resolution (e.g. network/URI) is NOT part of the core model
+
+All implementations MUST resolve schema_ref identically for the same graph definition.
+
+No implementation-specific resolution strategies are allowed.
 
 ---
 
@@ -343,20 +353,25 @@ The exact interpretation rules are defined as:
 2. Else if structured literal (e.g. JSON object) → infer candidate type via schema match (if unambiguous)
 3. Else → no type can be determined
 
-#### IIP Type Declaration
+#### IIP Type Declaration (Normative)
 
 An IIP is considered "typed" if one of the following is present:
 
-1. Explicit TypeId annotation:
+1. Explicit TypeId annotation using the canonical field name:
 
    {
-     "type": "email/EmailRaw@1",
-     "payload": { ... }
+     "type": "<TypeId>",
+     "payload": <value>
    }
+
+   - The field name "type" is REQUIRED and case-sensitive
+   - The value MUST be a valid canonical TypeId string
 
 2. Structured literal compatible with a schema that uniquely identifies a TypeId
 
 If neither is present, the IIP is considered untyped.
+
+The "payload" field name is recommended but not required, as long as the structure remains unambiguous.
 
 ## 5. Lifecycle Integration
 
@@ -393,8 +408,6 @@ Stable codes:
 * `W_IIP_UNTYPED_PAYLOAD`
 * `W_UNSAFE_ANY_EDGE`
 * `W_UNSAFE_CORRELATION_BYPASS`
-
-Errors are machine-readable and include node/port/edge references.
 
 Validation issues are machine-readable and include node/port/edge references.
 
