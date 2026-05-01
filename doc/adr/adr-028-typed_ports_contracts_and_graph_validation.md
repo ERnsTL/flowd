@@ -1,6 +1,6 @@
 # ADR-028: Typed Ports, Contracts & Graph Validation (v4)
 
-Status: Proposed
+Status: Accepted
 Date: 2026-05-01
 
 
@@ -138,9 +138,9 @@ Compatibility Matrix (Producer → Consumer)
 | Producer | Consumer | Allowed | Reason |
 |----------|----------|--------|--------|
 | T@1      | T@1      | ✅     | exact match |
-| T@1      | T@2      | ✅     | forward-compatible (consumer tolerant) |
+| T@1      | T@2      | ✅ (conditional)     | Allowed ONLY if compatibility is explicitly declared in the TypeRegistry |
 | T@2      | T@1      | ❌     | consumer cannot interpret newer data |
-| T@2      | T@3      | ⚠️     | Allowed ONLY if compatibility is explicitly declared in the TypeRegistry |
+| T@2      | T@3      | ✅ (conditional)     | Allowed ONLY if compatibility is explicitly declared in the TypeRegistry |
 | T@1      | U@1      | ❌     | different type |
 
 Note:
@@ -151,7 +151,7 @@ The consumer defines tolerance requirements.
 Authoritative Source of Compatibility:
 
 Compatibility declarations MUST be defined in the TypeRegistry
-(see ADR-029: Type System, Registry & Validation Model).
+(see ADR-029: Type System, Registry and Validation Model).
 
 Validator behavior:
 
@@ -185,39 +185,11 @@ T@1 → T@1
 
 ##### Forward-compatible (Registry-Declared)
 
-T@1 → T@2 is allowed ONLY if:
+Cross-version compatibility is allowed only when explicitly declared in
+the TypeRegistry, as defined by the Compatibility Matrix above.
 
-- compatibility is explicitly declared in the TypeRegistry
-
-Validator behavior:
-
-- does NOT infer compatibility from schema or version numbers
-- relies solely on registry declarations
-
-##### Semantic Requirements for Declaring Compatibility
-
-The following conditions define when a type version MAY declare
-compatibility with a previous version:
-
-- newly added fields MUST be optional
-- existing fields MUST retain their meaning
-- removed fields MUST be safely ignorable by the consumer
-- structural changes MUST not break consumer expectations
-
-These rules are NOT enforced dynamically by the validator.
-
-They are:
-
-- design-time constraints
-- enforced by schema governance and testing
-- assumed to be upheld when registry compatibility is declared
-
-Important:
-
-Compatibility is not inferred from schema similarity,
-field structure, or version numbering.
-
-The registry is the single source of truth for compatibility.
+Semantic compatibility requirements (for making such declarations)
+are design-time governance constraints, not runtime validator inference.
 
 ---
 
@@ -282,18 +254,25 @@ Supported mutation operations (aligned with control plane in ADR-006):
 - graph:removenode
 - graph:addedge
 - graph:removeedge
+
 - graph:changenode
 - graph:changeedge
-- graph:changegroup
+- graph:changegroup (metadata-only)
 
-Note: Configuration changes are performed via existing change operations (e.g. changenode, changeedge, changegroup) and are not represented as a separate mutation command.
+- graph:addinport
+- graph:removeinport
+- graph:renameinport
 
-Additional mutation operations:
+- graph:addoutport
+- graph:removeoutport
+- graph:renameoutport
 
 - graph:addinitial
 - graph:removeinitial
 
-These operations affect initial information packets (IIPs) and may introduce or remove entry-point data for ports.
+Note: Configuration changes are performed via existing change operations (e.g. changenode, changeedge, changegroup) and are not represented as a separate mutation command.
+
+graph:addinitial and graph:removeinitial operations affect initial information packets (IIPs) and may introduce or remove entry-point data for ports.
 
 Validation rules:
 
@@ -314,13 +293,33 @@ This staged behavior supports migration from untyped IIP payloads to fully typed
 Strict mode represents the normative target behavior of the system.
 Compatibility mode is transitional.
 
-Port-level mutations:
+#### Port-definition mutations
 
-If the control plane supports modification of port definitions
-(e.g. inport/outport changes), then:
+On mutations that modify port definitions (including changes to
+allowed_type, schema, or port existence):
 
-- Changes to allowed_type MUST trigger re-validation of all connected edges
-- Incompatible existing connections MUST cause mutation rejection
+- The validator MUST re-validate all edges connected to the affected port
+- Any incompatible existing connections MUST cause mutation rejection
+
+This applies to control-plane operations such as:
+
+- graph:changenode (port definition changes)
+- graph:changeedge (if port binding is affected)
+- graph:addinport / removeinport / renameinport
+- graph:addoutport / removeoutport / renameoutport
+
+Note:
+
+graph:changegroup modifies group metadata only and does not alter
+port definitions or type contracts.
+
+Therefore, it does not trigger port-level type re-validation unless
+future extensions explicitly introduce port exposure semantics.
+
+Rationale:
+
+Port definition changes alter the type contract of the graph and therefore
+require immediate re-validation to preserve graph correctness guarantees.
 
 #### IIP Type Validation & Migration
 
@@ -654,6 +653,7 @@ Rejected:
 * ADR-006: Control Plane
 * ADR-014: Versioning
 * ADR-021: Execution Semantics
+* ADR-028: Type System, Registry and Validation Model
 
 ---
 
