@@ -300,6 +300,20 @@ Validation rules:
 - Type compatibility must be validated for IIP assignments
 - IIP payload type must match the target port's allowed_type
 
+Enforcement depends on validation profile:
+
+- Strict mode:
+  Violations result in validation errors and mutation rejection.
+
+- Compatibility mode:
+  Violations produce warnings (e.g. W_IIP_TYPE_MISMATCH)
+  and do not block execution.
+
+This staged behavior supports migration from untyped IIP payloads to fully typed graph contracts.
+
+Strict mode represents the normative target behavior of the system.
+Compatibility mode is transitional.
+
 Port-level mutations:
 
 If the control plane supports modification of port definitions
@@ -445,7 +459,7 @@ based on component port metadata.
 
 The exact classification mechanism is defined in:
 
-→ ADR-029: Type System, Registry & Validation Model
+→ ADR-029: Type System, Registry and Validation Model
 
 Validation logic MUST rely on this classification rather than
 inferring semantics from connection patterns.
