@@ -202,21 +202,31 @@ schema_ref may reference:
 
 - inline schema identifiers
 - registry-based schema entries
-- external schema resources
+
+External schema resources are currently NOT part of the core model due to complexity, e.g. requiring caching, failure semantics, versioning etc.
 
 ### Schema Resolution (Normative)
 
-schema_ref resolution MUST follow a deterministic and portable strategy:
+schema_ref resolution MUST follow a deterministic and portable strategy and is strictly ordered:
 
 1. If schema_ref matches a registry entry → resolve from TypeRegistry
 2. Else if schema_ref is an inline identifier → resolve within graph scope
-3. External schema resolution (e.g. network/URI) is NOT part of the core model
+3. If multiple schema candidates are resolvable for the same `schema_ref`, validation MUST fail with `E_SCHEMA_AMBIGUOUS`.
+4. External schema resolution (e.g. network/URI) is currently NOT part of the core model due to complexity concerns.
 
-All implementations MUST resolve schema_ref identically for the same graph definition.
+All implementations MUST resolve schema_ref identically for the same graph definition. No implementation-specific resolution strategies are allowed.
 
-No implementation-specific resolution strategies are allowed.
+Ambiguity within the same level results in E_SCHEMA_AMBIGUOUS.
 
----
+* Inline schema identifier format (canonical):
+  `inline/<name>@<major>`
+* Grammar:
+  name  := [a-z][a-z0-9_\-]{0,63}
+  major := [1-9][0-9]*
+  InlineSchemaId := "inline/" name "@" major
+
+Implementations MAY accept legacy inline identifiers in minimal profile, but MUST normalize to canonical `InlineSchemaId` before validation.
+
 
 ## 4. Validator Algorithm (Normative)
 
@@ -258,6 +268,12 @@ CompatibilityResult → Error Mapping (Normative):
 4. **Schema Checks (profile-dependent)**
 * `minimal`: skip structural checks
 * `strict`: require schemas and compatibility
+
+Schema Error Mapping (Normative):
+
+- missing required schema in strict profile -> `E_SCHEMA_REQUIRED_STRICT`
+- multiple schema candidates for the same `schema_ref` -> `E_SCHEMA_AMBIGUOUS`
+- resolved producer/consumer schemas are structurally incompatible -> `E_SCHEMA_INCOMPATIBLE`
 
 5. **Join/Correlation Checks**
 * identify join nodes: connected data input edges > 1
@@ -317,7 +333,7 @@ for iip in graph.iips:
     continue
 
   compat = check_iip_compat(maybe_iip_type, t_in, registry)
-  if compat == Incompatible:
+  if compat == IncompatibleType or compat == IncompatibleVersion:
     if profile == Minimal:
       warn(W_IIP_TYPE_MISMATCH, iip)
     else:
@@ -350,8 +366,20 @@ The algorithm MUST:
 The exact interpretation rules are defined as:
 
 1. If explicit type annotation is present → use it
-2. Else if structured literal (e.g. JSON object) → infer candidate type via schema match (if unambiguous)
+2. Else if structured literal (e.g. JSON object) → derive candidate TypeIds via schema match
 3. Else → no type can be determined
+4. If rule (2) yields multiple candidate TypeIds, selection MUST be deterministic:
+   - choose the candidate with highest validation score
+   - if top score is tied, treat as ambiguous
+
+Validation score is computed by:
+- required-field coverage (higher is better)
+- type conformity (higher is better)
+- additional-properties violations (lower is better)
+
+Ambiguous result handling:
+- `minimal` profile: emit `W_IIP_UNTYPED_PAYLOAD`
+- `strict` profile: emit `E_IIP_TYPE_MISMATCH`
 
 #### IIP Type Declaration (Normative)
 
@@ -365,13 +393,18 @@ An IIP is considered "typed" if one of the following is present:
    }
 
    - The field name "type" is REQUIRED and case-sensitive
-   - The value MUST be a valid canonical TypeId string
+   - The value MUST be a valid canonical TypeId string.
+   - The field name "payload" is REQUIRED
+   - no additional top-level fields are allowed for canonical form
+
+   Alternative representations are NOT considered portable and MUST NOT be relied upon for validation.
+
+   Implementations MAY accept non-canonical forms in minimal profile, but MUST normalize to canonical form before validation.
 
 2. Structured literal compatible with a schema that uniquely identifies a TypeId
 
 If neither is present, the IIP is considered untyped.
 
-The "payload" field name is recommended but not required, as long as the structure remains unambiguous.
 
 ## 5. Lifecycle Integration
 
@@ -401,6 +434,7 @@ Stable codes:
 * `E_TYPE_INCOMPATIBLE`
 * `E_TYPE_ADAPTER_REQUIRED`
 * `E_SCHEMA_REQUIRED_STRICT`
+* `E_SCHEMA_AMBIGUOUS`
 * `E_SCHEMA_INCOMPATIBLE`
 * `E_CORRELATION_REQUIRED`
 * `E_IIP_TYPE_MISMATCH`
