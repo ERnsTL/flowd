@@ -118,6 +118,23 @@ Requirements:
 
 Guarantee level: type + structural contract.
 
+#### Profile Semantics
+
+The `strict` profile includes all structural requirements of `minimal`,
+but may override enforcement severity for specific validation rules.
+
+In case of conflict, `strict` behavior takes precedence over `minimal`.
+
+#### IIP Validation Severity
+
+- minimal profile:
+  IIP type mismatch → warning
+
+- strict profile:
+  IIP type mismatch → error
+
+This is an explicit override of minimal behavior.
+
 ### 2.3 Schema baseline (runtime-neutral)
 
 ADR-029 does not mandate one schema language, but requires:
@@ -297,8 +314,6 @@ for iip in graph.iips:
       error(E_IIP_TYPE_MISMATCH, iip)
 ```
 
-Best-effort IIP type interpretation is implementation-defined, but MUST be deterministic within a given deployment.
-
 Port Classification:
 
 Each port MUST declare one of:
@@ -309,7 +324,39 @@ Each port MUST declare one of:
 
 Port classification is defined as part of ComponentPort metadata and is required for all components participating in typed validation.
 
----
+#### Deterministic IIP Interpretation (Normative)
+
+Best-effort IIP type interpretation MUST follow a deterministic,
+standardized algorithm defined by flowd.
+
+This ensures consistent classification across runtime, tooling, and CI.
+
+The algorithm MUST:
+
+- be fully deterministic
+- not depend on runtime-specific heuristics
+- produce identical results for identical inputs across environments
+
+The exact interpretation rules are defined as:
+
+1. If explicit type annotation is present → use it
+2. Else if structured literal (e.g. JSON object) → infer candidate type via schema match (if unambiguous)
+3. Else → no type can be determined
+
+#### IIP Type Declaration
+
+An IIP is considered "typed" if one of the following is present:
+
+1. Explicit TypeId annotation:
+
+   {
+     "type": "email/EmailRaw@1",
+     "payload": { ... }
+   }
+
+2. Structured literal compatible with a schema that uniquely identifies a TypeId
+
+If neither is present, the IIP is considered untyped.
 
 ## 5. Lifecycle Integration
 
@@ -348,6 +395,8 @@ Stable codes:
 * `W_UNSAFE_CORRELATION_BYPASS`
 
 Errors are machine-readable and include node/port/edge references.
+
+Validation issues are machine-readable and include node/port/edge references.
 
 ---
 
