@@ -1,76 +1,186 @@
+Sehr gutes Review – der Kollege trifft ziemlich präzise die Punkte, wo aus „gute Richtung“ → „wirklich tragfähige Architektur“ wird.
+
+Ich gehe das erst kurz **kommentierend** durch (klar, direkt), und danach bekommst du eine **überarbeitete ADR-028 v2**, die die Lücken sauber schließt.
+
+---
+
+# 🧠 1. Kommentar zu den Punkten (kurz & ehrlich)
+
+---
+
+## ✅ 1. Validation Lifecycle (HIGH) — absolut richtig
+
+Dein aktuelles ADR denkt implizit „build-time“.
+
+Das ist falsch für dein System.
+
+> **flowd ist kein statisches System → Validierung ist ein Lifecycle-Thema.**
+
+Mit  (ADR-0006) hast du:
+
+* `graph:addedge`
+* `graph:removeedge`
+* Hot Mutation
+* Safe Points
+
+👉 Konsequenz:
+
+> **Validation muss Teil des Control Plane sein, nicht nur Build-Time**
+
+---
+
+## ✅ 2. Type Identity / Compatibility — kritischster Punkt
+
+Der Experte hat hier völlig recht.
+
+Aktuell ist dein ADR:
+
+> „widening, subtype, future…“
+
+➡️ Das ist **nicht implementierbar**.
+
+Mit  (ADR-0014):
+
+* Versionierung ist bereits formalisiert
+* aber nicht auf Typen angewendet
+
+👉 Du brauchst:
+
+* **canonical type identifier**
+* **version semantics**
+* **compatibility matrix**
+
+Sonst:
+
+> Jeder baut sein eigenes Typsystem → Chaos
+
+---
+
+## ✅ 3. Mapping zu bestehendem Modell — sehr wichtig
+
+Du hast schon:
+
+```rust
+ComponentPort {
+  allowed_type,
+  schema
+}
+```
+
+Wenn ADR-028 das ignoriert:
+
+> baust du **zweites Typsystem parallel** → Designfehler
+
+---
+
+## ⚠️ 4. Performance Claim — korrekt relativieren
+
+Deine Aussage war zu absolut.
+
+Richtig ist:
+
+> Runtime bleibt gleich
+> **Graph kann teurer werden (Adapter!)**
+
+Aber:
+
+👉 das ist gewollt und sichtbar → also ok
+
+---
+
+## ⚠️ 5. Correlation — sehr guter Catch
+
+Das ist wichtig:
+
+> **Typisierung löst KEIN Korrelationsthema**
+
+Mit  (ADR-0021):
+
+* kein global ordering
+* at-least-once
+
+👉 heißt:
+
+> **UID etc. muss explizit im Payload sein**
+
+Das gehört ins ADR rein, sonst denken Leute:
+„Types lösen das“
+
+---
+
+## ✅ 6. Status — klar
+
+Das Ding ist aktuell **Proposed**, nicht Accepted.
+
+---
+
+# 🧱 2. Ergebnis: Was sich ändern muss
+
+Du brauchst:
+
+1. **Validation Lifecycle Definition**
+2. **Type System konkretisieren**
+3. **Mapping zu existing metadata**
+4. **Performance Claim korrigieren**
+5. **Correlation klarstellen**
+6. Status → Proposed
+
 # ADR-028: Typed Ports, Contracts & Graph Validation
 
-**Status:** Accepted
-**Date:** 2026-05-01
+## Status
+
+**Proposed**
+
+## Date
+
+2026-05-01
 
 ---
 
 ## Context
 
-Flowd currently defines:
+Flowd defines:
 
-* A **typed runtime message envelope** (`FbpMessage`) (ADR-003)
-* A **high-performance transport layer** using ringbuffers and `Arc`-based sharing (ADR-008)
-* **Explicit execution semantics and guarantees**, including:
+* A typed runtime message envelope (`FbpMessage`) (ADR-003)
+* A high-performance transport model (ringbuffer + `Arc`) (ADR-008)
+* Explicit execution guarantees (ADR-021)
+* Runtime graph mutation via control plane (ADR-006)
+* Versioning and compatibility rules (ADR-014)
 
-  * FIFO per edge
-  * no global ordering
-  * at-least-once delivery (ADR-021)
+The system supports:
 
-Additionally, the system enforces:
-
-* no implicit behavior (Manifesto)
-* explicit dataflow
-* deterministic reasoning within defined boundaries
+* dynamic graph mutation
+* long-running execution
+* heterogeneous components
 
 ---
 
-## Problem Statement
+### Problem
 
-While `FbpMessage` provides a solid **transport-level abstraction**, it does not provide:
+The current system lacks:
 
-* strong typing at the **graph level**
-* guarantees about **compatibility between connected components**
-* a mechanism to enforce **semantic correctness of dataflow connections**
+* graph-level type safety
+* formal compatibility validation
+* explicit data transformation modeling
 
-This leads to several risks:
+Additionally, validation behavior is undefined under:
 
-1. **Implicit coupling via payload structure**
-
-   * Components must interpret payloads (e.g. `Bytes`, `Value`)
-   * Type expectations are not enforced
-
-2. **Runtime errors instead of build-time validation**
-
-   * Mismatched expectations are detected late or not at all
-
-3. **Loss of semantic clarity**
-
-   * The graph does not explicitly express data shape transformations
-
-4. **Fragile correlation handling**
-
-   * Identity (e.g. UID) may be lost or inconsistently propagated
-
-At the same time, constraints remain:
-
-* The runtime must stay **untyped and minimal**
-* No additional overhead in the transport layer
-* No hidden conversions or implicit coercion
-* Full compatibility with heterogeneous graphs
+* runtime graph mutation
+* version evolution
+* heterogeneous component ecosystems
 
 ---
 
 ## Decision
 
-Flowd introduces a **typed graph-level contract system based on ports**, with:
+Flowd introduces a **typed graph contract system** with:
 
-1. **Typed Ports (`Port<T>`)**
-2. **Explicit Compatibility Rules**
-3. **Adapter Nodes as First-Class Components**
-4. **Optional Explicit Dynamic/Unsafe Mode**
-
-This typing exists **only at the graph and validation layer**, not in the runtime transport.
+1. Typed Ports (`Port<T>`) mapped to existing port metadata
+2. Explicit compatibility rules with canonical type identity
+3. Lifecycle-aware validation integrated into control plane
+4. Adapter nodes as mandatory explicit transformations
+5. Explicit dynamic/unsafe mode
+6. Explicit requirement for correlation keys in payload contracts
 
 ---
 
@@ -78,296 +188,294 @@ This typing exists **only at the graph and validation layer**, not in the runtim
 
 ---
 
-### 1. Typed Ports
+### 1. Typed Ports (Mapped to Existing Metadata)
 
-Each component defines its interface via typed ports:
+Typed ports are **not a new runtime construct**.
 
-```rust
-Port<T>
+They map directly to existing structures:
+
+```text
+ComponentPort {
+  allowed_type: TypeId,
+  schema: Optional<Schema>
+}
+```
+
+Where:
+
+* `allowed_type` = canonical type identifier
+* `schema` = optional structural validation
+
+`Port<T>` is:
+
+> a logical representation of this metadata
+
+---
+
+### 2. Canonical Type Identity
+
+Each type is identified by:
+
+```text
+<namespace>/<type>@<version>
 ```
 
 Example:
 
 ```text
-EmailParser:
-  IN  raw:    Port<EmailRaw>
-  OUT parsed: Port<ParsedEmail>
+email/EmailRaw@1
+email/ParsedEmail@2
 ```
 
-Properties:
-
-* Ports carry **logical type information**
-* Types are **not embedded in `FbpMessage`**
-* Types are used **only for validation and composition**
-
 ---
 
-### 2. Separation of Concerns
+### 3. Compatibility Rules (Concrete)
 
-| Layer      | Responsibility            |
-| ---------- | ------------------------- |
-| Runtime    | transports `FbpMessage`   |
-| Graph      | defines typed connections |
-| Components | implement behavior        |
-| Adapters   | transform data shapes     |
-
-Key principle:
-
-> **Types belong to ports, not to messages.**
-
----
-
-### 3. Compatibility Rules
-
-Connections between ports must satisfy:
+Given:
 
 ```text
 OUT<T> → IN<U>
 ```
 
-Allowed cases:
+Compatibility is:
 
-1. **Exact match**
+---
+
+#### ✅ Exact match
 
 ```text
 T == U
 ```
 
-2. **Declared compatibility (optional, explicit)**
+---
 
-* widening
-* subtype relationships
-* version compatibility (future)
-
-3. **Adapter required**
-
-If:
+#### ✅ Compatible version (same type)
 
 ```text
-T != U
+email/EmailRaw@1 → email/EmailRaw@2
 ```
 
-then:
+Allowed if:
 
-> A conversion must be represented as an explicit adapter node.
+* backward-compatible (ADR-014 rules):
+
+  * new fields optional
+  * existing fields unchanged
+  * unknown fields ignored
 
 ---
 
-### 4. Adapter Nodes (First-Class)
+#### ❌ Different type
 
-All transformations between types must be explicit in the graph.
+```text
+EmailRaw → ParsedEmail
+```
+
+Requires:
+
+> explicit adapter node
+
+---
+
+#### ❌ Unknown / incompatible version
+
+Rejected at validation time
+
+---
+
+### 4. Validation Lifecycle (Critical)
+
+Validation is executed at defined control-plane events:
+
+---
+
+#### 1. Graph Load
+
+* full validation required
+* graph must be valid before `start`
+
+---
+
+#### 2. Graph Start (`network:start`)
+
+* validation rechecked
+* ensures no drift between definition and runtime
+
+---
+
+#### 3. Runtime Mutation (ADR-006)
+
+On operations:
+
+* `graph:addedge`
+* `graph:removenode`
+* `graph:replace`
+
+👉 Validation rules:
+
+* mutation must not produce invalid graph
+* validation occurs **before commit**
+* if invalid → mutation rejected
+
+---
+
+#### 4. Safe Mutation Boundary
+
+Validation is applied:
+
+> only at control-plane safe points
+
+(consistent with scheduler + mutation model)
+
+---
+
+### 5. Adapter Nodes (Mandatory)
+
+Any incompatible connection requires:
+
+* explicit adapter component
+* visible in graph
+* scheduled like normal node
+
+Adapters are:
+
+> the only allowed mechanism for type transformation
+
+---
+
+### 6. Dynamic / Unsafe Mode
+
+Defined via:
+
+```text
+Port<Any>
+```
+
+Properties:
+
+* disables compatibility checks for that connection
+* must be explicit
+* produces validation warning
+* no guarantees
+
+---
+
+### 7. Correlation Requirement (New Explicit Rule)
+
+Flowd guarantees:
+
+* no global ordering
+* at-least-once delivery
+
+Therefore:
+
+> Correlation MUST be part of payload contracts.
 
 Example:
 
-```text
-IMAPFetch
-  → OUT: Bytes
-  → [Adapter] Bytes → EmailRaw
-  → EmailParser
-  → OUT: ParsedEmail
-  → [Adapter] ParsedEmail → ClassifiedEmail
+```rust
+struct EmailRaw {
+  uid: Uid,
+  ...
+}
 ```
 
-Properties:
+The system does NOT provide:
 
-* visible in graph
-* schedulable like any component
-* observable and debuggable
-* no implicit conversion
-
----
-
-### 5. No Implicit Coercion
-
-The system explicitly forbids:
-
-* automatic casting between types
-* implicit decoding (e.g. JSON inside `Bytes`)
-* hidden transformations
-
-Rationale:
-
-> Implicit behavior violates core system principles.
+* implicit correlation
+* ordering-based correlation
+* grouping-based correlation
 
 ---
 
-### 6. Optional Unsafe / Dynamic Mode
+### 8. Performance Model Clarification
 
-A controlled escape hatch is provided:
+* Core runtime transport remains unchanged (ADR-008)
+* No additional overhead in message passing
 
-```text
-Port<AnyMessage>
-```
+However:
 
-or equivalent dynamic type.
+> Adapter nodes introduce explicit runtime cost
 
-Properties:
+This is:
 
-* must be explicitly declared
-* must be visible in the graph
-* may emit warnings during validation
-* disables type guarantees for that connection
-
-Use cases:
-
-* interoperability
-* incremental migration
-* external/unknown data sources
+* visible
+* predictable
+* intentional
 
 ---
 
-## Explicit Non-Goals
-
-The following are explicitly NOT part of this design:
+## Rationale
 
 ---
 
-### ❌ Typed Runtime Transport
+### Why lifecycle-aware validation
 
-The runtime will NOT:
+Because:
 
-* transport `Message<T>`
-* perform type-based dispatch
-* depend on generic message types
+* graphs mutate at runtime (ADR-006)
+* static validation is insufficient
 
-Reason:
+---
 
-* would break performance guarantees
-* would complicate scheduling and transport
+### Why canonical type identity
+
+Prevents:
+
+* naming conflicts
+* incompatible local definitions
+* ecosystem fragmentation
+
+---
+
+### Why explicit adapters
+
+Ensures:
+
+* observability
+* predictability
+* no hidden transformations
+
+---
+
+### Why correlation is explicit
+
+Because:
+
+* ordering guarantees are limited (ADR-021)
+* implicit correlation is unreliable
+
+---
+
+## Alternatives Considered
+
+---
+
+### Component<I,O>
+
+Rejected because:
+
+* does not support multi-port semantics
+* prevents graph-level validation
+* encourages pipeline thinking
+
+---
+
+### Runtime Typed Messages
+
+Rejected because:
+
+* breaks performance model
 * violates separation of concerns
 
 ---
 
-### ❌ Global Message Type System
+### Implicit Conversion
 
-There is no:
+Rejected because:
 
-* global `enum` of all possible domain types
-* centralized schema registry in core runtime
-
-Types are:
-
-> local to graph definition and component contracts
-
----
-
-### ❌ Implicit Data Structure Encoding (Brackets / Nested IPs)
-
-Brackets (control IPs) are NOT used for:
-
-* representing structured payloads
-* encoding key/value data
-
-They remain:
-
-> stream-structure markers, not data containers
-
----
-
-## Rejected Alternative: `Component<I, O>`
-
-An alternative design using:
-
-```rust
-Component<I, O>
-```
-
-was considered.
-
----
-
-### Advantages
-
-* simple mental model
-* ergonomic for linear pipelines
-* familiar from functional programming
-
----
-
-### Reasons for Rejection
-
-1. **Does not model multi-port components**
-
-   * FBP components have multiple inports/outports
-   * `Component<I, O>` does not scale to:
-
-     ```text
-     IN: A, B, C
-     OUT: X, Y
-     ```
-
-2. **Hides connection semantics**
-
-   * Type compatibility is checked only locally
-   * Graph-level validation is not possible
-
-3. **Encourages pipeline thinking instead of graph thinking**
-
-   * FBP is not a function chain
-   * Connections must be explicit per port
-
-4. **Becomes complex with real-world components**
-
-   Leads to:
-
-   ```rust
-   Component<(A, B, C), (X, Y)>
-   ```
-
-   which is:
-
-   * hard to read
-   * hard to maintain
-   * semantically unclear
-
----
-
-### Final Position
-
-> `Component<I, O>` is intentionally NOT part of the core architecture.
-
-It may be used:
-
-* outside the core system
-* as developer tooling
-* as syntactic sugar
-
-But:
-
-> It is not a foundational abstraction in flowd.
-
----
-
-## Interaction with Existing ADRs
-
----
-
-### ADR-003 (Message Model)
-
-* remains unchanged
-* `FbpMessage` continues as transport envelope
-* typed ports do NOT modify message format
-
----
-
-### ADR-008 (Transport & Memory Model)
-
-* ringbuffer + `Arc` model unaffected
-* no additional allocations or copying introduced
-
----
-
-### ADR-021 (Execution Semantics)
-
-* no reliance on ordering across edges
-* typed ports enforce correctness independent of scheduling
-
----
-
-### ADR-023 (ABI Boundaries)
-
-* typed ports terminate at boundary nodes
-* serialization/deserialization happens only at boundaries
+* violates manifesto (explicitness)
+* breaks determinism
 
 ---
 
@@ -377,57 +485,72 @@ But:
 
 ### Positive
 
-* strong graph-level correctness guarantees
-* early detection of incompatibilities
-* explicit data transformations
-* improved observability and debuggability
-* no runtime performance penalty
-* alignment with system philosophy (explicitness, determinism)
+* strong graph correctness guarantees
+* safe runtime mutation
+* consistent type evolution
+* improved observability
 
 ---
 
 ### Negative
 
-* additional complexity in graph definition
-* requires adapter nodes for transformations
-* stricter discipline required for component design
+* stricter graph design requirements
+* need for adapter nodes
+* increased upfront modeling effort
 
 ---
 
 ### Trade-offs
 
-| Aspect       | Decision                |
-| ------------ | ----------------------- |
-| Performance  | unchanged               |
-| Safety       | significantly improved  |
-| Flexibility  | reduced (intentionally) |
-| Explicitness | maximized               |
+| Property     | Result                          |
+| ------------ | ------------------------------- |
+| Safety       | high                            |
+| Explicitness | maximal                         |
+| Flexibility  | reduced                         |
+| Performance  | unchanged (core), +adapter cost |
+
+---
+
+## Implementation Notes
+
+* extend `ComponentPort.allowed_type`
+* introduce type registry
+* implement validator in control plane
+* enforce validation on mutation operations
+* add adapter component interface
+
+---
+
+## Related Decisions
+
+* ADR-003: Message Model
+* ADR-008: Transport Model
+* ADR-006: Control Plane
+* ADR-014: Versioning
+* ADR-021: Execution Semantics
 
 ---
 
 ## Key Insight
 
-> **Type safety is enforced at the graph boundary, not in the runtime transport.**
+> Type safety in flowd is a property of the graph lifecycle, not of message transport.
 
 ---
 
-## Summary
+## Open Questions
 
-Flowd introduces **typed ports and graph-level contracts** to ensure:
+* Should compatibility rules be pluggable?
+* Should schemas be enforced at runtime or only validated at edges?
+* Should adapter insertion be automated (with confirmation)?
 
-* explicit, verifiable dataflow
-* strong compatibility guarantees
-* no hidden transformations
 
-While keeping:
+## Summary regarding v2 of this ADR
 
-* the runtime minimal
-* the transport untyped
-* performance characteristics unchanged
+With these changes, ADR-028 changes from "good idea" to "implementable, scalable foundation".
 
----
+It was important to address the places where systems later implode:
 
-## Final Statement
-
-> A flowd graph is not just a topology of nodes —
-> it is a **type-checked dataflow system with explicit transformations and guarantees**.
+* lifecycle
+* type identity
+* versioning
+* implicit assumption
