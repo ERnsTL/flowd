@@ -411,13 +411,373 @@ Rejected because:
 * Should adapter insertion be automated (with confirmation)?
 
 
-## Summary regarding v2 of this ADR
+Sehr gutes Review – und diesmal sind wir wirklich im **Feinschliff auf Systemniveau**.
+Das sind genau die Stellen, wo später entweder Stabilität entsteht… oder subtiler Datenmüll.
 
-With these changes, ADR-028 changes from "good idea" to "implementable, scalable foundation".
+Ich mache wieder zwei Dinge:
 
-It was important to address the places where systems later implode:
+1. **Kurzkommentar je Punkt (klar, ohne Schönreden)**
+2. **Gezieltes Addendum / v3-Delta für ADR-028** (kein kompletter Rewrite, sondern präzise Schärfung)
 
-* lifecycle
+---
+
+# 🧠 1. Kommentar zu den neuen Punkten
+
+---
+
+## 🔴 1. Version Compatibility Matrix (HIGH)
+
+Er hat völlig recht – aktuell ist dein ADR:
+
+> „ADR-014 Regeln gelten schon irgendwie“
+
+➡️ Das reicht **nicht**.
+
+Das Kernproblem:
+
+> **Kompatibilität ist gerichtet (producer → consumer)**
+
+Und ohne Matrix passiert genau das:
+
+```text
+Producer @2 → Consumer @1
+```
+
+Validator sagt „passt vielleicht“
+Runtime sagt „boom“
+
+---
+
+👉 Du brauchst:
+
+* **gerichtete Regeln**
+* **klar definierte Verantwortung (wer ist tolerant?)**
+* **harte Ablehnung unsicherer Kombinationen**
+
+---
+
+## 🟡 2. graph:replace (Medium)
+
+Klassischer Drift.
+
+Du hast in  (ADR-0006):
+
+* add/remove/update
+
+👉 Wenn du `replace` willst:
+
+* entweder sauber definieren
+* oder rauswerfen
+
+Ich würde sagen:
+
+> **nicht einführen → unnötige Abstraktion**
+
+---
+
+## 🟡 3. Type Registry Scope (Medium, aber strategisch wichtig)
+
+Das ist subtil, aber extrem wichtig.
+
+Wenn du das falsch machst:
+
+* baust du globales Singleton-System ❌
+* oder inkonsistente Typdefinitionen ❌
+
+👉 Richtige Entscheidung:
+
+> **Registry ist kein Runtime-Objekt**
+
+sondern:
+
+* Build-/Graph-Artefakt
+* ggf. tooling-level
+
+---
+
+## 🟡 4. Correlation Enforcement (Medium → eigentlich HIGH in Praxis)
+
+Deine Aussage:
+
+> „Correlation muss im Payload sein“
+
+ist richtig.
+
+Aber aktuell:
+
+> nicht enforcebar
+
+---
+
+Beispiel Problem:
+
+```text
+Port<Any> → AI → Join
+```
+
+👉 Validator kann nichts prüfen → trotzdem gefährlich
+
+---
+
+👉 Lösung:
+
+* Kontextabhängige Regel:
+
+  * **bei Join / Fan-in → stricter requirements**
+
+---
+
+# ADR-028 Addendum
+
+## 1. Version Compatibility Matrix (Directed Semantics)
+
+Compatibility is **directional**:
+
+```text
+Producer (OUT<T@vP>) → Consumer (IN<T@vC>)
+```
+
+---
+
+### Rule: Compatibility depends on consumer tolerance
+
+The **consumer defines compatibility**, not the producer.
+
+---
+
+### Allowed Cases
+
+#### ✅ Same version
+
+```text
+T@1 → T@1
+```
+
+---
+
+#### ✅ Forward-compatible consumer
+
+```text
+T@1 → T@2
+```
+
+Allowed if:
+
+* consumer supports older versions
+* fields added in v2 are optional
+* consumer ignores missing fields
+
+---
+
+#### ❌ Backward (unsafe by default)
+
+```text
+T@2 → T@1
+```
+
+Rejected unless:
+
+* explicit adapter provided
+
+Reason:
+
+> consumer cannot safely ignore unknown fields or changed semantics
+
+---
+
+#### ❌ Unknown compatibility
+
+Rejected
+
+---
+
+### Final Rule
+
+> **Compatibility is defined as: “Consumer can safely interpret producer output.”**
+
+---
+
+## 2. Mutation API Alignment
+
+Validation hooks apply to **existing operations only**:
+
+* `graph:addnode`
+* `graph:removenode`
+* `graph:addedge`
+* `graph:removeedge`
+* `graph:update` (config-level)
+
+`graph:replace` is **not part of the model**.
+
+---
+
+## 3. Type Registry Scope
+
+The type registry is defined as:
+
+> **a build-time / graph-definition artifact**
+
+---
+
+### Properties
+
+* not part of runtime hot path
+* not globally mutable at runtime
+* versioned with graph or deployment unit
+* may be embedded in:
+
+  * compiled binary
+  * graph definition
+  * tooling metadata
+
+---
+
+### Responsibilities
+
+* map `TypeId` → schema/definition
+* validate compatibility rules
+* support tooling (IDE, validator, UI)
+
+---
+
+### Explicit Non-Goal
+
+* no global runtime type registry
+* no dynamic type loading
+
+---
+
+## 4. Correlation Enforcement Rules
+
+---
+
+### Rule 1: Correlation is payload responsibility
+
+Already defined:
+
+> correlation keys must be part of type
+
+---
+
+### Rule 2: Validator enforcement conditions
+
+Correlation enforcement applies when:
+
+* fan-in exists (multiple edges into one node)
+* or join/merge semantics detected
+
+---
+
+### Rule 3: Required constraints for fan-in
+
+For nodes with multiple input edges:
+
+* input types must define:
+
+```text
+CorrelationKey
+```
+
+via:
+
+* schema annotation OR
+* declared contract metadata
+
+---
+
+### Rule 4: Disallowed cases
+
+Rejected:
+
+```text
+Port<Any> → JoinNode
+```
+
+unless:
+
+* explicitly marked unsafe
+
+---
+
+### Rule 5: Adapter responsibility
+
+If correlation is missing:
+
+* adapter node must inject correlation key
+
+---
+
+## 5. Validation Rules (Extended)
+
+Validator must enforce:
+
+---
+
+### Structural validation
+
+* port compatibility
 * type identity
-* versioning
-* implicit assumption
+
+---
+
+### Version validation
+
+* directed compatibility (producer → consumer)
+
+---
+
+### Correlation validation
+
+* required for fan-in
+* optional for linear flows
+
+---
+
+### Dynamic mode validation
+
+* allowed
+* but produces warnings
+* disables guarantees
+
+---
+
+## 6. Performance Clarification (Refined)
+
+The system guarantees:
+
+* no additional overhead in core transport
+
+However:
+
+* adapter nodes introduce:
+
+  * additional scheduling steps
+  * additional memory access
+
+This is:
+
+> **explicit and part of graph design**
+
+---
+
+# 🧠 3. Ergebnisbewertung
+
+Mit diesen Ergänzungen ist ADR-028 jetzt:
+
+| Aspekt                 | Status            |
+| ---------------------- | ----------------- |
+| Architektur            | ✅ sauber          |
+| Runtime-Kompatibilität | ✅                 |
+| Mutation-Modell        | ✅                 |
+| Typensystem            | ✅ konkret         |
+| Versionierung          | ✅ implementierbar |
+| Korrelation            | ✅ realistisch     |
+| Performance            | ✅ ehrlich         |
+
+---
+
+# 🔥 Wichtigster Punkt insgesamt
+
+> **Kompatibilität ist nicht symmetrisch – sie ist gerichtet und vom Consumer definiert.**
+
+Das ist der eine Satz, der dir später massive Bugs erspart.
