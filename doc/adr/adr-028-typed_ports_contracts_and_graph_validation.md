@@ -1,53 +1,56 @@
-# ADR-028: Typed Ports, Contracts & Graph Validation
+# ADR-028: Typed Ports, Contracts & Graph Validation (v4)
 
-Status: Proposed
-Date: 2026-05-01
+Status: Proposed
+Date: 2026-05-01
 
 
 ## Context
 
 Flowd defines:
 
-* A typed runtime message envelope (`FbpMessage`) (ADR-003)
-* A high-performance transport model (ringbuffer + `Arc`) (ADR-008)
-* Explicit execution guarantees (ADR-021)
+* Typed message envelope (`FbpMessage`) (ADR-003)
+* High-performance transport (ADR-008)
+* Formal execution guarantees (ADR-021)
 * Runtime graph mutation via control plane (ADR-006)
 * Versioning and compatibility rules (ADR-014)
 
-The system supports:
+Flowd supports:
 
-* dynamic graph mutation
-* long-running execution
-* heterogeneous components
+* long-running systems
+* runtime graph mutation
+* heterogeneous component composition
 
 ---
 
-### Problem
+## Problem Statement
 
 The current system lacks:
 
 * graph-level type safety
 * formal compatibility validation
-* explicit data transformation modeling
+* enforceable data contracts across components
 
-Additionally, validation behavior is undefined under:
+Additionally:
 
-* runtime graph mutation
-* version evolution
-* heterogeneous component ecosystems
+* validation behavior under graph mutation is undefined
+* compatibility semantics are underspecified
+* correlation handling is not enforceable
+* type identity is not canonicalized
 
 ---
 
 ## Decision
 
-Flowd introduces a **typed graph contract system** with:
+Flowd introduces a **graph-level type system** based on:
 
-1. Typed Ports (`Port<T>`) mapped to existing port metadata
-2. Explicit compatibility rules with canonical type identity
-3. Lifecycle-aware validation integrated into control plane
-4. Adapter nodes as mandatory explicit transformations
-5. Explicit dynamic/unsafe mode
-6. Explicit requirement for correlation keys in payload contracts
+1. Typed Ports mapped to existing metadata
+2. Canonical Type Identity with versioning
+3. Directed Compatibility Rules
+4. Lifecycle-aware Validation integrated into control plane
+5. Adapter Nodes as mandatory transformation mechanism
+6. Explicit Dynamic/Unsafe Mode
+7. Enforceable Correlation Rules
+8. Build-time scoped Type Registry
 
 ---
 
@@ -57,9 +60,7 @@ Flowd introduces a **typed graph contract system** with:
 
 ### 1. Typed Ports (Mapped to Existing Metadata)
 
-Typed ports are **not a new runtime construct**.
-
-They map directly to existing structures:
+Typed ports are represented via existing `ComponentPort`:
 
 ```text
 ComponentPort {
@@ -68,20 +69,15 @@ ComponentPort {
 }
 ```
 
-Where:
+`Port<T>` is a logical abstraction over this structure.
 
-* `allowed_type` = canonical type identifier
-* `schema` = optional structural validation
-
-`Port<T>` is:
-
-> a logical representation of this metadata
+No new runtime representation is introduced.
 
 ---
 
 ### 2. Canonical Type Identity
 
-Each type is identified by:
+Each type is uniquely identified as:
 
 ```text
 <namespace>/<type>@<version>
@@ -96,123 +92,236 @@ email/ParsedEmail@2
 
 ---
 
-### 3. Compatibility Rules (Concrete)
+### 3. Type Registry (Scope & Responsibility)
 
-Given:
+The type registry is:
 
-```text
-OUT<T> → IN<U>
-```
-
-Compatibility is:
+> **a build-time / graph-definition artifact**
 
 ---
 
-#### ✅ Exact match
+#### Properties
+
+* not part of runtime execution path
+* not mutable at runtime
+* versioned with graph or deployment
+* available to validator and tooling
+
+---
+
+#### Responsibilities
+
+* resolve `TypeId`
+* provide schema (if defined)
+* evaluate compatibility rules
+
+---
+
+#### Explicit Non-Goals
+
+* no global runtime registry
+* no dynamic type loading
+* no runtime schema resolution
+
+---
+
+### 4. Compatibility Rules (Normative)
+
+Compatibility is **directional**:
 
 ```text
-T == U
+OUT<T@vP> → IN<T@vC>
 ```
 
 ---
 
-#### ✅ Compatible version (same type)
+#### Governing Rule
+
+> **Compatibility is defined by the consumer’s ability to safely interpret the producer output.**
+
+---
+
+#### Allowed
+
+##### Exact match
 
 ```text
-email/EmailRaw@1 → email/EmailRaw@2
+T@1 → T@1
+```
+
+---
+
+##### Forward-compatible
+
+```text
+T@1 → T@2
 ```
 
 Allowed if:
 
-* backward-compatible (ADR-014 rules):
-
-  * new fields optional
-  * existing fields unchanged
-  * unknown fields ignored
+* v2 is backward-compatible with v1 (ADR-014)
+* new fields are optional
+* existing semantics unchanged
+* consumer tolerates missing fields
 
 ---
 
-#### ❌ Different type
+#### Rejected
+
+##### Backward (unsafe by default)
+
+```text
+T@2 → T@1
+```
+
+Reason:
+
+* consumer cannot safely interpret additional or changed fields
+
+Requires explicit adapter.
+
+---
+
+##### Different types
 
 ```text
 EmailRaw → ParsedEmail
 ```
 
-Requires:
-
-> explicit adapter node
+Requires explicit adapter.
 
 ---
 
-#### ❌ Unknown / incompatible version
+##### Unknown compatibility
 
-Rejected at validation time
-
----
-
-### 4. Validation Lifecycle (Critical)
-
-Validation is executed at defined control-plane events:
+Rejected.
 
 ---
 
-#### 1. Graph Load
-
-* full validation required
-* graph must be valid before `start`
-
----
-
-#### 2. Graph Start (`network:start`)
-
-* validation rechecked
-* ensures no drift between definition and runtime
-
----
-
-#### 3. Runtime Mutation (ADR-006)
-
-On operations:
-
-* `graph:addedge`
-* `graph:removenode`
-* `graph:replace`
-
-👉 Validation rules:
-
-* mutation must not produce invalid graph
-* validation occurs **before commit**
-* if invalid → mutation rejected
-
----
-
-#### 4. Safe Mutation Boundary
-
-Validation is applied:
-
-> only at control-plane safe points
-
-(consistent with scheduler + mutation model)
-
----
-
-### 5. Adapter Nodes (Mandatory)
-
-Any incompatible connection requires:
-
-* explicit adapter component
-* visible in graph
-* scheduled like normal node
+### 5. Adapter Nodes
 
 Adapters are:
 
-> the only allowed mechanism for type transformation
+> **the only valid mechanism for transforming types**
+
+Properties:
+
+* explicit in graph
+* scheduled like any component
+* observable
+* no implicit conversion
 
 ---
 
-### 6. Dynamic / Unsafe Mode
+### 6. Validation Lifecycle
+
+Validation is performed at control-plane boundaries:
+
+---
+
+#### Supported Mutation Operations
+
+Aligned with control plane (ADR-006):
+
+* `graph:addnode`
+* `graph:removenode`
+* `graph:addedge`
+* `graph:removeedge`
+* `graph:updateconfig` *(configuration-only updates)*
+
+---
+
+#### Validation Points
+
+##### 1. Graph Load
+
+* full validation required
+
+---
+
+##### 2. Graph Start (`network:start`)
+
+* validation rechecked
+
+---
+
+##### 3. Runtime Mutation
+
+For each mutation:
+
+* validation runs **before commit**
+* invalid mutation is rejected
+
+---
+
+##### 4. Safe Mutation Boundary
+
+Validation occurs only at control-plane safe points
+(consistent with scheduler semantics)
+
+---
+
+### 7. Correlation Rules
+
+---
+
+#### 7.1 Core Principle
+
+Flowd provides:
+
+* no global ordering
+* at-least-once delivery
+
+Therefore:
+
+> **Correlation must be explicitly modeled in payload contracts.**
+
+---
+
+#### 7.2 Join Detection (Formalized)
+
+A node is considered a **join node** if:
+
+```text
+number_of_connected_input_edges > 1
+```
+
+---
+
+#### 7.3 Enforcement Rules
+
+For join nodes:
+
+* input types MUST define a correlation key
 
 Defined via:
+
+* schema annotation OR
+* port metadata
+
+---
+
+#### 7.4 Disallowed
+
+```text
+Port<Any> → JoinNode
+```
+
+unless explicitly marked unsafe.
+
+---
+
+#### 7.5 Adapter Responsibility
+
+If correlation is missing:
+
+* adapter must introduce it
+
+---
+
+### 8. Dynamic / Unsafe Mode
+
+Defined as:
 
 ```text
 Port<Any>
@@ -220,44 +329,16 @@ Port<Any>
 
 Properties:
 
-* disables compatibility checks for that connection
-* must be explicit
-* produces validation warning
-* no guarantees
+* disables type validation
+* allowed only if explicitly declared
+* produces validation warnings
+* disables guarantees
 
 ---
 
-### 7. Correlation Requirement (New Explicit Rule)
+### 9. Performance Model
 
-Flowd guarantees:
-
-* no global ordering
-* at-least-once delivery
-
-Therefore:
-
-> Correlation MUST be part of payload contracts.
-
-Example:
-
-```rust
-struct EmailRaw {
-  uid: Uid,
-  ...
-}
-```
-
-The system does NOT provide:
-
-* implicit correlation
-* ordering-based correlation
-* grouping-based correlation
-
----
-
-### 8. Performance Model Clarification
-
-* Core runtime transport remains unchanged (ADR-008)
+* Core transport remains unchanged (ADR-008)
 * No additional overhead in message passing
 
 However:
@@ -276,41 +357,33 @@ This is:
 
 ---
 
-### Why lifecycle-aware validation
+### Why directed compatibility
 
-Because:
+Because compatibility is asymmetric and defined by the consumer.
 
-* graphs mutate at runtime (ADR-006)
-* static validation is insufficient
+---
+
+### Why lifecycle validation
+
+Because graph mutation occurs at runtime (ADR-006).
 
 ---
 
 ### Why canonical type identity
 
-Prevents:
-
-* naming conflicts
-* incompatible local definitions
-* ecosystem fragmentation
+Prevents incompatible parallel definitions.
 
 ---
 
 ### Why explicit adapters
 
-Ensures:
-
-* observability
-* predictability
-* no hidden transformations
+Ensures observability and predictability.
 
 ---
 
-### Why correlation is explicit
+### Why explicit correlation rules
 
-Because:
-
-* ordering guarantees are limited (ADR-021)
-* implicit correlation is unreliable
+Because ordering guarantees are limited (ADR-021).
 
 ---
 
@@ -320,28 +393,28 @@ Because:
 
 ### Component<I,O>
 
-Rejected because:
+Rejected:
 
-* does not support multi-port semantics
+* does not support multi-port components
 * prevents graph-level validation
-* encourages pipeline thinking
+* encourages incorrect abstraction
 
 ---
 
-### Runtime Typed Messages
+### Runtime typed messages
 
-Rejected because:
+Rejected:
 
 * breaks performance model
 * violates separation of concerns
 
 ---
 
-### Implicit Conversion
+### Implicit conversion
 
-Rejected because:
+Rejected:
 
-* violates manifesto (explicitness)
+* violates explicitness principle
 * breaks determinism
 
 ---
@@ -361,30 +434,30 @@ Rejected because:
 
 ### Negative
 
-* stricter graph design requirements
+* stricter modeling requirements
 * need for adapter nodes
-* increased upfront modeling effort
+* increased upfront design effort
 
 ---
 
 ### Trade-offs
 
-| Property     | Result                          |
-| ------------ | ------------------------------- |
-| Safety       | high                            |
-| Explicitness | maximal                         |
-| Flexibility  | reduced                         |
-| Performance  | unchanged (core), +adapter cost |
+| Property     | Result                                  |
+| ------------ | --------------------------------------- |
+| Safety       | high                                    |
+| Explicitness | maximal                                 |
+| Flexibility  | reduced                                 |
+| Performance  | unchanged (core), explicit adapter cost |
 
 ---
 
 ## Implementation Notes
 
 * extend `ComponentPort.allowed_type`
-* introduce type registry
+* define `TypeId` format
 * implement validator in control plane
-* enforce validation on mutation operations
-* add adapter component interface
+* enforce validation at mutation operations
+* define correlation metadata
 
 ---
 
@@ -400,244 +473,12 @@ Rejected because:
 
 ## Key Insight
 
-> Type safety in flowd is a property of the graph lifecycle, not of message transport.
+> Type safety in flowd is enforced at the graph level, validated across the graph lifecycle, and independent of runtime transport.
 
 ---
 
 ## Open Questions
 
-* Should compatibility rules be pluggable?
-* Should schemas be enforced at runtime or only validated at edges?
-* Should adapter insertion be automated (with confirmation)?
-
-
-# ADR-028 Addendum
-
-## 1. Version Compatibility Matrix (Directed Semantics)
-
-Compatibility is **directional**:
-
-```text
-Producer (OUT<T@vP>) → Consumer (IN<T@vC>)
-```
-
----
-
-### Rule: Compatibility depends on consumer tolerance
-
-The **consumer defines compatibility**, not the producer.
-
----
-
-### Allowed Cases
-
-#### ✅ Same version
-
-```text
-T@1 → T@1
-```
-
----
-
-#### ✅ Forward-compatible consumer
-
-```text
-T@1 → T@2
-```
-
-Allowed if:
-
-* consumer supports older versions
-* fields added in v2 are optional
-* consumer ignores missing fields
-
----
-
-#### ❌ Backward (unsafe by default)
-
-```text
-T@2 → T@1
-```
-
-Rejected unless:
-
-* explicit adapter provided
-
-Reason:
-
-> consumer cannot safely ignore unknown fields or changed semantics
-
----
-
-#### ❌ Unknown compatibility
-
-Rejected
-
----
-
-### Final Rule
-
-> **Compatibility is defined as: “Consumer can safely interpret producer output.”**
-
----
-
-## 2. Mutation API Alignment
-
-Validation hooks apply to **existing operations only**:
-
-* `graph:addnode`
-* `graph:removenode`
-* `graph:addedge`
-* `graph:removeedge`
-* `graph:update` (config-level)
-
-`graph:replace` is **not part of the model**.
-
----
-
-## 3. Type Registry Scope
-
-The type registry is defined as:
-
-> **a build-time / graph-definition artifact**
-
----
-
-### Properties
-
-* not part of runtime hot path
-* not globally mutable at runtime
-* versioned with graph or deployment unit
-* may be embedded in:
-
-  * compiled binary
-  * graph definition
-  * tooling metadata
-
----
-
-### Responsibilities
-
-* map `TypeId` → schema/definition
-* validate compatibility rules
-* support tooling (IDE, validator, UI)
-
----
-
-### Explicit Non-Goal
-
-* no global runtime type registry
-* no dynamic type loading
-
----
-
-## 4. Correlation Enforcement Rules
-
----
-
-### Rule 1: Correlation is payload responsibility
-
-Already defined:
-
-> correlation keys must be part of type
-
----
-
-### Rule 2: Validator enforcement conditions
-
-Correlation enforcement applies when:
-
-* fan-in exists (multiple edges into one node)
-* or join/merge semantics detected
-
----
-
-### Rule 3: Required constraints for fan-in
-
-For nodes with multiple input edges:
-
-* input types must define:
-
-```text
-CorrelationKey
-```
-
-via:
-
-* schema annotation OR
-* declared contract metadata
-
----
-
-### Rule 4: Disallowed cases
-
-Rejected:
-
-```text
-Port<Any> → JoinNode
-```
-
-unless:
-
-* explicitly marked unsafe
-
----
-
-### Rule 5: Adapter responsibility
-
-If correlation is missing:
-
-* adapter node must inject correlation key
-
----
-
-## 5. Validation Rules (Extended)
-
-Validator must enforce:
-
----
-
-### Structural validation
-
-* port compatibility
-* type identity
-
----
-
-### Version validation
-
-* directed compatibility (producer → consumer)
-
----
-
-### Correlation validation
-
-* required for fan-in
-* optional for linear flows
-
----
-
-### Dynamic mode validation
-
-* allowed
-* but produces warnings
-* disables guarantees
-
----
-
-## 6. Performance Clarification (Refined)
-
-The system guarantees:
-
-* no additional overhead in core transport
-
-However:
-
-* adapter nodes introduce:
-
-  * additional scheduling steps
-  * additional memory access
-
-This is:
-
-> **explicit and part of graph design**
+* Should schema validation be optional or mandatory in strict mode?
+* Should adapter insertion be automatable?
+* Should compatibility rules be extensible?
