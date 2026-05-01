@@ -133,6 +133,21 @@ Compatibility is **directional**:
 OUT<T@vP> → IN<T@vC>
 ```
 
+Compatibility Matrix (Producer → Consumer)
+
+| Producer | Consumer | Allowed | Reason |
+|----------|----------|--------|--------|
+| T@1      | T@1      | ✅     | exact match |
+| T@1      | T@2      | ✅     | forward-compatible (consumer tolerant) |
+| T@2      | T@1      | ❌     | consumer cannot interpret newer data |
+| T@2      | T@3      | ⚠️     | only if v3 explicitly declares compatibility with v2 |
+| T@1      | U@1      | ❌     | different type |
+
+Note:
+
+Compatibility is always evaluated from producer to consumer.
+The consumer defines tolerance requirements.
+
 ---
 
 #### Governing Rule
@@ -233,6 +248,26 @@ Supported mutation operations (aligned with control plane in ADR-006):
 
 Note: Configuration changes are performed via existing change operations (e.g. changenode, changeedge, changegroup) and are not represented as a separate mutation command.
 
+Additional mutation operations:
+
+- graph:addinitial
+- graph:removeinitial
+
+These operations affect initial information packets (IIPs) and may introduce or remove entry-point data for ports.
+
+Validation rules:
+
+- Type compatibility must be validated for IIP assignments
+- IIP payload type must match the target port's allowed_type
+
+Port-level mutations:
+
+If the control plane supports modification of port definitions
+(e.g. inport/outport changes), then:
+
+- Changes to allowed_type MUST trigger re-validation of all connected edges
+- Incompatible existing connections MUST cause mutation rejection
+
 #### Validation Points
 
 ##### 1. Graph Load
@@ -305,6 +340,26 @@ Rationale:
 
 Only data-plane inputs participate in correlation semantics.
 Control and configuration inputs do not require correlation.
+
+Source of data-plane classification:
+
+Ports are classified as data-plane, control, or configuration ports
+based on component port metadata.
+
+The exact classification mechanism is defined in:
+
+→ ADR-029: Type System & Port Metadata Model
+
+Validation logic MUST rely on this classification rather than
+inferring semantics from connection patterns.
+
+Note on IIPs:
+
+Initial Information Packets (IIPs) are treated as data-plane inputs
+for validation purposes if they target data-plane ports.
+
+They are excluded from join detection unless multiple data-plane edges
+are also connected.
 
 ---
 
