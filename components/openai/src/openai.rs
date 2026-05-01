@@ -6,9 +6,9 @@ use flowd_component_api::{
 use log::{debug, error, info, trace, warn};
 
 // component-specific
-use openai::{
-    chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessageRole},
-    Credentials,
+use openai_oxide::{
+    ClientConfig, OpenAI, OpenAIError,
+    types::chat::{ChatCompletionMessageParam, ChatCompletionRequest, UserContent},
 };
 use std::time::Duration;
 
@@ -22,7 +22,8 @@ enum OpenAIChatState {
 
 #[derive(Debug, Clone)]
 struct OpenAIConfig {
-    credentials: Credentials,
+    api_key: String,
+    base_url: Option<String>,
     model: String,
     context: bool,
 }
@@ -50,7 +51,7 @@ pub struct OpenAIChatComponent {
     state: OpenAIChatState,
     config: Option<OpenAIConfig>,
     #[allow(dead_code)]
-    messages: Vec<ChatCompletionMessage>,
+    messages: Vec<ChatCompletionMessageParam>,
     // ADR-017: Bounded IO channels
     cmd_sender: std::sync::mpsc::SyncSender<OpenAICommand>,
     result_receiver: std::sync::mpsc::Receiver<OpenAIResult>,
@@ -60,6 +61,62 @@ pub struct OpenAIChatComponent {
 }
 
 const OPENAI_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn format_openai_error(err: OpenAIError) -> String {
+    match err {
+        OpenAIError::ApiError {
+            status,
+            mut message,
+            type_,
+            code,
+            request_id,
+        } => {
+            if message.trim().is_empty() {
+                message = "<empty response body>".to_string();
+            }
+            let mut details = vec![format!("status={}", status)];
+            if let Some(t) = type_.filter(|v| !v.is_empty()) {
+                details.push(format!("type={}", t));
+            }
+            if let Some(c) = code.filter(|v| !v.is_empty()) {
+                details.push(format!("code={}", c));
+            }
+            if let Some(rid) = request_id.filter(|v| !v.is_empty()) {
+                details.push(format!("request_id={}", rid));
+            }
+            format!("OpenAI API error ({}) : {}", details.join(", "), message)
+        }
+        other => format!("OpenAI API error: {}", other),
+    }
+}
+
+fn build_openai_client(cfg: &OpenAIConfig) -> OpenAI {
+    if let Some(base_url) = &cfg.base_url {
+        OpenAI::with_config(ClientConfig::new(cfg.api_key.clone()).base_url(base_url.clone()))
+    } else {
+        OpenAI::new(cfg.api_key.clone())
+    }
+}
+
+fn normalize_base_url(url: &url::Url) -> Option<String> {
+    if url.host_str().unwrap_or("default") == "default" {
+        return None;
+    }
+
+    let mut host = url.host_str().expect("no host in URL").to_string();
+    if let Some(port) = url.port() {
+        host = format!("{}:{}", host, port);
+    }
+
+    let raw_path = url.path().trim_end_matches('/');
+    let path = if raw_path.is_empty() {
+        "/v1".to_string()
+    } else {
+        raw_path.to_string()
+    };
+
+    Some(format!("{}://{}{}", url.scheme(), host, path))
+}
 
 fn message_to_utf8_text(msg: &FbpMessage) -> Result<String, String> {
     if let Some(text) = msg.as_text() {
@@ -79,27 +136,25 @@ async fn async_openai_main(
     scheduler_waker: Option<flowd_component_api::SchedulerWaker>,
 ) {
     let mut config: Option<OpenAIConfig> = None;
-    let mut messages: Vec<ChatCompletionMessage> = Vec::new();
+    let mut client: Option<OpenAI> = None;
+    let mut messages: Vec<ChatCompletionMessageParam> = Vec::new();
 
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             OpenAICommand::SetConfig(new_config) => {
+                client = Some(build_openai_client(&new_config));
                 config = Some(new_config);
                 debug!("OpenAI config set");
             }
             OpenAICommand::SetInitialPrompt(prompt) => {
-                messages.push(ChatCompletionMessage {
-                    role: ChatCompletionMessageRole::System,
-                    content: Some(prompt),
+                messages.push(ChatCompletionMessageParam::System {
+                    content: prompt,
                     name: None,
-                    function_call: None,
-                    tool_call_id: None,
-                    tool_calls: None,
                 });
                 debug!("Initial prompt set");
             }
             OpenAICommand::ChatCompletion(msg_bytes) => {
-                if let Some(ref cfg) = config {
+                if let (Some(cfg), Some(client)) = (config.as_ref(), client.as_ref()) {
                     let user_message_content = match message_to_utf8_text(&msg_bytes) {
                         Ok(text) => text,
                         Err(e) => {
@@ -117,34 +172,45 @@ async fn async_openai_main(
                     // Prepare messages for this request
                     let request_messages = if cfg.context {
                         // Add user message to context
-                        messages.push(ChatCompletionMessage {
-                            role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content.clone()),
+                        messages.push(ChatCompletionMessageParam::User {
+                            content: UserContent::Text(user_message_content.clone()),
                             name: None,
-                            function_call: None,
-                            tool_call_id: None,
-                            tool_calls: None,
                         });
                         messages.clone()
                     } else {
                         // Single-turn conversation
-                        vec![ChatCompletionMessage {
-                            role: ChatCompletionMessageRole::User,
-                            content: Some(user_message_content),
+                        vec![ChatCompletionMessageParam::User {
+                            content: UserContent::Text(user_message_content),
                             name: None,
-                            function_call: None,
-                            tool_call_id: None,
-                            tool_calls: None,
                         }]
                     };
 
                     // Build and send request
-                    let chat_completion = ChatCompletion::builder(&cfg.model, request_messages)
-                        .credentials(cfg.credentials.clone())
-                        .create();
+                    debug!("Sending OpenAI chat completion request with model: {}, message count: {}", cfg.model, request_messages.len());
+
+                    // Log credentials info (API key masked for security)
+                    let api_key_masked = if cfg.api_key.len() > 8 {
+                        format!("{}****{}", &cfg.api_key[..4], &cfg.api_key[cfg.api_key.len()-4..])
+                    } else {
+                        "****".to_string()
+                    };
+                    debug!("OpenAI API key: {} (length: {}), base_url: '{}'",
+                           api_key_masked,
+                           cfg.api_key.len(),
+                           cfg.base_url.as_deref().unwrap_or("default"));
 
                     let response_result =
-                        tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, chat_completion).await;
+                        tokio::time::timeout(OPENAI_REQUEST_TIMEOUT, async {
+                            client
+                                .chat()
+                                .completions()
+                                .create(ChatCompletionRequest::new(
+                                    cfg.model.clone(),
+                                    request_messages,
+                                ))
+                                .await
+                        })
+                        .await;
 
                     match response_result {
                         Ok(Ok(response)) => {
@@ -153,7 +219,12 @@ async fn async_openai_main(
 
                             // Add AI response to context if enabled
                             if cfg.context {
-                                messages.push(ai_message.clone());
+                                messages.push(ChatCompletionMessageParam::Assistant {
+                                    content: ai_message.content.clone(),
+                                    name: None,
+                                    tool_calls: ai_message.tool_calls.clone(),
+                                    refusal: ai_message.refusal.clone(),
+                                });
                             }
 
                             let content = ai_message
@@ -169,7 +240,7 @@ async fn async_openai_main(
                         }
                         Ok(Err(err)) => {
                             let _ = result_tx
-                                .send(OpenAIResult::Error(format!("OpenAI API error: {}", err)));
+                                .send(OpenAIResult::Error(format_openai_error(err)));
                             // Wake scheduler to process the error result
                             if let Some(ref waker) = scheduler_waker {
                                 waker();
@@ -318,21 +389,16 @@ impl Component for OpenAIChatComponent {
                         .unwrap_or(false);
 
                     // Set credentials
-                    let credentials = if url.host_str().unwrap_or("default") != "default" {
-                        let base_url = format!(
-                            "{}://{}{}",
-                            url.scheme(),
-                            url.host_str().expect("no host in URL"),
-                            url.path()
-                        );
-                        Credentials::new(api_key, base_url)
+                    let base_url = if url.host_str().unwrap_or("default") != "default" {
+                        normalize_base_url(&url)
                     } else {
                         debug!("using default base URL for OpenAI API");
-                        Credentials::new(api_key, "")
+                        None
                     };
 
                     let config = OpenAIConfig {
-                        credentials,
+                        api_key,
+                        base_url,
                         model,
                         context: context_enabled,
                     };
@@ -399,7 +465,7 @@ impl Component for OpenAIChatComponent {
                         match result {
                             OpenAIResult::ChatResponse(response) => {
                                 debug!("Received AI response, forwarding to output");
-                                let response_msg = FbpMessage::from_bytes(response.as_bytes().to_vec());
+                                let response_msg = FbpMessage::from_text(response);
                                 if let Err(_) = self.out.push(response_msg) {
                                     error!("Failed to send response to output");
                                     return ProcessResult::Finished;
