@@ -183,18 +183,41 @@ T@1 → T@1
 
 ---
 
-##### Forward-compatible
+##### Forward-compatible (Registry-Declared)
 
-```text
-T@1 → T@2
-```
+T@1 → T@2 is allowed ONLY if:
 
-Allowed if:
+- compatibility is explicitly declared in the TypeRegistry
 
-* v2 is backward-compatible with v1 (ADR-014)
-* new fields are optional
-* existing semantics unchanged
-* consumer tolerates missing fields
+Validator behavior:
+
+- does NOT infer compatibility from schema or version numbers
+- relies solely on registry declarations
+
+##### Semantic Requirements for Declaring Compatibility
+
+The following conditions define when a type version MAY declare
+compatibility with a previous version:
+
+- newly added fields MUST be optional
+- existing fields MUST retain their meaning
+- removed fields MUST be safely ignorable by the consumer
+- structural changes MUST not break consumer expectations
+
+These rules are NOT enforced dynamically by the validator.
+
+They are:
+
+- design-time constraints
+- enforced by schema governance and testing
+- assumed to be upheld when registry compatibility is declared
+
+Important:
+
+Compatibility is not inferred from schema similarity,
+field structure, or version numbering.
+
+The registry is the single source of truth for compatibility.
 
 ---
 
@@ -286,8 +309,6 @@ If the control plane supports modification of port definitions
 - Incompatible existing connections MUST cause mutation rejection
 
 #### IIP Type Validation & Migration
-
-IIP Type Validation & Migration
 
 Current State:
 
