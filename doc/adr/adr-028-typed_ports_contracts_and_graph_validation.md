@@ -140,13 +140,30 @@ Compatibility Matrix (Producer → Consumer)
 | T@1      | T@1      | ✅     | exact match |
 | T@1      | T@2      | ✅     | forward-compatible (consumer tolerant) |
 | T@2      | T@1      | ❌     | consumer cannot interpret newer data |
-| T@2      | T@3      | ⚠️     | only if v3 explicitly declares compatibility with v2 |
+| T@2      | T@3      | ⚠️     | Allowed ONLY if compatibility is explicitly declared in the TypeRegistry |
 | T@1      | U@1      | ❌     | different type |
 
 Note:
 
 Compatibility is always evaluated from producer to consumer.
 The consumer defines tolerance requirements.
+
+Authoritative Source of Compatibility:
+
+Compatibility declarations MUST be defined in the TypeRegistry
+(see ADR-029: Type System, Registry & Validation Model).
+
+Validator behavior:
+
+- If registry declares compatibility → allowed
+- If not declared → rejected
+
+No implicit compatibility inference is allowed.
+
+Note:
+
+Version compatibility is NOT inferred from version numbers alone.
+All cross-version compatibility MUST be explicitly declared in the registry.
 
 ---
 
@@ -268,6 +285,65 @@ If the control plane supports modification of port definitions
 - Changes to allowed_type MUST trigger re-validation of all connected edges
 - Incompatible existing connections MUST cause mutation rejection
 
+#### IIP Type Validation & Migration
+
+IIP Type Validation & Migration
+
+Current State:
+
+- IIPs (Initial Information Packets) are commonly represented as raw strings
+- No enforced type association exists in many existing graph definitions
+
+Target State:
+
+- IIPs MUST conform to the target port's declared TypeId
+- IIP payloads are treated as data-plane inputs when targeting data ports
+
+---
+
+Migration Strategy:
+
+Flowd adopts a staged enforcement model:
+
+1. Compatibility Mode (default for existing graphs)
+
+   - IIP values are accepted as untyped input
+   - Validator attempts best-effort type interpretation
+   - Mismatches produce warnings, not errors
+
+   Example warnings:
+   - W_IIP_TYPE_MISMATCH
+   - W_IIP_UNTYPED_PAYLOAD
+
+2. Strict Mode
+
+   - IIP payload MUST match target port TypeId
+   - Validation errors are raised for mismatches
+   - No implicit parsing or coercion allowed
+
+---
+
+Future Direction:
+
+Typed IIP encoding SHOULD be supported via:
+
+- structured literals (e.g. JSON-based)
+- or explicit adapter nodes
+
+Example:
+
+  IIP (string) → [Adapter] → EmailRaw
+
+---
+
+Rationale:
+
+This approach enables:
+
+- backward compatibility with existing graphs
+- gradual migration toward fully typed systems
+- consistent behavior with schema validation model (ADR-029)
+
 #### Validation Points
 
 ##### 1. Graph Load
@@ -348,7 +424,7 @@ based on component port metadata.
 
 The exact classification mechanism is defined in:
 
-→ ADR-029: Type System & Port Metadata Model
+→ ADR-029: Type System, Registry & Validation Model
 
 Validation logic MUST rely on this classification rather than
 inferring semantics from connection patterns.
