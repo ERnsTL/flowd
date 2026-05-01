@@ -1,6 +1,6 @@
 # ADR-028: Typed Ports, Contracts & Graph Validation (v4)
 
-Status: Accepted
+Status: Proposed
 Date: 2026-05-01
 
 
@@ -284,14 +284,14 @@ Enforcement depends on validation profile:
 - Strict mode:
   Violations result in validation errors and mutation rejection.
 
-- Compatibility mode:
+- Minimal profile:
   Violations produce warnings (e.g. W_IIP_TYPE_MISMATCH)
   and do not block execution.
 
 This staged behavior supports migration from untyped IIP payloads to fully typed graph contracts.
 
 Strict mode represents the normative target behavior of the system.
-Compatibility mode is transitional.
+Minimal profile is transitional.
 
 #### Port-definition mutations
 
@@ -339,7 +339,7 @@ Migration Strategy:
 
 Flowd adopts a staged enforcement model:
 
-1. Compatibility Mode (default for existing graphs)
+1. Minimal profile (default for existing graphs)
 
    - IIP values are accepted as untyped input
    - Validator attempts best-effort type interpretation
@@ -456,12 +456,9 @@ Source of data-plane classification:
 Ports are classified as data-plane, control, or configuration ports
 based on component port metadata.
 
-The exact classification mechanism is defined in:
-
-→ ADR-029: Type System, Registry and Validation Model
-
-Validation logic MUST rely on this classification rather than
-inferring semantics from connection patterns.
+Each port MUST declare exactly one classification. Validation logic
+MUST rely on this metadata classification rather than inferring
+semantics from connection patterns.
 
 Note on IIPs:
 
@@ -653,7 +650,7 @@ Rejected:
 * ADR-006: Control Plane
 * ADR-014: Versioning
 * ADR-021: Execution Semantics
-* ADR-028: Type System, Registry and Validation Model
+* ADR-029: Type System, Registry and Validation Model
 
 ---
 

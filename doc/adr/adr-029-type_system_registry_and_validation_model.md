@@ -97,9 +97,10 @@ Goal: low-friction migration.
 Requirements:
 
 * valid `TypeId` required
-* registry entry required
+* registry entry required (including built-in `core/Any@1`)
 * compatibility check by type/version rules
 * schema presence optional
+* IIP mismatches produce warnings (`W_IIP_TYPE_MISMATCH`, `W_IIP_UNTYPED_PAYLOAD`)
 
 Guarantee level: type compatibility only.
 
@@ -113,6 +114,7 @@ Requirements:
 * schema required for non-`Any` ports
 * schema compatibility checks required
 * correlation key annotation required for join-node inputs
+* IIP type mismatch is an error (`E_IIP_TYPE_MISMATCH`)
 
 Guarantee level: type + structural contract.
 
@@ -217,7 +219,14 @@ Resolution is implementation-defined but must be deterministic.
 3. **Directed Compatibility**
 * evaluate producer->consumer compatibility
 * accept exact/declared compatible
-* otherwise error `E_TYPE_ADAPTER_REQUIRED`
+* incompatible type/version -> `E_TYPE_INCOMPATIBLE`
+* conversion required -> `E_TYPE_ADAPTER_REQUIRED`
+
+CompatibilityResult → Error Mapping (Normative):
+
+- CompatibleExact / CompatibleDeclared → no error
+- RequiresAdapter → E_TYPE_ADAPTER_REQUIRED
+- IncompatibleType / IncompatibleVersion → E_TYPE_INCOMPATIBLE
 
 4. **Schema Checks (profile-dependent)**
 * `minimal`: skip structural checks
@@ -233,13 +242,16 @@ Resolution is implementation-defined but must be deterministic.
 * never downgrade parse/registry resolution failures
 
 7. **IIP Validation**
-
-- for each IIP assignment:
-  - resolve target port
-  - validate TypeId compatibility
-  - apply profile rules:
-    - minimal → warning
-    - strict → error
+* for each IIP assignment:
+  * resolve target port
+  * parse/normalize target port `TypeId` and resolve registry entry
+  * `minimal` profile:
+    * best-effort typed interpretation is allowed
+    * emit `W_IIP_UNTYPED_PAYLOAD` when IIP has no usable type annotation
+    * emit `W_IIP_TYPE_MISMATCH` on compatibility mismatch
+  * `strict` profile:
+    * IIP payload must be typed/declared for deterministic validation
+    * any mismatch is `E_IIP_TYPE_MISMATCH`
 
 ### 4.4 Pseudocode
 
@@ -252,7 +264,7 @@ for edge in graph.edges:
   t_in  = parse_type_id(tgt.allowed_type)
 
   compat = check_directed_compat(t_out, t_in, registry)
-  if compat == Incompatible:
+  if compat == IncompatibleType or compat == IncompatibleVersion:
     error(E_TYPE_INCOMPATIBLE, edge)
   if compat == RequiresAdapter:
     error(E_TYPE_ADAPTER_REQUIRED, edge)
@@ -263,9 +275,29 @@ for edge in graph.edges:
 for node in graph.nodes:
   if incoming_data_edges(node) > 1:
     enforce_correlation(node, profile)
+
+for iip in graph.iips:
+  tgt = resolve_iip_target_port(iip)
+  t_in = parse_type_id(tgt.allowed_type)
+  require_registry_entry(t_in)
+
+  maybe_iip_type = interpret_iip_type_best_effort(iip)
+  if maybe_iip_type == None:
+    if profile == Minimal:
+      warn(W_IIP_UNTYPED_PAYLOAD, iip)
+    else:
+      error(E_IIP_TYPE_MISMATCH, iip)
+    continue
+
+  compat = check_iip_compat(maybe_iip_type, t_in, registry)
+  if compat == Incompatible:
+    if profile == Minimal:
+      warn(W_IIP_TYPE_MISMATCH, iip)
+    else:
+      error(E_IIP_TYPE_MISMATCH, iip)
 ```
 
-incoming_data_edges is defined according to port classification rules specified in ADR-028.
+Best-effort IIP type interpretation is implementation-defined, but MUST be deterministic within a given deployment.
 
 Port Classification:
 
@@ -275,7 +307,7 @@ Each port MUST declare one of:
 - control
 - config
 
-This classification is part of ComponentPort metadata.
+Port classification is defined as part of ComponentPort metadata and is required for all components participating in typed validation.
 
 ---
 
@@ -285,8 +317,13 @@ Validator runs at:
 
 * graph load
 * `network:start`
-* pre-commit of graph mutation commands (`addnode`, `removenode`, `addedge`, `removeedge`, `changenode`, `changeedge`, and equivalent config mutations including all port and IIP mutation operations defined in the control plane
-(see ADR-028))
+* pre-commit of control-plane graph mutations:
+  * `graph:addnode`, `graph:removenode`
+  * `graph:addedge`, `graph:removeedge`
+  * `graph:changenode`, `graph:changeedge`, `graph:changegroup`
+  * `graph:addinport`, `graph:removeinport`, `graph:renameinport`
+  * `graph:addoutport`, `graph:removeoutport`, `graph:renameoutport`
+  * `graph:addinitial`, `graph:removeinitial`
 
 Mutation is rejected on validation errors.
 
@@ -304,6 +341,9 @@ Stable codes:
 * `E_SCHEMA_REQUIRED_STRICT`
 * `E_SCHEMA_INCOMPATIBLE`
 * `E_CORRELATION_REQUIRED`
+* `E_IIP_TYPE_MISMATCH`
+* `W_IIP_TYPE_MISMATCH`
+* `W_IIP_UNTYPED_PAYLOAD`
 * `W_UNSAFE_ANY_EDGE`
 * `W_UNSAFE_CORRELATION_BYPASS`
 
