@@ -590,7 +590,7 @@ impl Component for ZeroconfBrowserComponent {
                     match result {
                         ZeroconfBrowserResult::ServiceFound(url) => {
                             debug!("Service found, sending to output: {}", url);
-                            let msg = FbpMessage::from_bytes(url.into_bytes());
+                            let msg = FbpMessage::from_text(url);
                             if let Err(_) = self.out.push(msg) {
                                 error!("Failed to send service result to output");
                                 return ProcessResult::Finished;

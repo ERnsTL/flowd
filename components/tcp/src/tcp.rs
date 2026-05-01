@@ -708,7 +708,7 @@ impl Component for TCPServerComponent {
 
                         // Frame data with client ID for multi-client support
                         let framed_data_str = format!("{}:{}", client_id, String::from_utf8_lossy(&data));
-                        let framed_msg = FbpMessage::from_bytes(framed_data_str.into_bytes());
+                        let framed_msg = FbpMessage::from_text(framed_data_str);
                         match self.out.push(framed_msg) {
                             Ok(()) => {
                                 work_units += 1;

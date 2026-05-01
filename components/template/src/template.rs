@@ -121,7 +121,7 @@ impl Component for TeraTemplateComponent {
 
                         // Send result to out port
                         debug!("sending...");
-                        let msg = FbpMessage::from_bytes(rendered.trim().as_bytes().to_vec());
+                        let msg = FbpMessage::from_text(rendered.trim().to_string());
                         if let Ok(()) = self.out.push(msg) {
                             debug!("done");
                             work_units += 1;

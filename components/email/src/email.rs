@@ -126,7 +126,7 @@ impl Component for EmailParserComponent {
                     Ok(parsed) => {
                         match serde_json::to_string(&parsed) {
                             Ok(json_str) => {
-                                let output_msg = FbpMessage::from_bytes(json_str.into_bytes());
+                                let output_msg = FbpMessage::from_text(json_str);
                                 if let Err(_) = self.out.push(output_msg) {
                                     warn!("output buffer full, stopping processing");
                                     break;

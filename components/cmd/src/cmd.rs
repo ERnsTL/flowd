@@ -274,7 +274,10 @@ impl Component for CmdComponent {
                 if context.remaining_budget > 0 {
                     match stdout_rx.try_recv() {
                         Ok(line) => {
-                            let msg_out = FbpMessage::from_bytes(line);
+                            let msg_out = match String::from_utf8(line) {
+                                Ok(text) => FbpMessage::from_text(text),
+                                Err(err) => FbpMessage::from_bytes(err.into_bytes()),
+                            };
                             match self.out.push(msg_out) {
                                 Ok(()) => {
                                     work_done += 1;

@@ -163,7 +163,7 @@ impl Component for GenericRouterComponent {
                 debug!("routed to port: {}", output_port);
 
                 if let Some(out_sink) = self.out_ports.get_mut(&output_port) {
-                    let output_msg = FbpMessage::from_bytes(input_text.as_bytes().to_vec());
+                    let output_msg = FbpMessage::from_str(input_text);
                     match out_sink.push(output_msg) {
                         Ok(()) => {
                             work_units += 1;

@@ -113,7 +113,7 @@ impl Component for RegexpExtractComponent {
 
                         // Send results
                         debug!("sending...");
-                        let msg = FbpMessage::from_bytes(capture_str.as_bytes().to_vec());
+                        let msg = FbpMessage::from_str(capture_str);
                         if let Ok(()) = self.out.push(msg) {
                             debug!("done");
                             work_units += 1;
