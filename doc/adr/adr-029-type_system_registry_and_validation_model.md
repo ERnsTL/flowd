@@ -163,7 +163,8 @@ pub enum CompatibilityResult {
     CompatibleExact,
     CompatibleDeclared,
     RequiresAdapter,
-    Incompatible,
+    IncompatibleType,
+    IncompatibleVersion,
 }
 ```
 
@@ -172,6 +173,18 @@ Notes:
 * `ComponentPort.allowed_type` stores canonical `TypeId` string.
 * `ComponentPort.schema` stores schema reference or inline schema identifier.
 * `Port<Any>` is represented by reserved type ID: `core/Any@1`.
+
+Semantics:
+
+* `compatible_from` defines which producer TypeIds this type version can safely consume (consumer tolerance list).
+
+schema_ref may reference:
+
+- inline schema identifiers
+- registry-based schema entries
+- external schema resources
+
+Resolution is implementation-defined but must be deterministic.
 
 ---
 
@@ -242,6 +255,8 @@ for node in graph.nodes:
     enforce_correlation(node, profile)
 ```
 
+incoming_data_edges is defined according to port classification rules specified in ADR-028.
+
 ---
 
 ## 5. Lifecycle Integration
@@ -250,9 +265,11 @@ Validator runs at:
 
 * graph load
 * `network:start`
-* pre-commit of graph mutation commands (`addnode`, `removenode`, `addedge`, `removeedge`, `changenode`, `changeedge`, and equivalent config mutations)
+* pre-commit of graph mutation commands (`addnode`, `removenode`, `addedge`, `removeedge`, `changenode`, `changeedge`, and equivalent config mutations including all port and IIP mutation operations defined in the control plane
+(see ADR-028))
 
 Mutation is rejected on validation errors.
+
 
 ---
 
