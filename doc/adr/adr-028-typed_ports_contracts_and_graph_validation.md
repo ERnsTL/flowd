@@ -221,15 +221,17 @@ Validation is performed at control-plane boundaries:
 
 #### Supported Mutation Operations
 
-Aligned with control plane (ADR-006):
+Supported mutation operations (aligned with control plane in ADR-006):
 
-* `graph:addnode`
-* `graph:removenode`
-* `graph:addedge`
-* `graph:removeedge`
-* `graph:updateconfig` *(configuration-only updates)*
+- graph:addnode
+- graph:removenode
+- graph:addedge
+- graph:removeedge
+- graph:changenode
+- graph:changeedge
+- graph:changegroup
 
----
+Note: Configuration changes are performed via existing change operations (e.g. changenode, changeedge, changegroup) and are not represented as a separate mutation command.
 
 #### Validation Points
 
@@ -259,6 +261,9 @@ For each mutation:
 Validation occurs only at control-plane safe points
 (consistent with scheduler semantics)
 
+Correlation requirements apply only to data-plane joins.
+Nodes with multiple non-data inputs are not subject to correlation validation.
+
 ---
 
 ### 7. Correlation Rules
@@ -283,8 +288,23 @@ Therefore:
 A node is considered a **join node** if:
 
 ```text
-number_of_connected_input_edges > 1
+number_of_connected_data_input_edges > 1
 ```
+
+Definition:
+
+- Data input edges:
+  Edges connected to ports that carry data-plane messages.
+
+- Excluded from join detection:
+  - control ports
+  - configuration ports
+  - IIP-only inputs
+
+Rationale:
+
+Only data-plane inputs participate in correlation semantics.
+Control and configuration inputs do not require correlation.
 
 ---
 
