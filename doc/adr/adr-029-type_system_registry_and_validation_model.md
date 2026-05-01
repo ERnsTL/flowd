@@ -173,6 +173,7 @@ Notes:
 * `ComponentPort.allowed_type` stores canonical `TypeId` string.
 * `ComponentPort.schema` stores schema reference or inline schema identifier.
 * `Port<Any>` is represented by reserved type ID: `core/Any@1`.
+* core/Any@1 is a mandatory built-in registry entry present in every graph scope.
 
 Semantics:
 
@@ -231,6 +232,15 @@ Resolution is implementation-defined but must be deterministic.
 * if unsafe edge flag present, downgrade selected errors to warnings per policy
 * never downgrade parse/registry resolution failures
 
+7. **IIP Validation**
+
+- for each IIP assignment:
+  - resolve target port
+  - validate TypeId compatibility
+  - apply profile rules:
+    - minimal → warning
+    - strict → error
+
 ### 4.4 Pseudocode
 
 ```text
@@ -256,6 +266,16 @@ for node in graph.nodes:
 ```
 
 incoming_data_edges is defined according to port classification rules specified in ADR-028.
+
+Port Classification:
+
+Each port MUST declare one of:
+
+- data
+- control
+- config
+
+This classification is part of ComponentPort metadata.
 
 ---
 
