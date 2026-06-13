@@ -61,7 +61,7 @@ Built-in primitive message types and control IPs:
 
 do not require:
 
-- registry-defined TypeId declarations (primitive messages use reserved Built-In TypeIds).
+- registry-defined TypeId declarations (primitive messages use reserved Built-In TypeIds instead).
 - EncodingId declarations
 - Schema definitions
 - Registry entries
@@ -576,57 +576,3 @@ Example:
 "CapNP" -> "capnp"
 
 "capnproto" -> rejected
-
-
-## Commentary
-
-Ich würde ADR-030 tatsächlich schreiben, aber mit einer wichtigen Nuance:
-
-> **ADR-030 sollte nicht "rkyv vs Flexbuffers" entscheiden.**
->
-> ADR-030 sollte entscheiden:
->
-> **"Encoding is a contract property, not a transport property."**
-
-Das ist die eigentliche Architekturentscheidung.
-
-Ob später:
-
-* rkyv
-* Flexbuffers
-* Cap'n Proto
-* JSON
-
-existieren, ist dann nur eine Registry-/Adapter-Frage.
-
-Das verhindert, dass du in 2 Jahren ADR-030 wieder ändern musst.
-
-
----
-
-Meine Einschätzung:
-
-**ADR-030 ist deutlich wichtiger als die Wahl zwischen rkyv und Flexbuffers.**
-
-Die eigentliche Architekturentscheidung lautet:
-
-> **Encoding gehört in den Contract, nicht in `FbpMessage`.**
-
-Wenn du das sauber festschreibst, kannst du in 5 Jahren problemlos `rkyv`, `Flexbuffers`, `Arrow`, `FlatBuffers` oder etwas völlig Neues hinzufügen, ohne ADR-003, ADR-008, ADR-028 oder ADR-029 anfassen zu müssen. Das ist normalerweise ein Zeichen für eine gute ADR.
-
-### 7. Die eigentliche Stärke des aktuellen Stands
-
-Wenn ich ADR-028, 029 und 030 zusammen betrachte:
-
-Dann habt ihr jetzt sauber getrennt:
-
-| Ebene      | Verantwortlich |
-| ---------- | -------------- |
-| FbpMessage | Transport      |
-| TypeId     | Semantik       |
-| EncodingId | Repräsentation |
-| Schema     | Struktur       |
-| Registry   | Kompatibilität |
-| Adapter    | Transformation |
-
-Das ist architektonisch ziemlich elegant.
