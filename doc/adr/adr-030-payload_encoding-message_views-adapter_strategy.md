@@ -61,7 +61,7 @@ Built-in primitive message types and control IPs:
 
 do not require:
 
-- TypeId declarations in the sense of:  Built-in primitive message types use reserved Built-In TypeIds provided by flowd and do not require registry-defined TypeIds.
+- registry-defined TypeId declarations (primitive messages use reserved Built-In TypeIds).
 - EncodingId declarations
 - Schema definitions
 - Registry entries
@@ -255,7 +255,7 @@ Structured Typed Ports:
 Validation Rules:
 
 Primitive Ports:
-- no TypeId required: Primitive Ports use Built-In TypeIds and therefore do not require registry-defined TypeIds.
+- TypeId declaration in source graph is optional; after graph normalization, primitive ports SHALL carry the corresponding Built-In TypeId.
 - no EncodingId required
 - excluded from ADR-029 registry validation
 
@@ -266,6 +266,19 @@ Structured Typed Ports:
 
 Mixed connections between primitive and structured ports require
 explicit adapter components.
+
+### Primitive Compatibility Rules (Normative)
+
+Primitive port compatibility is evaluated using Built-In TypeIds only.
+
+Compatibility outcomes:
+
+- exact Built-In TypeId match -> compatible
+- different Built-In TypeIds -> E_TYPE_ADAPTER_REQUIRED
+
+No implicit primitive conversion is allowed.
+
+Any primitive-to-primitive conversion must be represented by an explicit adapter component.
 
 
 ## Canonical Built-In EncodingIds
@@ -526,7 +539,7 @@ The following Built-In TypeIds are reserved:
   encoding = rkyv
   schema = ...
 
-### Built-In Primitive Type Mapping
+### Built-In Primitive TypeId Mapping
 
 Human-facing primitive names map to the following canonical
 Built-In TypeIds:
