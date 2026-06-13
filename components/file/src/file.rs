@@ -216,6 +216,7 @@ impl Component for FileReaderComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("NAMES"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -226,6 +227,7 @@ impl Component for FileReaderComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -439,6 +441,7 @@ impl Component for FileTailerComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("NAME"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -449,6 +452,7 @@ impl Component for FileTailerComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -642,7 +646,8 @@ impl Component for FileWriterComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("filename, one IP"),
@@ -652,7 +657,8 @@ impl Component for FileWriterComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be written to the given file"),

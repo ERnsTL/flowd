@@ -27,7 +27,7 @@ use crate::{
     RuntimeErrorResponse, RuntimeMessage, RuntimePacketsentMessage, RuntimePacketsentPayload,
     RuntimePortsMessage, RuntimeRuntimeMessage, RuntimeRuntimePayload, TraceClearResponse,
     TraceDumpResponse, TraceErrorResponse, TraceMessage, TraceStartResponse, TraceStopResponse,
-    CLIENT_BROADCAST_WRITE_TIMEOUT,
+    validate_graph_contracts_or_err, schema_profile_from_env, CLIENT_BROADCAST_WRITE_TIMEOUT,
 };
 /* unused imports
 , RuntimePacketRequestPayload,
@@ -370,6 +370,29 @@ impl FlowdServer {
                 std::io::ErrorKind::NotFound,
                 format!("Graph '{}' not found", graph_name),
             ))
+        }
+
+        fn apply_validated_graph_mutation<T, F>(
+            target_graph: &Arc<RwLock<Graph>>,
+            components: &Arc<RwLock<ComponentLibrary>>,
+            mutation: F,
+        ) -> Result<T, std::io::Error>
+        where
+            F: FnOnce(&mut Graph) -> Result<T, std::io::Error>,
+        {
+            let mut graph_write = target_graph.write().expect("lock poisoned");
+            let snapshot = graph_write.clone();
+            let result = mutation(&mut graph_write)?;
+
+            let components_read = components.read().expect("lock poisoned");
+            let profile = schema_profile_from_env();
+            if let Err(err) = validate_graph_contracts_or_err(&graph_write, &components_read, profile)
+            {
+                *graph_write = snapshot;
+                return Err(err);
+            }
+
+            Ok(result)
         }
         if let Err(err) = stream.set_write_timeout(Some(Duration::SECOND)) {
             log::warn!("set_write_timeout call failed: {:?}", err);
@@ -1001,24 +1024,26 @@ impl FlowdServer {
                                             continue;
                                         }
                                     };
-                                let add_node_result = {
-                                    let mut graph_write =
-                                        target_graph.write().expect("lock poisoned");
-                                    // Include the icon field in metadata if present
-                                    let mut metadata = payload.metadata.clone();
-                                    if let Some(icon) = &payload.icon {
-                                        metadata.insert(
-                                            "icon".to_string(),
-                                            serde_json::Value::String(icon.clone()),
-                                        );
-                                    }
-                                    graph_write.add_node_from_payload(
-                                        graph_name.to_string(),
-                                        payload.component,
-                                        payload.name,
-                                        metadata,
-                                    )
-                                };
+                                let add_node_result = apply_validated_graph_mutation(
+                                    &target_graph,
+                                    &components,
+                                    |graph_write| {
+                                        // Include the icon field in metadata if present
+                                        let mut metadata = payload.metadata.clone();
+                                        if let Some(icon) = &payload.icon {
+                                            metadata.insert(
+                                                "icon".to_string(),
+                                                serde_json::Value::String(icon.clone()),
+                                            );
+                                        }
+                                        graph_write.add_node_from_payload(
+                                            graph_name.to_string(),
+                                            payload.component,
+                                            payload.name,
+                                            metadata,
+                                        )
+                                    },
+                                );
                                 match add_node_result {
                                     Ok(response) => {
                                         log::info!("response: sending graph:addnode response");
@@ -1097,10 +1122,14 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_node_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_node(payload.graph.clone(), payload.name.clone())
-                            };
+                            let remove_node_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write
+                                        .remove_node(payload.graph.clone(), payload.name.clone())
+                                },
+                            );
                             match remove_node_result {
                                 Ok(removed_edges) => {
                                     for removed_edge in removed_edges {
@@ -1174,14 +1203,17 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let rename_node_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.rename_node(
-                                    payload.graph.clone(),
-                                    payload.from.clone(),
-                                    payload.to.clone(),
-                                )
-                            };
+                            let rename_node_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.rename_node(
+                                        payload.graph.clone(),
+                                        payload.from.clone(),
+                                        payload.to.clone(),
+                                    )
+                                },
+                            );
                             match rename_node_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:renamenode response");
@@ -1241,14 +1273,17 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let change_node_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.change_node(
-                                    payload.graph.clone(),
-                                    payload.name.clone(),
-                                    payload.metadata,
-                                )
-                            };
+                            let change_node_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.change_node(
+                                        payload.graph.clone(),
+                                        payload.name.clone(),
+                                        payload.metadata.clone(),
+                                    )
+                                },
+                            );
                             match change_node_result {
                                 Ok(updated_metadata) => {
                                     log::info!("response: sending graph:changenode response");
@@ -1315,13 +1350,16 @@ impl FlowdServer {
                                     }
                                 };
                             //TODO optimize clone here
-                            let add_edge_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.add_edge(
-                                    payload.graph.clone(),
-                                    GraphEdge::from(payload.clone()),
-                                )
-                            };
+                            let add_edge_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.add_edge(
+                                        payload.graph.clone(),
+                                        GraphEdge::from(payload.clone()),
+                                    )
+                                },
+                            );
                             match add_edge_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addedge response");
@@ -1379,14 +1417,17 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_edge_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_edge(
-                                    payload.graph.clone(),
-                                    payload.src.clone(),
-                                    payload.tgt.clone(),
-                                )
-                            };
+                            let remove_edge_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.remove_edge(
+                                        payload.graph.clone(),
+                                        payload.src.clone(),
+                                        payload.tgt.clone(),
+                                    )
+                                },
+                            );
                             match remove_edge_result {
                                 //TODO optimize any way to avoid these clones?
                                 Ok(_) => {
@@ -1447,15 +1488,18 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let change_edge_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.change_edge(
-                                    payload.graph.clone(),
-                                    payload.src.clone(),
-                                    payload.tgt.clone(),
-                                    payload.metadata.clone(),
-                                )
-                            };
+                            let change_edge_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.change_edge(
+                                        payload.graph.clone(),
+                                        payload.src.clone(),
+                                        payload.tgt.clone(),
+                                        payload.metadata.clone(),
+                                    )
+                                },
+                            );
                             match change_edge_result {
                                 //TODO optimize any way to avoid these clones here?
                                 Ok(_) => {
@@ -1516,10 +1560,11 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let add_initial_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.add_initialip(payload.clone())
-                            };
+                            let add_initial_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| graph_write.add_initialip(payload.clone()),
+                            );
                             match add_initial_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addinitial response");
@@ -1579,10 +1624,11 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_initial_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_initialip(payload.clone())
-                            };
+                            let remove_initial_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| graph_write.remove_initialip(payload.clone()),
+                            );
                             match remove_initial_result {
                                 Ok(removed_src) => {
                                     log::info!("response: sending graph:removeinitial response");
@@ -1647,11 +1693,16 @@ impl FlowdServer {
                                     }
                                 };
                             let response = GraphAddinportResponse::from_request(payload.clone());
-                            let add_inport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write
-                                    .add_inport(payload.public.clone(), GraphPort::from(payload))
-                            };
+                            let add_inport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.add_inport(
+                                        payload.public.clone(),
+                                        GraphPort::from(payload.clone()),
+                                    )
+                                },
+                            );
                             match add_inport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addinport response");
@@ -1708,10 +1759,11 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_inport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_inport(payload.public)
-                            };
+                            let remove_inport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| graph_write.remove_inport(payload.public.clone()),
+                            );
                             match remove_inport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removeinport response");
@@ -1772,10 +1824,14 @@ impl FlowdServer {
                                     }
                                 };
                             log::info!("response: sending graph:renameinport response");
-                            let rename_inport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.rename_inport(payload.from, payload.to)
-                            };
+                            let rename_inport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write
+                                        .rename_inport(payload.from.clone(), payload.to.clone())
+                                },
+                            );
                             match rename_inport_result {
                                 Ok(_) => {
                                     websocket
@@ -1835,11 +1891,16 @@ impl FlowdServer {
                                     }
                                 };
                             let response = GraphAddoutportResponse::from_request(payload.clone());
-                            let add_outport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write
-                                    .add_outport(payload.public.clone(), GraphPort::from(payload))
-                            };
+                            let add_outport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.add_outport(
+                                        payload.public.clone(),
+                                        GraphPort::from(payload.clone()),
+                                    )
+                                },
+                            );
                             match add_outport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addoutport response");
@@ -1896,10 +1957,11 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_outport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_outport(payload.public.clone())
-                            };
+                            let remove_outport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| graph_write.remove_outport(payload.public.clone()),
+                            );
                             match remove_outport_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removeoutport response");
@@ -1960,10 +2022,14 @@ impl FlowdServer {
                                     }
                                 };
                             log::info!("response: sending graph:renameoutport response");
-                            let rename_outport_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.rename_outport(payload.from, payload.to)
-                            };
+                            let rename_outport_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write
+                                        .rename_outport(payload.from.clone(), payload.to.clone())
+                                },
+                            );
                             match rename_outport_result {
                                 Ok(_) => {
                                     websocket
@@ -2022,15 +2088,18 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let add_group_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.add_group(
-                                    payload.graph,
-                                    payload.name,
-                                    payload.nodes,
-                                    payload.metadata,
-                                )
-                            };
+                            let add_group_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.add_group(
+                                        payload.graph.clone(),
+                                        payload.name.clone(),
+                                        payload.nodes.clone(),
+                                        payload.metadata.clone(),
+                                    )
+                                },
+                            );
                             match add_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:addgroup response");
@@ -2092,10 +2161,14 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let remove_group_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.remove_group(payload.graph, payload.name)
-                            };
+                            let remove_group_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write
+                                        .remove_group(payload.graph.clone(), payload.name.clone())
+                                },
+                            );
                             match remove_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:removegroup response");
@@ -2155,10 +2228,17 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let rename_group_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.rename_group(payload.graph, payload.from, payload.to)
-                            };
+                            let rename_group_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.rename_group(
+                                        payload.graph.clone(),
+                                        payload.from.clone(),
+                                        payload.to.clone(),
+                                    )
+                                },
+                            );
                             match rename_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:renamegroup response");
@@ -2218,14 +2298,17 @@ impl FlowdServer {
                                         continue;
                                     }
                                 };
-                            let change_group_result = {
-                                let mut graph_write = target_graph.write().expect("lock poisoned");
-                                graph_write.change_group(
-                                    payload.graph,
-                                    payload.name,
-                                    payload.metadata,
-                                )
-                            };
+                            let change_group_result = apply_validated_graph_mutation(
+                                &target_graph,
+                                &components,
+                                |graph_write| {
+                                    graph_write.change_group(
+                                        payload.graph.clone(),
+                                        payload.name.clone(),
+                                        payload.metadata.clone(),
+                                    )
+                                },
+                            );
                             match change_group_result {
                                 Ok(_) => {
                                     log::info!("response: sending graph:changegroup response");

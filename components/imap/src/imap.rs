@@ -206,7 +206,8 @@ impl Component for IMAPAppendComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL which includes encryption, server, username, password, mailbox name"),
@@ -216,7 +217,8 @@ impl Component for IMAPAppendComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be appended to given mailbox"),
@@ -448,6 +450,7 @@ impl Component for IMAPFetchIdleComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("CONF"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -458,6 +461,7 @@ impl Component for IMAPFetchIdleComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -963,6 +967,7 @@ impl Component for IMAPFetchComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("CONF"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -973,6 +978,7 @@ impl Component for IMAPFetchComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -1226,7 +1232,8 @@ impl Component for IMAPMoveCopyComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL with optional copy=true query parameter"),
@@ -1236,7 +1243,8 @@ impl Component for IMAPMoveCopyComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("JSON with uid and mailbox fields"),
@@ -1473,7 +1481,8 @@ impl Component for IMAPDeleteComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL which includes encryption, server, username, password, mailbox name"),
@@ -1483,7 +1492,8 @@ impl Component for IMAPDeleteComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("Message UID to delete (string or JSON with uid field)"),

@@ -203,7 +203,8 @@ impl Component for JSONQueryComponent {
                 ComponentPort {
                     name: String::from("QUERY"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("filter to apply to the JSON data, in jaq/jq filter syntax"),
@@ -213,7 +214,8 @@ impl Component for JSONQueryComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs to process, expected to contain JSON data"),
@@ -225,7 +227,8 @@ impl Component for JSONQueryComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("processed IPs with filtered JSON data"),

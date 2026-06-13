@@ -404,7 +404,8 @@ impl Component for RedisPublisherComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from(
@@ -418,7 +419,8 @@ impl Component for RedisPublisherComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be published on given Redis MQ channel"),
@@ -600,7 +602,8 @@ impl Component for RedisSubscriberComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL which includes options, see redis crate documentation"),  // see https://github.com/redis-rs/redis-rs/blob/45973d30c70c3817856095dda0c20401a8327207/redis/src/connection.rs#L282
@@ -612,7 +615,8 @@ impl Component for RedisSubscriberComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("contents of received messages on given Redis MQ channel"),

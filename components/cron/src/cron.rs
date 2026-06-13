@@ -155,6 +155,7 @@ impl Component for CronComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("WHEN"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -165,6 +166,7 @@ impl Component for CronComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("TICK"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,

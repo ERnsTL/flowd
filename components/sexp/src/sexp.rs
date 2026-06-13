@@ -184,7 +184,8 @@ impl Component for SexpComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs with strings to trim, one string per IP"),
@@ -196,7 +197,8 @@ impl Component for SexpComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("trimmed strings"),

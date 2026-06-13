@@ -187,7 +187,8 @@ impl Component for BrotliCompressComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("TODO"),
@@ -198,7 +199,8 @@ impl Component for BrotliCompressComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs to compress"),
@@ -210,7 +212,8 @@ impl Component for BrotliCompressComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("compressed IPs"),
@@ -394,7 +397,8 @@ impl Component for BrotliDecompressComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("TODO"),
@@ -405,7 +409,8 @@ impl Component for BrotliDecompressComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("compressed Brotli data"),
@@ -417,7 +422,8 @@ impl Component for BrotliDecompressComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("decompressed data"),

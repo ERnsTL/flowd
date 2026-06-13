@@ -178,11 +178,14 @@ async fn async_openai_main(
                         });
                         messages.clone()
                     } else {
-                        // Single-turn conversation
-                        vec![ChatCompletionMessageParam::User {
+                        // Single-turn conversation with optional persistent system prompt.
+                        // `messages` may contain the initial system prompt set via initialprompt=true.
+                        let mut single_turn_messages = messages.clone();
+                        single_turn_messages.push(ChatCompletionMessageParam::User {
                             content: UserContent::Text(user_message_content),
                             name: None,
-                        }]
+                        });
+                        single_turn_messages
                     };
 
                     // Build and send request
@@ -527,7 +530,8 @@ impl Component for OpenAIChatComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL which includes options in the query string"),
@@ -537,7 +541,8 @@ impl Component for OpenAIChatComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("chat prompts from the user"),
@@ -549,7 +554,8 @@ impl Component for OpenAIChatComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("response chat completion message"),

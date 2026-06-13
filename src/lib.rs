@@ -66,6 +66,7 @@ const PERSISTENCE_FILE_NAME: &str = "flowd.graph.json";
 include!("runtime.rs");
 include!("protocol.rs");
 include!("graph.rs");
+include!("type_system.rs");
 
 pub mod bench_api;
 

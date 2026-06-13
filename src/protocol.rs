@@ -2651,7 +2651,7 @@ struct GraphAddgroupRequestPayload {
 }
 
 //NOTE: Serialize trait needed for FBP graph structs, not for the FBP network protocol
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct GraphGroupMetadata {
     description: String,
 }

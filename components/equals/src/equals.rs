@@ -206,7 +206,8 @@ impl Component for EqualsComponent {
                 ComponentPort {
                     name: String::from("CMP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to compare against - can be updated at runtime"),
@@ -216,7 +217,8 @@ impl Component for EqualsComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be routed to TRUE or FALSE outport"),
@@ -228,7 +230,8 @@ impl Component for EqualsComponent {
                 ComponentPort {
                     name: String::from("TRUE"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("repeated data from IN port if it is equal to the latest IP from CMP port"),
@@ -238,7 +241,8 @@ impl Component for EqualsComponent {
                 ComponentPort {
                     name: String::from("FALSE"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("repeated data from IN port if it is not equal to the latest IP from CMP port"),

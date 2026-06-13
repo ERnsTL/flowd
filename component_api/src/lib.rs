@@ -498,6 +498,8 @@ pub struct ComponentPort {
     #[serde(rename = "type")]
     pub allowed_type: String, //TODO clarify spec: so if we define a boolean, we can send only booleans? What about struct/object types? How should the runtime verify that? //TODO map JSON types <-> Rust types
     #[serde(default)]
+    pub encoding: Option<String>,
+    #[serde(default)]
     pub schema: Option<String>, // spec: optional
     #[serde(default)]
     pub required: bool, // spec: optional, whether the port needs to be connected for the component to work (TODO add checks for that and notify user (how?) that a vital port is unconnected if required=true)
@@ -516,6 +518,7 @@ impl Default for ComponentPort {
         ComponentPort {
             name: String::from("out"),
             allowed_type: String::from("string"),
+            encoding: None,
             schema: None,
             required: true,
             is_arrayport: false,
@@ -531,6 +534,7 @@ impl ComponentPort {
         ComponentPort {
             name: String::from("in"),
             allowed_type: String::from("string"),
+            encoding: None,
             schema: None,
             required: true,
             is_arrayport: false,

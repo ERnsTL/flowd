@@ -387,6 +387,7 @@ impl Component for ZeroconfResponderComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("CONF"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
@@ -625,7 +626,8 @@ impl Component for ZeroconfBrowserComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("query URL - instance in the URL path is optional"),
@@ -637,7 +639,8 @@ impl Component for ZeroconfBrowserComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("service response in URL format, eg. tcp://1.2.3.4:1234/instancename"),

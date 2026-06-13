@@ -107,6 +107,7 @@ impl Component for FlowdVisComponent {
             in_ports: vec![ComponentPort {
                 name: String::from("IN"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,

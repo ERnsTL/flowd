@@ -789,7 +789,8 @@ impl Component for HTTPClientComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: false,
                     is_arrayport: false,
                     description: String::from("JSON configuration for retry parameters: {\"max_retries\": 3, \"backoff_base_ms\": 100, \"backoff_max_ms\": 30000}"),
@@ -799,7 +800,8 @@ impl Component for HTTPClientComponent {
                 ComponentPort {
                     name: String::from("REQ"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("URLs to request, one per IP"),
@@ -811,7 +813,8 @@ impl Component for HTTPClientComponent {
                 ComponentPort {
                     name: String::from("RESP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("successful response body"),
@@ -821,7 +824,8 @@ impl Component for HTTPClientComponent {
                 ComponentPort {
                     name: String::from("ERR"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("error messages (transient errors are retried, permanent errors fail immediately)"),
@@ -1817,7 +1821,8 @@ impl Component for HTTPServerComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration value, currently the IP address to listen on"),
@@ -1827,7 +1832,8 @@ impl Component for HTTPServerComponent {
                 ComponentPort {
                     name: String::from("ROUTES"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration value, currently a comma-separated list of routes; matching route index = outport index"),
@@ -1837,7 +1843,8 @@ impl Component for HTTPServerComponent {
                 ComponentPort {
                     name: String::from("RESP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,    //TODO currently this needs a Muxer before it and the RESP port is thus intentionally not marked as an arrayport
                     description: String::from("response data from HTTP route handlers"),
@@ -1849,7 +1856,8 @@ impl Component for HTTPServerComponent {
                 ComponentPort {
                     name: String::from("REQ"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: true,
                     description: String::from("incoming requests from HTTP clients"),

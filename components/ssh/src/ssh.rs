@@ -548,7 +548,8 @@ impl Component for SSHClientComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to be sent to the remote process STDIN"),
@@ -558,7 +559,8 @@ impl Component for SSHClientComponent {
                 ComponentPort {
                     name: String::from("CMD"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("POSIX shell-compatible path and arguments for the remote process"),
@@ -568,7 +570,8 @@ impl Component for SSHClientComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration parameters: --retry default false retry/restart command on non-zero return code  --mode=<one|each> where one (command instance handling all IPs) or each (IP handled by new instance) - most parameters are optional"),
@@ -580,7 +583,8 @@ impl Component for SSHClientComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("STDOUT output data coming from the remote process"),

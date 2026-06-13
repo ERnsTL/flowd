@@ -380,7 +380,8 @@ impl Component for TelegramBotComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration IP, currently just the Telegram Bot API token, may change to IRI/URL in the future"),
@@ -390,7 +391,8 @@ impl Component for TelegramBotComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("response to be sent to Telegram chat"),
@@ -402,7 +404,8 @@ impl Component for TelegramBotComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("messages from Telegram chat(s)"),

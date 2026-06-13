@@ -227,6 +227,7 @@ impl Component for DelayComponent {
                 ComponentPort {
                     name: "CONF".to_string(),
                     allowed_type: "any".to_string(),
+                    encoding: None,
                     schema: None,
                     required: true,
                     is_arrayport: false,

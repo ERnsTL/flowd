@@ -4,7 +4,7 @@
 
 //TODO how to serialize/deserialize as object/hashtable in JSON, but use Vec internally? TODO performance tests Vec <-> HashMap.
 //TODO optimize what is faster for a few entries: Hashmap or Vec @ https://www.reddit.com/r/rust/comments/7mqwjn/hashmapstringt_vs_vecstringt/
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")] // spec: for example the field "caseSensitive"
 pub struct Graph {
     case_sensitive: bool, // always true for flowd TODO optimize
@@ -24,7 +24,7 @@ enum AccessLevel {
     ReadWrite,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphProperties {
     name: String,
     environment: GraphPropertiesEnvironment,
@@ -32,14 +32,14 @@ struct GraphProperties {
     icon: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphPropertiesEnvironment {
     #[serde(rename = "type")]
     typ: String,
     content: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphPort {
     process: String,
     port: String,
@@ -47,20 +47,20 @@ struct GraphPort {
     metadata: GraphPortMetadata,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphPortMetadata {
     x: i32,
     y: i32,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphGroup {
     name: String,
     nodes: Vec<String>, // spec: node IDs (.name)
     metadata: GraphGroupMetadata,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphNode {
     component: String,
     metadata: GraphNodeMetadata,
@@ -70,7 +70,7 @@ struct GraphNode {
 
 #[serde_with::skip_serializing_none]
 // noflo-ui interprets even "data": null as "this is an IIP". not good but we can disable serializing None //TODO make issue in noflo-ui
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct GraphEdge {
     #[serde(rename = "src")]
     source: GraphNodeSpec,
@@ -82,7 +82,7 @@ struct GraphEdge {
 }
 
 #[serde_with::skip_serializing_none] // do not serialize index if it is None
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct GraphNodeSpec {
     process: String,
     port: String,
@@ -186,6 +186,7 @@ impl Graph {
             out.push(ComponentPort {
                 name: name.clone(),
                 allowed_type: String::from(""), //TODO clarify spec: not available from FBP JSON Graph port TODO what happens if we return a empty allowed type (because we dont know from Graph inport)
+                encoding: None,
                 schema: None, //TODO clarify spec: not available from FBP JSON Graph port
                 required: true, //TODO clarify spec: not available from FBP JSON Graph port
                 is_arrayport: false, //TODO clarify spec: not available from FBP JSON Graph port
@@ -1038,4 +1039,3 @@ impl ComponentLibrary {
         }
     }
 }
-

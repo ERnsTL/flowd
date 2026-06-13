@@ -170,7 +170,8 @@ impl Component for TeraTemplateComponent {
                 ComponentPort {
                     name: String::from("TEMPLATE"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("the template source code"),
@@ -189,7 +190,8 @@ impl Component for TeraTemplateComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data inputs to be processed by the template"),
@@ -201,7 +203,8 @@ impl Component for TeraTemplateComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("rendered template output"),

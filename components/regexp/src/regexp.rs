@@ -179,7 +179,8 @@ impl Component for RegexpExtractComponent {
                 ComponentPort {
                     name: String::from("REGEXP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("the regular expression to apply"),
@@ -189,7 +190,8 @@ impl Component for RegexpExtractComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("data to apply the given regexp to"),
@@ -201,7 +203,8 @@ impl Component for RegexpExtractComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("extracted match data"),

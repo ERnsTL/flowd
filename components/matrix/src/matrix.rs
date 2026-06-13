@@ -537,7 +537,8 @@ impl Component for MatrixClientComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration IP in URL format, optional URL path is the room name if not already pre-joined from a previous session"),
@@ -547,7 +548,8 @@ impl Component for MatrixClientComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("response to be sent to Matrix room"),
@@ -559,7 +561,8 @@ impl Component for MatrixClientComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("messages from Matrix room"),

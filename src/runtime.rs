@@ -724,6 +724,13 @@ impl Runtime {
             ));
         }
 
+        let validation_profile = schema_profile_from_env();
+        let validation_report =
+            validate_graph_contracts_or_err(graph, components, validation_profile)?;
+        for warning in validation_report.warnings {
+            warn!("graph validation warning {}: {}", warning.code, warning.message);
+        }
+
         // Initialize a fresh scheduler instance for this start cycle.
         // Reusing a previously stopped scheduler can carry `running=false`
         // into the next run, causing immediate scheduler thread exit.

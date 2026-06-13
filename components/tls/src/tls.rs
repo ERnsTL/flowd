@@ -431,7 +431,8 @@ impl Component for TLSClientComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL with optional configuration parameters in query part - currently none defined"),
@@ -441,7 +442,8 @@ impl Component for TLSClientComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("incoming decrypted bytes from TLS, transformed to IPs"),
@@ -453,7 +455,8 @@ impl Component for TLSClientComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs to be sent as encrypted bytes via TLS"),
@@ -938,7 +941,8 @@ impl Component for TLSServerComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("configuration value, currently the IP and port to listen on"),
@@ -948,7 +952,8 @@ impl Component for TLSServerComponent {
                 ComponentPort {
                     name: String::from("CERT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("the TLS certificate with the public key; can be multiple chained certificates; generate selfsigned with openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj '/CN=localhost'"),
@@ -958,7 +963,8 @@ impl Component for TLSServerComponent {
                 ComponentPort {
                     name: String::from("KEY"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("private key fitting the public key in the TLS certificate"),
@@ -968,7 +974,8 @@ impl Component for TLSServerComponent {
                 ComponentPort {
                     name: String::from("RESP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("response data from downstream process for each connection"),
@@ -980,7 +987,8 @@ impl Component for TLSServerComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("signal and content data from the client connections"),

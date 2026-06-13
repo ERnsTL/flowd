@@ -22,10 +22,18 @@ struct BodyPart {
 
 #[derive(Debug, Serialize)]
 struct ParsedEmail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uid: Option<String>,
     headers: HashMap<String, String>,
     body_text: Option<String>,
     body_html: Option<String>,
     raw_size: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct FetchEnvelope {
+    uid: Option<String>,
+    body: Option<Vec<u8>>,
 }
 
 pub struct EmailParserComponent {
@@ -119,10 +127,15 @@ impl Component for EmailParserComponent {
         // Process input emails
         while context.remaining_budget > 0 && !self.inn.is_empty() {
             if let Ok(email_msg) = self.inn.pop() {
-                let email_bytes = email_msg.as_bytes().unwrap_or(&[]);
-                debug!("processing email of {} bytes", email_bytes.len());
+                let raw_input = email_msg.as_bytes().unwrap_or(&[]);
+                let (uid, email_bytes) = decode_email_input(raw_input);
+                debug!(
+                    "processing email of {} bytes (uid present: {})",
+                    email_bytes.len(),
+                    uid.is_some()
+                );
 
-                match parse_email(email_bytes, config) {
+                match parse_email(&email_bytes, config, uid) {
                     Ok(parsed) => {
                         match serde_json::to_string(&parsed) {
                             Ok(json_str) => {
@@ -174,7 +187,8 @@ impl Component for EmailParserComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("JSON configuration specifying headers to extract and body preferences"),
@@ -184,7 +198,8 @@ impl Component for EmailParserComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("raw email bytes from IMAP"),
@@ -196,7 +211,8 @@ impl Component for EmailParserComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("parsed email as JSON"),
@@ -209,7 +225,21 @@ impl Component for EmailParserComponent {
     }
 }
 
-fn parse_email(email_bytes: &[u8], config: &EmailParserConfig) -> Result<ParsedEmail, String> {
+fn decode_email_input(input: &[u8]) -> (Option<String>, Vec<u8>) {
+    if let Ok(envelope) = serde_json::from_slice::<FetchEnvelope>(input) {
+        if let Some(body) = envelope.body {
+            return (envelope.uid, body);
+        }
+    }
+
+    (None, input.to_vec())
+}
+
+fn parse_email(
+    email_bytes: &[u8],
+    config: &EmailParserConfig,
+    uid: Option<String>,
+) -> Result<ParsedEmail, String> {
     let mail = mailparse::parse_mail(email_bytes).map_err(|e| e.to_string())?;
 
     let mut headers = HashMap::new();
@@ -230,6 +260,7 @@ fn parse_email(email_bytes: &[u8], config: &EmailParserConfig) -> Result<ParsedE
     let (body_text, body_html) = select_bodies(bodies, config);
 
     Ok(ParsedEmail {
+        uid,
         headers,
         body_text,
         body_html,

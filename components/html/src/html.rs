@@ -129,7 +129,8 @@ impl Component for HTMLStripComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("TODO"),
@@ -140,7 +141,8 @@ impl Component for HTMLStripComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs with HTML code"),
@@ -152,7 +154,8 @@ impl Component for HTMLStripComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("HTML-stripped IPs"),
@@ -356,7 +359,8 @@ impl Component for HTMLQueryComponent {
                 ComponentPort {
                     name: String::from("QUERY"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("XPath query to apply to the input data"),
@@ -366,7 +370,8 @@ impl Component for HTMLQueryComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("HTML data to process"),
@@ -378,7 +383,8 @@ impl Component for HTMLQueryComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("processed resp. filtered HTML data"),

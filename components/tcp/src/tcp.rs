@@ -473,7 +473,8 @@ impl Component for TCPClientComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("connection URL with optional configuration parameters in query part - currently none defined"),
@@ -483,7 +484,8 @@ impl Component for TCPClientComponent {
                 ComponentPort {
                     name: String::from("IN"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("incoming TCP bytes, transformed to IPs"),
@@ -495,7 +497,8 @@ impl Component for TCPClientComponent {
                 ComponentPort {
                     name: String::from("OUT"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from("IPs to be sent as TCP bytes"),
@@ -912,7 +915,8 @@ impl Component for TCPServerComponent {
                 ComponentPort {
                     name: String::from("CONF"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from(
@@ -924,7 +928,8 @@ impl Component for TCPServerComponent {
                 ComponentPort {
                     name: String::from("RESP"),
                     allowed_type: String::from("any"),
-                    schema: None,
+                    encoding: None,
+                schema: None,
                     required: true,
                     is_arrayport: false,
                     description: String::from(
@@ -937,6 +942,7 @@ impl Component for TCPServerComponent {
             out_ports: vec![ComponentPort {
                 name: String::from("OUT"),
                 allowed_type: String::from("any"),
+                encoding: None,
                 schema: None,
                 required: true,
                 is_arrayport: false,
