@@ -1,6 +1,6 @@
 # ADR-028: Typed Ports, Contracts & Graph Validation (v4)
 
-Status: Proposed
+Status: Accepted
 Date: 2026-05-01
 
 

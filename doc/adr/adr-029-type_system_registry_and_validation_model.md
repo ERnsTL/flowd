@@ -1,6 +1,6 @@
 # ADR-029: Type System, Registry and Validation Model
 
-Status: Proposed
+Status: Accepted
 Date: 2026-05-01
 
 ## Context
