@@ -491,11 +491,7 @@ Primitive Port:
   encoding = None
   schema = None
 
-  or (if Primitive Types are modelled via Builtin-TypeIds):
-
-  allowed_type = core/String@1
-  encoding = None
-  schema = None
+Primitive Ports SHALL use Built-In TypeIds.
 
 Structured Typed Port:
 
