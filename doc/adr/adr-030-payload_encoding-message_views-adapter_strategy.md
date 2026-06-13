@@ -68,6 +68,12 @@ do not require:
 
 Typed contracts extend classic FBP but do not replace it.
 
+EncodingId is not part of FbpMessage.
+
+EncodingId is metadata associated with port contracts and validation.
+
+Runtime transport remains encoding-agnostic.
+
 
 ## Runtime Transport Model
 
@@ -79,7 +85,7 @@ Example:
 pub struct FbpMessage {
     payload: Arc<[u8]>,
 }
-````
+```
 
 The runtime:
 
@@ -90,7 +96,6 @@ The runtime:
 
 The runtime is encoding-agnostic.
 
----
 
 ## Port Contracts
 
@@ -115,6 +120,62 @@ email/ParsedEmail@1 + json
 ```
 
 Encoding becomes part of compatibility validation.
+
+
+## Primitive and Structured Payloads
+
+Graph/tooling implementations should avoid hidden defaults. EncodingId is mandatory for structured typed payloads. EncodingId is not required for primitive built-in message types. If a structured typed port omits EncodingId, validation SHALL fail.
+
+### Rationale
+
+Classic Flow-Based Programming predates schema-driven and
+encoding-aware message contracts.
+
+Primitive message types such as:
+
+- String
+- Bytes
+- Boolean
+- Integer
+- Float
+
+have an intrinsic runtime representation and therefore do not
+require an explicit EncodingId.
+
+Requiring EncodingId declarations for primitive message types
+would add configuration overhead without providing additional
+semantic information.
+
+Structured typed payloads are fundamentally different.
+
+A TypeId alone identifies the semantic meaning of a payload,
+but does not define its binary representation.
+
+For example:
+
+    email/ParsedEmail@1
+
+may be represented using:
+
+- rkyv
+- flexbuffers
+- capnp
+- json
+
+or future encodings.
+
+Without an explicit EncodingId, two components could agree on
+TypeId compatibility while remaining unable to interpret the
+payload representation.
+
+Therefore:
+
+- primitive built-in message types do not require EncodingId
+- structured typed payloads require EncodingId
+- encoding mismatches require explicit adapter components
+
+This preserves compatibility with classic FBP while enabling
+multiple serialization technologies for structured payloads.
 
 
 ## Compatibility Rules
@@ -149,6 +210,79 @@ Email@1+rkyv
  ->
 Order@1+rkyv
 ```
+
+### Encoding Compatibility Error Mapping
+
+Encoding compatibility is evaluated after successful TypeId compatibility validation.
+
+Results:
+
+- exact EncodingId match -> compatible
+- different EncodingId -> E_TYPE_ADAPTER_REQUIRED
+
+Encoding mismatches are not treated as E_TYPE_INCOMPATIBLE because
+the semantic type contract remains compatible.
+
+The required transformation must be represented by an explicit
+adapter component.
+
+### Validation Scope
+
+Ports are classified into:
+
+1. Primitive Ports
+2. Structured Typed Ports
+
+Primitive Ports:
+
+- String
+- Bytes
+- Boolean
+- Integer
+- Float
+- OpenBracket
+- CloseBracket
+
+Structured Typed Ports:
+
+- any port declaring a TypeId other than built-in primitive types
+
+Validation Rules:
+
+Primitive Ports:
+- no TypeId required
+- no EncodingId required
+- excluded from ADR-029 registry validation
+
+Structured Typed Ports:
+- TypeId required
+- EncodingId required
+- subject to ADR-028 and ADR-029 validation
+
+Mixed connections between primitive and structured ports require
+explicit adapter components.
+
+
+## Canonical Built-In EncodingIds
+
+The following identifiers are reserved:
+
+- rkyv
+- flexbuffers
+- capnp
+- json
+
+Aliases are not permitted.
+
+Examples of invalid aliases:
+
+- capnproto
+- capn_proto
+- flat-json
+- JSON
+
+Tooling MUST normalize user input to canonical identifiers
+or reject invalid aliases.
 
 
 ## Message Views
@@ -320,7 +454,6 @@ These topics are explicitly out of scope for this ADR.
 - Validation order for an edge is: TypeId compatibility first (ADR-029), then encoding compatibility. Type mismatch takes precedence over encoding mismatch.
 - Runtime must continue to treat payload as opaque bytes; decode/encode failures occur in components/views/adapters and are reported through component error paths, not transport-layer errors.
 - Adapters may transform type, encoding, or both, but each transformation MUST be explicit in graph topology and must not be inserted implicitly by runtime.
-- Graph/tooling implementations should avoid hidden defaults; if encoding is omitted on a typed data port, validation should fail or use a project-defined default that is recorded explicitly in the effective graph.
 - Implementation Note: ComponentPort is extended with:
 
   encoding: EncodingId
