@@ -641,6 +641,17 @@ Rejected:
 * enforce validation at mutation operations
 * define correlation metadata
 
+## Implementation Clarifications
+
+- Typed validation applies only to ports classified as `data`. Ports classified as `control` or `config` are excluded from type compatibility and join-correlation checks.
+- Every data port MUST declare `allowed_type`. `core/Any@1` is the only portable untyped marker and MUST be treated as explicit unsafe mode.
+- `graph:changegroup` is metadata-only and MUST NOT trigger type re-validation unless future port exposure semantics are explicitly added.
+- For mutation-time validation, implementations MUST validate only the post-mutation graph snapshot and MUST reject the mutation if any error exists.
+- The minimum re-validation scope for a port-definition change is all edges currently connected to that port plus all IIPs targeting that port.
+- Validator output MUST be deterministic. Issues SHOULD be emitted in stable lexical order by `(code, node_id, port_id, edge_id)` so CI/tooling produce identical results.
+- Correlation enforcement for join nodes applies only when `connected_data_input_edges > 1`. IIP-only inputs do not by themselves make a node a join.
+- Unsafe-edge downgrade policy MUST be explicit and finite. Parse/normalization/registry-missing failures remain hard errors and cannot be downgraded.
+
 ---
 
 ## Related Decisions

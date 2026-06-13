@@ -45,6 +45,29 @@ Encoding-specific interpretation is delegated to:
 - message views
 - explicit adapter components
 
+### Classic FBP Compatibility
+
+flowd SHALL remain capable of classic Flow-Based Programming operation.
+
+Built-in primitive message types and control IPs:
+
+- String
+- Bytes
+- Integer
+- Float
+- Boolean
+- OpenBracket
+- CloseBracket
+
+do not require:
+
+- TypeId declarations
+- EncodingId declarations
+- Schema definitions
+- Registry entries
+
+Typed contracts extend classic FBP but do not replace it.
+
 
 ## Runtime Transport Model
 
@@ -286,6 +309,32 @@ Potential future ADRs may define:
 
 These topics are explicitly out of scope for this ADR.
 
+## Implementation Clarifications
+
+- Encoding is part of the port contract identity for validation purposes: `(TypeId, EncodingId)`.
+- Encoding compatibility is exact-match only in core validation. If `EncodingId` differs, an explicit adapter node is required.
+- Recommended canonical `EncodingId` grammar:
+  `encoding := [a-z][a-z0-9_\-]{0,31}`
+  Examples: `rkyv`, `flexbuffers`, `capnp`, `json`.
+- Encoding identifiers are case-sensitive in storage but SHOULD be normalized to lowercase by tooling before persistence.
+- Validation order for an edge is: TypeId compatibility first (ADR-029), then encoding compatibility. Type mismatch takes precedence over encoding mismatch.
+- Runtime must continue to treat payload as opaque bytes; decode/encode failures occur in components/views/adapters and are reported through component error paths, not transport-layer errors.
+- Adapters may transform type, encoding, or both, but each transformation MUST be explicit in graph topology and must not be inserted implicitly by runtime.
+- Graph/tooling implementations should avoid hidden defaults; if encoding is omitted on a typed data port, validation should fail or use a project-defined default that is recorded explicitly in the effective graph.
+- Implementation Note: ComponentPort is extended with:
+
+  encoding: EncodingId
+
+  Example:
+
+  ComponentPort {
+    allowed_type,
+    encoding,
+    schema
+  }
+
+  Also see ADR-028 for reference where the Encoding comes from.
+
 
 
 ## Commentary
@@ -323,3 +372,20 @@ Die eigentliche Architekturentscheidung lautet:
 > **Encoding gehört in den Contract, nicht in `FbpMessage`.**
 
 Wenn du das sauber festschreibst, kannst du in 5 Jahren problemlos `rkyv`, `Flexbuffers`, `Arrow`, `FlatBuffers` oder etwas völlig Neues hinzufügen, ohne ADR-003, ADR-008, ADR-028 oder ADR-029 anfassen zu müssen. Das ist normalerweise ein Zeichen für eine gute ADR.
+
+### 7. Die eigentliche Stärke des aktuellen Stands
+
+Wenn ich ADR-028, 029 und 030 zusammen betrachte:
+
+Dann habt ihr jetzt sauber getrennt:
+
+| Ebene      | Verantwortlich |
+| ---------- | -------------- |
+| FbpMessage | Transport      |
+| TypeId     | Semantik       |
+| EncodingId | Repräsentation |
+| Schema     | Struktur       |
+| Registry   | Kompatibilität |
+| Adapter    | Transformation |
+
+Das ist architektonisch ziemlich elegant.

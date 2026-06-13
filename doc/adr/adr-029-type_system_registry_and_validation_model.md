@@ -454,6 +454,21 @@ Validation issues are machine-readable and include node/port/edge references.
 * no global mutable runtime type registry
 * no implicit coercion between incompatible types
 
+## Implementation Clarifications
+
+- Compatibility check algorithm is normative:
+  1. if `producer == consumer` -> `CompatibleExact`
+  2. else if `producer` is in consumer `compatible_from` -> `CompatibleDeclared`
+  3. else if base type differs (namespace or type name) -> `IncompatibleType`
+  4. else -> `RequiresAdapter`
+- `compatible_from` is interpreted as consumer tolerance only and MUST NOT be treated as symmetric.
+- Registry identity key is the normalized canonical TypeId string; duplicate normalized keys MUST fail registry load.
+- Validation phase ordering is strict. If an earlier phase fails for an edge/port, later phases for the same subject are skipped to avoid duplicate/conflicting issues.
+- Error precedence per subject MUST be deterministic: parse/registry errors first, then type compatibility, then schema, then correlation, then IIP-specific checks.
+- `strict` profile is a superset of `minimal` requirements except where severity override is explicitly defined in this ADR.
+- For identical inputs, implementations MUST emit identical issue sets and stable ordering; sort by `(severity, code, node_id, port_id, edge_id, iip_id)`.
+- `core/Any@1` remains registry-resolved and valid in both profiles, but strict profile must still enforce correlation and unsafe warnings/policies around `Any`.
+
 ---
 
 ## Consequences
