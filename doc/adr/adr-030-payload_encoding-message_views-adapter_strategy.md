@@ -451,11 +451,17 @@ These topics are explicitly out of scope for this ADR.
 ## Implementation Clarifications
 
 - Encoding is part of the port contract identity for validation purposes: `(TypeId, EncodingId)`.
+
+For structured typed ports, contract identity is:
+  (TypeId, EncodingId)
+
+Primitive ports use built-in primitive TypeIds and do not participate in EncodingId validation.
+
 - Encoding compatibility is exact-match only in core validation. If `EncodingId` differs, an explicit adapter node is required.
 - Recommended canonical `EncodingId` grammar:
   `encoding := [a-z][a-z0-9_\-]{0,31}`
   Examples: `rkyv`, `flexbuffers`, `capnp`, `json`.
-- Encoding identifiers are case-sensitive in storage but SHOULD be normalized to lowercase by tooling before persistence.
+- EncodingIds SHALL be stored in canonical lowercase form.
 - Validation order for an edge is: TypeId compatibility first (ADR-029), then encoding compatibility. Type mismatch takes precedence over encoding mismatch.
 - Runtime must continue to treat payload as opaque bytes; decode/encode failures occur in components/views/adapters and are reported through component error paths, not transport-layer errors.
 - Adapters may transform type, encoding, or both, but each transformation MUST be explicit in graph topology and must not be inserted implicitly by runtime.
@@ -504,7 +510,7 @@ Structured Typed Port:
 1. Trim surrounding whitespace.
 2. Convert to lowercase.
 3. Validate against EncodingId grammar.
-4. Validate against reserved EncodingId registry.
+4. Validate against the EncodingId registry available to the graph, deployment or runtime environment.
 
 The resulting normalized string is the canonical EncodingId.
 
