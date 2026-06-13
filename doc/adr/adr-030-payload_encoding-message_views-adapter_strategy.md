@@ -61,7 +61,7 @@ Built-in primitive message types and control IPs:
 
 do not require:
 
-- TypeId declarations
+- TypeId declarations in the sense of:  Built-in primitive message types use reserved Built-In TypeIds provided by flowd and do not require registry-defined TypeIds.
 - EncodingId declarations
 - Schema definitions
 - Registry entries
@@ -236,7 +236,7 @@ Ports are classified into:
 The compatibility rules in this section apply only to
 structured typed ports.
 
-Primitive ports are validated according to the classic FBP model and are excluded from TypeId and EncodingId compatibility checks.
+Primitive ports use Built-In TypeIds and are validated using fixed built-in compatibility rules rather than registry-based ADR-029 compatibility rules.
 
 Primitive Ports:
 
@@ -255,7 +255,7 @@ Structured Typed Ports:
 Validation Rules:
 
 Primitive Ports:
-- no TypeId required
+- no TypeId required: Primitive Ports use Built-In TypeIds and therefore do not require registry-defined TypeIds.
 - no EncodingId required
 - excluded from ADR-029 registry validation
 
@@ -350,6 +350,15 @@ Implementations may provide:
 * future encodings
 
 through adapter components and view implementations.
+
+### EncodingId registry
+
+The EncodingId registry is extensible.
+
+Built-in EncodingIds are reserved by flowd.
+
+Additional EncodingIds may be registered by deployments,
+graphs or extensions according to future registry ADRs.
 
 
 ## Recommended Usage
@@ -467,7 +476,7 @@ Primitive ports use built-in primitive TypeIds and do not participate in Encodin
 - Adapters may transform type, encoding, or both, but each transformation MUST be explicit in graph topology and must not be inserted implicitly by runtime.
 - Implementation Note: ComponentPort is extended with:
 
-  encoding: EncodingId
+  encoding: Option<EncodingId>
 
   Example:
 
@@ -491,19 +500,49 @@ ComponentPort {
     schema: Option<SchemaRef>
 }
 
-Primitive Port:
+#### Primitive Port:
 
-  allowed_type = None
+  allowed_type = core/String@1
   encoding = None
   schema = None
 
-Primitive Ports SHALL use Built-In TypeIds.
+Primitive Ports SHALL use Built-In TypeIds. Primitive ports MAY omit TypeId declarations in graph definitions. During graph normalization, tooling SHALL materialize the corresponding Built-In TypeId before validation.
 
-Structured Typed Port:
+After normalization, all primitive ports SHALL have a Built-In TypeId.
+
+The following Built-In TypeIds are reserved:
+
+- core/String@1
+- core/Bytes@1
+- core/Bool@1
+- core/Int64@1
+- core/Float64@1
+- core/OpenBracket@1
+- core/CloseBracket@1
+
+#### Structured Typed Port:
 
   allowed_type = email/ParsedEmail@1
   encoding = rkyv
   schema = ...
+
+### Built-In Primitive Type Mapping
+
+Human-facing primitive names map to the following canonical
+Built-In TypeIds:
+
+| Primitive Name | Built-In TypeId |
+|----------------|-----------------|
+| String         | core/String@1   |
+| Bytes          | core/Bytes@1    |
+| Boolean        | core/Bool@1     |
+| Integer        | core/Int64@1    |
+| Float          | core/Float64@1  |
+| OpenBracket    | core/OpenBracket@1 |
+| CloseBracket   | core/CloseBracket@1 |
+
+These mappings are normative and SHALL be used by all tooling,
+validators and graph normalization implementations.
 
 ### EncodingId Canonicalization Algorithm
 
@@ -511,6 +550,8 @@ Structured Typed Port:
 2. Convert to lowercase.
 3. Validate against EncodingId grammar.
 4. Validate against the EncodingId registry available to the graph, deployment or runtime environment.
+
+EncodingIds SHALL be stored in canonical lowercase form.
 
 The resulting normalized string is the canonical EncodingId.
 
