@@ -35,6 +35,21 @@ Ok dann Bitte erstelle ein Specdokument auf englisch für "ADR-021: Formal Guara
 
 
 
+## ADR-028, ADR-029, ADR-030
+
+These ADRs contain:
+
+Am Anfang habt ihr noch fundamentale Architekturfragen diskutiert:
+
+Typed Messages vs Typed Contracts
+Registry oder nicht?
+Encoding im Runtime-Core oder nicht?
+Primitive Typen oder alles über Schema?
+Kompatibilitätsmodell?
+Graph-Mutation-Validierung?
+
+Das waren echte Architekturentscheidungen.
+
 
 ## Commentary on ADR-030
 
