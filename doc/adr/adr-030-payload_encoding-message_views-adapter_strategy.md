@@ -233,6 +233,11 @@ Ports are classified into:
 1. Primitive Ports
 2. Structured Typed Ports
 
+The compatibility rules in this section apply only to
+structured typed ports.
+
+Primitive ports are validated according to the classic FBP model and are excluded from TypeId and EncodingId compatibility checks.
+
 Primitive Ports:
 
 - String
@@ -468,6 +473,53 @@ These topics are explicitly out of scope for this ADR.
 
   Also see ADR-028 for reference where the Encoding comes from.
 
+### ComponentPort Encoding Cardinality
+
+ComponentPort.encoding SHALL be optional.
+
+Reference model:
+
+ComponentPort {
+    allowed_type: Option<TypeId>,
+    encoding: Option<EncodingId>,
+    schema: Option<SchemaRef>
+}
+
+Primitive Port:
+
+  allowed_type = None
+  encoding = None
+  schema = None
+
+  or (if Primitive Types are modelled via Builtin-TypeIds):
+
+  allowed_type = core/String@1
+  encoding = None
+  schema = None
+
+Structured Typed Port:
+
+  allowed_type = email/ParsedEmail@1
+  encoding = rkyv
+  schema = ...
+
+### EncodingId Canonicalization Algorithm
+
+1. Trim surrounding whitespace.
+2. Convert to lowercase.
+3. Validate against EncodingId grammar.
+4. Validate against reserved EncodingId registry.
+
+The resulting normalized string is the canonical EncodingId.
+
+Aliases are not permitted.
+
+Example:
+
+"JSON" -> "json"
+"CapNP" -> "capnp"
+
+"capnproto" -> rejected
 
 
 ## Commentary
